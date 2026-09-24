@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>생활안전·복지 신고 관제 · 전남지방우정청(파일럿)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<style>
+  :root{
+    --ink:#0E1216; --ink-2:#48525C; --line:#DDE2E7; --panel:#FFFFFF; --bg:#EEF1F4;
+    --post:#E4002B; --console:#10141A; --console-2:#1A2028;
+    --safe:#C70026; --env:#087349; --welfare:#0E44A8;
+    /* 상태 색: 유형 색과 겹치지 않게 별도 체계 */
+    --s-received:#7C8794; --s-checking:#2563EB; --s-done:#0B8A5B;
+    --s-hold:#D97706; --s-noaction:#9AA4AE; --s-cancelled:#B0B7C0;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{font-family:'Pretendard',system-ui,sans-serif;background:var(--bg);color:var(--ink);}
+  button{font-family:inherit;cursor:pointer;}
+
+  /* ===== 로그인 ===== */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    background:radial-gradient(120% 90% at 50% -10%,#232A33 0%,#12161C 60%,#0B0E12 100%);}
+  .login-card{width:100%;max-width:460px;color:#fff;}
+  .login-brand{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+  .badge-post{background:var(--post);color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:6px;letter-spacing:.5px;}
+  .login-sys{font-size:12px;color:#9AA4AE;font-weight:700;letter-spacing:.3px;}
+  .login-h{font-size:23px;font-weight:800;margin:10px 0 3px;}
+  .login-sub{font-size:13px;color:#AEB6BF;margin-bottom:22px;line-height:1.5;}
+  .login-form{display:flex;flex-direction:column;gap:10px;}
+  .login-in{border:1px solid #2E3742;background:#141A21;color:#fff;border-radius:12px;padding:14px 15px;font-size:15px;font-family:inherit;}
+  .login-in:focus{outline:none;border-color:var(--post);background:#171E26;}
+  .login-in::placeholder{color:#6B747E;}
+  .login-btn{margin-top:4px;border:none;background:var(--post);color:#fff;font-size:15px;font-weight:800;padding:15px;border-radius:12px;}
+  .login-btn:hover{filter:brightness(1.06);}
+  .login-err{font-size:12px;color:#FF7B7B;font-weight:700;min-height:0;padding-left:2px;}
+  .demo-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;}
+  .demo-chip{background:#1A2028;border:1px solid #2E3742;color:#C6CDD4;border-radius:999px;padding:6px 11px;font-size:11px;font-weight:700;}
+  .demo-chip:hover{background:#222932;}
+  .rc-photo{width:82px;height:62px;object-fit:cover;border-radius:9px;border:1px solid var(--line);margin-top:9px;cursor:zoom-in;display:block;}
+  #lightbox{position:fixed;inset:0;background:rgba(8,10,13,.86);display:none;align-items:center;justify-content:center;z-index:4000;padding:24px;}
+  #lightbox.on{display:flex;}
+  #lightbox img{max-width:100%;max-height:82vh;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  #lightbox .lb-close{position:absolute;top:18px;right:20px;color:#fff;font-size:26px;font-weight:700;background:none;border:none;}
+  .lb-mosaic-btn{position:absolute;bottom:32px;left:50%;transform:translateX(-50%);border:none;background:#fff;color:var(--ink);font-size:13px;font-weight:800;padding:11px 20px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.4);cursor:pointer;display:none;}
+  .role-grid{display:flex;flex-direction:column;gap:10px;}
+  .role{display:flex;align-items:center;gap:13px;text-align:left;border:1px solid #2A323C;
+    background:#171C22;color:#fff;border-radius:14px;padding:15px 16px;transition:.12s;}
+  .role:hover{background:#1E252D;border-color:#3A434E;transform:translateY(-1px);}
+  .role .ic{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:19px;flex:0 0 auto;font-weight:800;}
+  .role .rt{font-size:15px;font-weight:800;}
+  .role .rs{font-size:11.5px;color:#9AA4AE;margin-top:2px;}
+  .role .arw{margin-left:auto;color:#5A646E;font-size:18px;}
+  .login-note{font-size:11px;color:#7A828B;margin-top:18px;text-align:center;line-height:1.5;}
+
+  /* ===== 앱 셸 ===== */
+  #app{display:none;min-height:100vh;flex-direction:column;}
+  .topbar{background:var(--console);color:#fff;display:flex;align-items:center;gap:12px;
+    padding:11px 18px;position:sticky;top:0;z-index:50;}
+  .topbar .sys{font-size:13px;font-weight:800;letter-spacing:.2px;}
+  .topbar .sys small{display:block;font-size:10px;color:#8A94A0;font-weight:600;letter-spacing:.4px;}
+  .who-pill{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--console-2);
+    border:1px solid #2A323C;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:700;}
+  .who-dot{width:8px;height:8px;border-radius:50%;}
+  .logout{background:transparent;border:1px solid #333B45;color:#C6CDD4;border-radius:8px;
+    padding:7px 12px;font-size:12px;font-weight:700;}
+  .logout:hover{background:#1E252D;}
+
+  .wrap{flex:1;padding:18px;max-width:1200px;width:100%;margin:0 auto;}
+
+  /* 요약 스트립 */
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 15px;min-width:104px;flex:1;}
+  .stat .n{font-size:24px;font-weight:800;font-family:var(--mono);line-height:1;}
+  .stat .l{font-size:11.5px;color:var(--ink-2);font-weight:700;margin-top:6px;}
+  .stat.alert{border-color:#F3B0B0;background:#FDF2F2;}
+  .stat.alert .n{color:var(--post);}
+  button.stat{font:inherit;text-align:left;transition:.1s;}
+  button.stat:hover{border-color:#B9C1C9;}
+  button.stat.on{border-color:var(--post);box-shadow:0 0 0 1px var(--post) inset;}
+
+  .ctl-bar{display:flex;align-items:center;gap:10px;margin:4px 0 12px;flex-wrap:wrap;}
+  .cat-tabs{display:flex;gap:7px;flex-wrap:wrap;}
+  .ctab{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:800;color:var(--ink-2);}
+  .ctab b{font-family:var(--mono);margin-left:3px;}
+  .ctab.on{border-color:var(--ink);color:#fff;background:var(--ink);}
+  .map-toggle{margin-left:auto;border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:8px 13px;font-size:12.5px;font-weight:800;color:var(--ink-2);}
+  .map-toggle.on{background:var(--console);color:#fff;border-color:transparent;}
+  .ctlmap{height:320px;border-radius:14px;border:1px solid var(--line);background:#D8DEE4;margin-bottom:14px;overflow:hidden;}
+  .safety-pin-icon{background:transparent!important;border:none!important;}
+
+  .rows{display:flex;flex-direction:column;gap:6px;}
+  .row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px;transition:.1s;}
+  .row:hover{border-color:#B9C1C9;background:#FBFCFD;}
+  .row-tag{font-size:11px;font-weight:800;color:#fff;padding:2px 8px;border-radius:6px;flex:0 0 auto;}
+  .row-item{font-size:14px;font-weight:800;flex:0 0 auto;}
+  .row-sub{font-size:12px;color:var(--ink-2);flex:1 1 auto;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .row-carrier{font-size:12px;color:var(--ink-2);font-weight:700;flex:0 0 auto;}
+  .row-cam{font-size:12px;flex:0 0 auto;}
+  .row-delay{font-size:10px;font-weight:800;color:var(--post);background:#FDECEC;border:1px solid #F6C6C6;border-radius:999px;padding:1px 7px;flex:0 0 auto;}
+  .row.urgent{border-color:var(--post);background:#FFF6F6;}
+  .row-urgent{font-size:10.5px;font-weight:800;color:#fff;background:var(--post);border-radius:999px;padding:2px 9px;flex:0 0 auto;animation:pulse 1.6s ease-in-out infinite;}
+  .dup-badge{font-size:10.5px;font-weight:800;color:#fff;background:#B45309;border-radius:999px;padding:2px 9px;flex:0 0 auto;}
+  .dup-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #EEF1F4;font-size:12.5px;}
+  .dup-item:last-child{border-bottom:none;}
+  .dup-merge-btn{flex:0 0 auto;border:1.5px solid #B45309;background:#FFF7ED;color:#B45309;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:800;white-space:nowrap;}
+  .dup-dismiss-btn{flex:0 0 auto;border:1.5px solid var(--line);background:#fff;color:var(--ink-2);border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+  .dup-actions{display:flex;gap:6px;flex:0 0 auto;}
+  .mosaic-btn{margin-top:10px;width:100%;border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:10px;font-size:12.5px;font-weight:800;color:var(--ink);cursor:pointer;}
+  .merged-toggle{margin-top:10px;font-size:11.5px;font-weight:800;color:#B45309;cursor:pointer;padding:8px 10px;background:#FFF7ED;border-radius:9px;border:1px solid #F3D9B4;}
+  .merged-panel{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
+  .merged-child{display:flex;align-items:center;gap:10px;padding:8px;background:#FAFBFC;border:1px solid var(--line);border-radius:9px;cursor:pointer;}
+  .merged-child:hover{border-color:#B9C1C9;}
+  .merged-child-title{font-size:12px;font-weight:800;}
+  .merged-child-sub{font-size:11px;color:var(--ink-2);margin-top:2px;}
+  #mosaicModal,#clusterModal{position:fixed;inset:0;background:rgba(8,10,13,.65);display:none;align-items:center;justify-content:center;z-index:4200;padding:20px;}
+  #mosaicModal.on,#clusterModal.on{display:flex;}
+  .mosaic-card{background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;padding:22px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+  .row-time{font-size:11px;color:var(--ink-2);font-family:var(--mono);flex:0 0 auto;}
+  .row .status-pill{flex:0 0 auto;}
+  @media(max-width:640px){
+    .row{flex-wrap:wrap;gap:6px 8px;}
+    .row-sub{flex:1 1 100%;order:5;}
+  }
+
+  /* 세부내역 모달 */
+  #detail{position:fixed;inset:0;background:rgba(8,10,13,.55);display:none;align-items:center;justify-content:center;z-index:3500;padding:20px;}
+  #detail.on{display:flex;}
+  .d-card{background:#fff;border-radius:16px;max-width:460px;width:100%;max-height:86vh;overflow-y:auto;padding:22px 22px 24px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+  .d-close{position:absolute;top:14px;right:16px;border:none;background:#F0F2F4;border-radius:8px;width:30px;height:30px;font-size:15px;font-weight:700;color:var(--ink-2);}
+  .d-title{font-size:13px;font-weight:800;color:var(--ink-2);font-family:var(--mono);margin-bottom:16px;}
+  .d-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #EEF1F4;font-size:13.5px;align-items:center;}
+  .d-row:last-of-type{border-bottom:none;}
+  .row.unclassified{border-color:#B0B7C0;border-style:dashed;background:#FAFBFC;}
+  .row-unclass{font-size:10.5px;font-weight:800;color:#fff;background:#8A94A0;border-radius:999px;padding:2px 9px;flex:0 0 auto;}
+  .classify-box{margin-top:16px;padding:14px;background:#FAFBFC;border:1.5px dashed #B0B7C0;border-radius:12px;}
+  .classify-h{font-size:12.5px;font-weight:800;color:var(--ink-2);margin-bottom:10px;}
+  .classify-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .classify-btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:10px 8px;font-size:12.5px;font-weight:700;color:var(--ink);}
+  .classify-btn.dismiss{color:var(--post);border-color:#F0324F;background:#FFF6F6;}
+  .classify-btn.dismiss:hover{background:#FDECEC;}
+  .classify-btn:hover{border-color:var(--post);background:#FFF6F6;}
+  .d-k{flex:0 0 82px;color:var(--ink-2);font-weight:700;}
+  .d-v{flex:1;font-weight:600;line-height:1.5;}
+  .d-photo{width:100%;border-radius:12px;margin-top:14px;border:1px solid var(--line);cursor:zoom-in;}
+
+  /* 진행중/이력 전환 */
+  .view-switch{display:flex;gap:0;background:#E4E8EC;border-radius:11px;padding:4px;margin-bottom:16px;width:fit-content;}
+  .vsw{border:none;background:transparent;border-radius:8px;padding:9px 20px;font-size:13.5px;font-weight:800;color:var(--ink-2);}
+  .vsw.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+
+  /* 이력·실적 */
+  .hist-top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
+    background:linear-gradient(135deg,#1B1F25,#0E1216);border-radius:16px;padding:16px 20px;}
+  .year-sel{display:flex;gap:6px;}
+  .ybtn{border:1px solid #333B45;background:transparent;color:#C6CDD4;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:800;}
+  .ybtn.on{background:var(--post);border-color:transparent;color:#fff;}
+  .ystat{display:flex;gap:26px;}
+  .ys{text-align:right;} .ysn{font-size:27px;font-weight:800;font-family:var(--mono);color:#fff;line-height:1;}
+  .ysl{font-size:11px;color:#9AA4AE;font-weight:700;margin-top:5px;}
+  button.ys-toggle{background:transparent;border:none;font:inherit;cursor:pointer;padding:0;}
+  button.ys-toggle .ysn{transition:color .1s;}
+  button.ys-toggle.on .ysn{color:var(--post);}
+  button.ys-toggle.on .ysl{color:var(--post);}
+
+  .trend{display:flex;align-items:flex-end;gap:5px;height:150px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 12px 10px;}
+  .bar{flex:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;border:none;background:transparent;cursor:pointer;}
+  .bar .bcol{width:78%;max-width:26px;background:#C3CBD3;border-radius:5px 5px 0 0;min-height:3px;transition:.15s;}
+  .bar:hover .bcol{background:#9AA4AE;}
+  .bar.on .bcol{background:var(--post);}
+  .bar .bl{font-size:10.5px;color:var(--ink-2);font-weight:700;}
+  .bar .bn{font-size:10px;color:var(--ink-2);font-family:var(--mono);min-height:12px;}
+  .bar.on .bl{color:var(--post);}
+
+  .hcats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media(max-width:560px){.hcats{grid-template-columns:1fr;}}
+  .hcat{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px 15px;text-align:left;width:100%;cursor:pointer;transition:.12s;}
+  .hcat:hover{border-color:#B9C1C9;}
+  .hcat.on{box-shadow:0 0 0 2px inset;background:#FBFCFD;}
+  .hcat-clear{border:1px solid var(--line);background:#fff;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;color:var(--ink-2);margin-left:8px;}
+  .hcat-n{font-size:26px;font-weight:800;font-family:var(--mono);margin-top:8px;}
+  .hcat-n span{font-size:13px;font-weight:700;color:var(--ink-2);margin-left:3px;}
+  .hcat-r{font-size:12px;color:var(--ink-2);font-weight:600;margin-top:4px;}
+  .hcat-r b{color:var(--s-done);}
+
+  .section-h{font-size:13px;font-weight:800;color:var(--ink-2);margin:2px 0 10px;display:flex;align-items:center;gap:8px;}
+  .filter-tag{font-size:11px;font-weight:700;color:#fff;padding:3px 9px;border-radius:999px;}
+
+  /* 관제실: 지도+목록 */
+  .split{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;}
+  @media(max-width:820px){.split{grid-template-columns:1fr;}}
+  #map{height:520px;border-radius:14px;border:1px solid var(--line);background:#D8DEE4;}
+  .list{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow-y:auto;padding-right:2px;}
+  @media(max-width:820px){.list{max-height:none;}}
+
+  /* 신고 카드 */
+  .rc{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px 14px;position:relative;overflow:hidden;}
+  .rc.urgent-card{border-color:var(--post);background:#FFF6F6;}
+  .rc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--rail,#ccc);}
+  .rc.sel{outline:2px solid var(--post);}
+  .rc-top{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+  .type-tag{font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;color:#fff;}
+  .rc-id{font-size:10.5px;color:var(--ink-2);font-family:var(--mono);}
+  .status-pill{margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;color:#fff;display:flex;align-items:center;gap:5px;}
+  .rc-title{font-size:14.5px;font-weight:800;margin-bottom:3px;}
+  .rc-meta{font-size:12px;color:var(--ink-2);line-height:1.5;}
+  .rc-meta b{color:var(--ink);font-weight:700;}
+  .rc-memo{font-size:12px;color:var(--ink-2);background:#F5F7F9;border-radius:8px;padding:7px 9px;margin-top:8px;}
+  .delay{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;color:var(--post);
+    background:#FDECEC;border:1px solid #F6C6C6;border-radius:999px;padding:2px 8px;margin-left:6px;}
+
+  /* 지자체 상태 조작 */
+  .actions{margin-top:11px;padding-top:11px;border-top:1px dashed var(--line);}
+  .act-lab{font-size:10.5px;font-weight:800;color:var(--ink-2);margin-bottom:7px;}
+  .act-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .act{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:8px 11px;font-size:12px;font-weight:800;color:var(--ink-2);}
+  .act:hover{background:#F3F5F7;}
+  .act.on{color:#fff;border-color:transparent;}
+  .reason{width:100%;margin-top:9px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12.5px;font-family:inherit;resize:none;}
+  .reason:focus{outline:none;border-color:var(--post);}
+
+  .empty{background:var(--panel);border:1px dashed var(--line);border-radius:13px;padding:34px 16px;text-align:center;color:var(--ink-2);font-size:13px;}
+
+  /* ===== 집배원 신고 ===== */
+  .carrier-wrap{max-width:430px;margin:0 auto;}
+  .c-profile{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 15px;margin-bottom:16px;}
+  .c-ava{width:44px;height:44px;border-radius:11px;background:#3A434E;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;}
+  .c-name{font-size:16px;font-weight:800;}
+  .c-org{font-size:12px;color:var(--ink-2);font-weight:600;margin-top:2px;}
+  .mine-h{font-size:12px;font-weight:800;color:var(--ink-2);margin:20px 0 9px;}
+  .mine-list{display:flex;flex-direction:column;gap:7px;}
+  .mine-row{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 12px;}
+  .mine-item{font-size:13px;font-weight:700;}
+  .mine-empty{background:var(--panel);border:1px dashed var(--line);border-radius:11px;padding:18px;text-align:center;color:var(--ink-2);font-size:12.5px;}
+  .c-lead{font-size:12px;font-weight:800;color:var(--ink-2);margin:2px 0 3px;}
+  .c-h{font-size:20px;font-weight:800;margin:0 0 13px;}
+  .cats{display:flex;flex-direction:column;gap:11px;}
+  .cat{border:none;text-align:left;border-radius:16px;padding:18px 16px;display:flex;align-items:center;gap:14px;color:#fff;box-shadow:0 5px 14px rgba(14,18,22,.14);}
+  .cat:active{transform:scale(.98);}
+  .cat .ci{font-size:30px;width:46px;text-align:center;}
+  .cat .ct{font-size:18px;font-weight:800;}
+  .cat .cs{font-size:11.5px;opacity:.92;margin-top:2px;}
+  .cat.safe{background:linear-gradient(135deg,#F0324F,#C70026);}
+  .cat.env{background:linear-gradient(135deg,#10A56E,#087349);}
+  .cat.welfare{background:linear-gradient(135deg,#2E6BE0,#0E44A8);}
+  .backrow{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+  .back{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;color:var(--ink-2);}
+  .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .sub{border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:15px 10px;text-align:center;
+    display:flex;flex-direction:column;align-items:center;gap:7px;min-height:88px;justify-content:center;}
+  .sub:active{transform:scale(.96);}
+  .sub .si{font-size:24px;} .sub .sl{font-size:13px;font-weight:700;line-height:1.2;}
+  .sub.etc{background:#F3F5F7;border-style:dashed;}
+  .card2{background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden;}
+  .card2-h{padding:11px 13px;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px;}
+  .card2-h .opt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--ink-2);background:#EFF2F5;padding:2px 8px;border-radius:999px;}
+  .locbtn{width:100%;border:1.5px solid var(--env);background:#E9F7F0;color:var(--env);font-weight:800;font-size:14px;padding:13px;border-radius:11px;}
+  #cmap{height:140px;display:none;} .cmap-on{display:block!important;}
+  .addr-in,.f-in,.memo2{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px 11px;font-size:14px;font-family:inherit;}
+  .addr-in:focus,.f-in:focus,.memo2:focus{outline:none;border-color:var(--env);}
+  .fld{padding:0 13px 12px;} .fld .fl{font-size:11px;font-weight:800;color:var(--ink-2);margin:10px 0 5px;}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;}
+  .chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 13px;font-size:12.5px;font-weight:700;color:var(--ink-2);}
+  .chip.on{background:var(--welfare);color:#fff;border-color:transparent;}
+  .photo-btn{width:100%;border:1.5px dashed var(--line);background:#fff;color:var(--ink-2);font-weight:800;font-size:13.5px;padding:13px;border-radius:11px;display:flex;align-items:center;justify-content:center;gap:8px;}
+  .thumb{width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin:0 13px 12px;}
+  .hidden{display:none;}
+  .save{width:100%;border:none;background:var(--console);color:#fff;font-size:16px;font-weight:800;padding:16px;border-radius:13px;box-shadow:0 6px 14px rgba(16,20,26,.22);}
+  .save:active{transform:scale(.99);}
+  .save-sub{font-size:11.5px;color:var(--ink-2);text-align:center;margin-top:9px;font-weight:600;}
+  .done-c{text-align:center;padding:40px 10px;}
+  .done-c .stamp{width:104px;height:104px;margin:0 auto 10px;border-radius:50%;border:3.5px solid var(--env);
+    display:flex;align-items:center;justify-content:center;background:rgba(11,138,91,.06);font-size:48px;color:var(--env);}
+  .done-c .dt{font-size:20px;font-weight:800;margin:6px 0 4px;}
+  .done-c .ds{font-size:13px;color:var(--ink-2);}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--console);
+    color:#fff;padding:12px 20px;border-radius:999px;font-size:13px;font-weight:700;opacity:0;transition:.25s;z-index:3000;box-shadow:0 8px 22px rgba(0,0,0,.3);}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .leaflet-container{font:inherit;}
+</style>
+</head>
+<body>
+
+<!-- 로그인 -->
+<div id="login">
+  <div class="login-card">
+    <div class="login-brand"><span class="badge-post">우체국</span>
+      <span class="login-sys">전남지방우정청 · 파일럿</span></div>
+    <div class="login-h">생활안전·복지 신고 관제</div>
+    <div class="login-sub">집배원·직원이 현장에서 올린 신고를 한 곳에 모으고, 관할 지자체 부서로 연계합니다.<br>본인 계정으로 로그인하면 소속·역할에 맞는 화면이 열립니다.</div>
+    <div class="login-form" id="loginForm">
+      <input class="login-in" id="loginId" placeholder="아이디" autocomplete="username" autocapitalize="off" onkeydown="if(event.key==='Enter')doLogin()">
+      <input class="login-in" id="loginPw" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      <div class="login-err" id="loginErr"></div>
+      <button class="login-btn" type="button" onclick="doLogin()">로그인</button>
+    </div>
+    <div class="login-note">승인된 관제실·지자체 담당자 계정으로 로그인하세요.</div>
+  </div>
+</div>
+
+<!-- 앱 -->
+<div id="app">
+  <div class="topbar">
+    <div class="sys">생활안전·복지 신고 관제<small>전남지방우정청 파일럿</small></div>
+    <div class="who-pill"><span class="who-dot" id="whoDot"></span><span id="whoName">—</span></div>
+    <button class="logout" onclick="logout()">로그아웃</button>
+  </div>
+  <div class="wrap" id="content"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="lightbox" onclick="closeLightbox()"><button class="lb-close">✕</button><img id="lbImg" src="">
+  <button class="lb-mosaic-btn" id="lbMosaicBtn" onclick="event.stopPropagation();closeLightbox();openMosaicEditor(lbReportId);"></button>
+</div>
+<div id="detail" onclick="if(event.target===this)closeDetail()">
+  <div class="d-card"><button class="d-close" onclick="closeDetail()">✕</button>
+    <div id="detailBody"></div></div>
+</div>
+<div id="clusterModal" onclick="if(event.target===this)closeClusterPicker()">
+  <div class="mosaic-card" style="max-width:420px"><button class="d-close" onclick="closeClusterPicker()">✕</button>
+    <div class="d-title">이 위치의 신고 목록</div>
+    <div id="clusterList"></div>
+  </div>
+</div>
+<div id="mosaicModal" onclick="if(event.target===this)closeMosaicEditor()">
+  <div class="mosaic-card"><button class="d-close" onclick="closeMosaicEditor()">✕</button>
+    <div class="d-title">사진 모자이크 처리</div>
+    <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:10px">얼굴·번호판 등 개인정보로 보이는 부분을 마우스(또는 손가락)로 드래그해서 선택하세요. 여러 번 반복할 수 있습니다.</div>
+    <canvas id="mosaicCanvas" style="width:100%;border-radius:10px;border:1px solid var(--line);cursor:crosshair;touch-action:none;display:block"></canvas>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="act" onclick="undoMosaicRect()">↩️ 마지막 선택 취소</button>
+      <button class="save" style="flex:1" id="mosaicSaveBtn" onclick="saveMosaicPhoto()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= 기준 데이터 ================= */
+const CATS = {
+  safe:   {label:'안전', color:'var(--safe)', dept:'교통과'},
+  env:    {label:'환경', color:'var(--env)', dept:'환경과'},
+  welfare:{label:'복지', color:'var(--welfare)', dept:'복지과'}  // 복지는 직접 입력 양식
+};
+const STATUS = {
+  received:  {label:'접수됨',    color:'var(--s-received)'},
+  checking:  {label:'확인 중',   color:'var(--s-checking)'},
+  hold:      {label:'보류',      color:'var(--s-hold)'},
+  done:      {label:'처리 완료', color:'var(--s-done)'},
+  noaction:  {label:'조치 불요', color:'var(--s-noaction)'},
+  cancelled: {label:'취소됨',    color:'var(--s-cancelled)'}
+};
+/* 좌표 기준점 (지도 중심용) */
+const GEO={ "장흥군":{lat:34.6816,lng:126.9072}, "강진군":{lat:34.6417,lng:126.7672}, "광주광역시":{lat:35.1595,lng:126.8526}, "보성군":{lat:34.7715,lng:127.2166} };
+let reports=[];  // 서버에서 로드
+
+/* ================= 세션 ================= */
+let me=null, token=sessionStorage.getItem('cv_dash_token')||null, selId=null, map=null, ws=null, photoRefreshTimer=null;
+let KAKAO_KEY='', kakaoReady=false, kakaoLoading=false, kakaoCbs=[], mapKind=null, mapMarkers={};
+const $=id=>document.getElementById(id);
+const cssv=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function ensureKakao(cb){
+  if(kakaoReady) return cb && cb();
+  if(!KAKAO_KEY) return cb && cb(); // 키 없으면 Leaflet 폴백
+  if(cb) kakaoCbs.push(cb);
+  if(kakaoLoading) return;
+  kakaoLoading=true;
+  const s=document.createElement('script');
+  s.src=`//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
+  s.onload=()=>kakao.maps.load(()=>{ kakaoReady=true; kakaoLoading=false; const q=kakaoCbs.slice(); kakaoCbs=[]; q.forEach(f=>f()); });
+  s.onerror=()=>{ kakaoLoading=false; const q=kakaoCbs.slice(); kakaoCbs=[]; q.forEach(f=>f()); };
+  document.head.appendChild(s);
+}
+function dotOf(u){ return u.kind==='control'?'var(--post)':u.type==='safe'?'var(--safe)':u.type==='env'?'var(--env)':'var(--welfare)'; }
+
+/* ===== 서버 통신 ===== */
+async function api(path,opts={}){
+  opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  if(token) opts.headers.Authorization='Bearer '+token;
+  const r=await fetch(path,opts);
+  if(r.status===401){ logout(); throw new Error('401'); }
+  if(!r.ok) throw new Error('req fail');
+  return r.json();
+}
+async function loadReports(){
+  const d=await api('/api/reports');
+  reports=d.reports.map(r=>({...r, createdAt:new Date(r.createdAt),
+    dupCandidates:(r.dupCandidates||[]).map(c=>({...c, createdAt:new Date(c.createdAt)})),
+    mergedChildren:(r.mergedChildren||[]).map(c=>({...c, createdAt:new Date(c.createdAt)}))}));
+}
+async function refresh(){
+  try{ await loadReports(); render(); }catch(e){ return; }
+  // 라이트박스를 오래 띄워두고 있으면 render()가 다시 그리지 않는 <img>라
+  // 목록 갱신만으로는 서명이 안 바뀐다 — 열려 있으면 새 서명 URL로 직접 교체.
+  if($('lightbox').classList.contains('on') && lbReportId){
+    const r=reports.find(x=>x.id===lbReportId);
+    if(r && r.photoUrl) $('lbImg').src=r.photoUrl; else closeLightbox();
+  }
+}
+
+/* ===== 로그인 ===== */
+function renderLogin(){}
+async function doLogin(){
+  const id=$('loginId').value.trim(), pw=$('loginPw').value;
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pw})});
+    const d=await r.json();
+    if(!r.ok){ $('loginErr').textContent=d.error||'로그인 실패'; return; }
+    if(d.user.kind==='carrier'){ $('loginErr').textContent='집배원·직원 계정은 폰앱(/report.html)을 사용하세요.'; return; }
+    if(d.user.kind==='safety'){ sessionStorage.setItem('cv_safe_token',d.token); location.href='/safety.html'; return; }
+    if(d.user.kind==='safety_mgr'){ sessionStorage.setItem('cv_risk_token',d.token); location.href='/risk.html'; return; }
+    token=d.token; me=d.user; sessionStorage.setItem('cv_dash_token',token);
+    $('loginId').value=''; $('loginPw').value=''; $('loginErr').textContent='';
+    enterApp();
+  }catch(e){ $('loginErr').textContent='서버 연결 실패'; }
+}
+function enterApp(){
+  $('login').style.display='none'; $('app').style.display='flex';
+  $('whoName').textContent = me.name + (me.org?` · ${me.org}`:'') + (me.zone?` (${me.zone})`:'');
+  $('whoDot').style.background=dotOf(me);
+  connectWS(); refresh();
+  // 사진 서명 URL은 5분 후 만료되는데, WS 이벤트가 한동안 없으면 화면에 이미 그려진
+  // <img src>가 계속 그 옛날 서명을 가리켜 조용히 깨진다(특히 병합 패널처럼 한번
+  // 열어두고 오래 쳐다보는 화면). 만료 전에 주기적으로 다시 받아와 갱신한다.
+  if(photoRefreshTimer) clearInterval(photoRefreshTimer);
+  photoRefreshTimer=setInterval(refresh, 4*60*1000);
+}
+function logout(){ if(token) fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{}); token=null; me=null; sessionStorage.removeItem('cv_dash_token');
+  if(ws){ try{ws.close();}catch(e){} ws=null; }
+  if(photoRefreshTimer){ clearInterval(photoRefreshTimer); photoRefreshTimer=null; }
+  destroyMap();
+  $('app').style.display='none'; $('login').style.display='flex'; }
+function connectWS(){
+  if(ws){ try{ws.close();}catch(e){} }
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}?token=${token}`);
+  ws.onmessage=e=>{ try{ if(JSON.parse(e.data).type==='safety') return; }catch(_){} refresh(); };
+  ws.onclose=()=>{ if(token) setTimeout(connectWS,3000); };
+}
+async function boot(){
+  try{ const cfg=await (await fetch('/api/config')).json(); KAKAO_KEY=cfg.kakaoKey||''; }catch(e){}
+  renderLogin();
+  if(token){ try{ const d=await api('/api/me'); me=d.user; if(me.kind==='safety'){ location.href='/safety.html'; return; } if(me.kind==='safety_mgr'){ location.href='/risk.html'; return; } enterApp(); return; }catch(e){ token=null; } }
+  $('login').style.display='flex'; $('app').style.display='none';
+}
+
+/* 라우팅 */
+function render(){
+  if(!me) return;
+  if(me.kind==='dept') return renderDept();
+  return renderControl();
+}
+
+/* 공통: 신고 카드 */
+/* 병합되어 취소 처리된 신고는 그냥 "취소됨"이 아니라, 실제로 합쳐진 대표 신고의
+ * 현재 상태를 그대로 비춰서 보여준다(대표 신고가 처리완료되면 여기도 자동 반영). */
+function pillFor(r){
+  if(r.mergedInto && r.mergedIntoStatus){
+    const live=STATUS[r.mergedIntoStatus];
+    return {label:'병합됨 · '+live.label, color:live.color};
+  }
+  return STATUS[r.status];
+}
+function statusPill(r){const st=pillFor(r); return `<span class="status-pill" style="background:${st.color}">${st.label}</span>`;}
+function isDelayed(r){return ['received','checking'].includes(r.status) && (Date.now()-r.createdAt.getTime())/864e5 >= 10;}
+function fmt(d){return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+function reportCard(r,{actions=false, allow=null}={}){
+  const c=CATS[r.type];
+  let wel='';
+  if(r.type==='welfare'&&r.welfare){const w=r.welfare;
+    const privacy=r.privacyLevel==='masked'?'<span style="font-size:10px;font-weight:800;color:#0E44A8;background:#EEF4FF;border-radius:999px;padding:2px 7px;margin-left:5px">🔐 비식별</span>':'<span style="font-size:10px;font-weight:800;color:#087349;background:#EAF7F1;border-radius:999px;padding:2px 7px;margin-left:5px">🔓 복지담당자 원문</span>';
+    wel=`<div class="rc-memo"><b>${w.name} · ${w.age} · ${w.household}</b>${privacy}<br>조치: ${w.action} / 사유: ${w.reason}</div>`;}
+  const memo = r.memo?`<div class="rc-memo">${r.memo}</div>`:'';
+  const reason = r.reason?`<div class="rc-memo">처리메모: ${r.reason}</div>`:'';
+  const photo = r.photoUrl?`<img class="rc-photo" src="${r.photoUrl}" onclick="openLightbox(event,'${r.id}')" alt="현장사진">`:'';
+  const delay = isDelayed(r)?`<span class="delay">⏱ 10일+ 정체</span>`:'';
+  const urgentBadge = r.urgent?`<span class="row-urgent" style="margin-right:6px">🚨 긴급</span>`:'';
+  const dupBadge = (r.dupCandidates&&r.dupCandidates.length)?`<span class="dup-badge" style="margin-right:6px">⚠️ 유사 신고 ${r.dupCandidates.length}건</span>`:'';
+  let act='';
+  if(actions && r.mergedInto){
+    act=`<div class="actions"><div class="act-lab" style="color:var(--ink-2)">🔗 중복신고로 병합됨 — 원본 신고에서 함께 처리됩니다</div></div>`;
+  } else if(actions){
+    const keys=allow||Object.keys(STATUS).filter(k=>k!=='received'&&k!=='cancelled'); // 취소됨은 집배원만 지정 가능
+    const btns=keys.map(k=>{const st=STATUS[k];
+      return `<button class="act ${r.status===k?'on':''}" style="${r.status===k?`background:${st.color}`:''}"
+        onclick="setStatus('${r.id}','${k}')">${st.label}</button>`;}).join('');
+    act=`<div class="actions"><div class="act-lab">처리 상태 변경</div><div class="act-btns">${btns}</div>
+      <textarea class="reason" placeholder="처리 사유·메모 (선택)" onchange="setReason('${r.id}',this.value)">${r.reason||''}</textarea></div>`;
+  }
+  return `<div class="rc ${r.urgent?'urgent-card':''}" style="--rail:${r.urgent?'var(--post)':pillFor(r).color}" id="card-${r.id}">
+    <div style="cursor:pointer" onclick="selectReport('${r.id}')">
+      <div class="rc-top">${urgentBadge}${dupBadge}<span class="type-tag" style="background:${c.color}">${c.label}</span>
+        <span class="rc-id">${r.id}</span>${statusPill(r)}</div>
+      <div class="rc-title">${r.item}${delay}</div>
+      <div class="rc-meta"><b>${r.region}</b> · ${r.addr}<br>접수 ${fmt(r.createdAt)} · ${r.carrier}${r.photo?' · 📷':''}</div>
+    </div>
+    ${photo}${wel}${memo}${reason}${act}${mergedPanelFor(r)}</div>`;
+}
+
+/* ============ 관제실 화면 (지도+목록) ============ */
+function visibleFor(u){
+  return reports.filter(r=>{
+    if(u.region && r.region!==u.region) return false;
+    if(u.type && r.type!==u.type) return false;
+    return true;
+  });
+}
+function counts(list){const c={received:0,checking:0,hold:0,done:0,noaction:0,cancelled:0};
+  list.forEach(r=>c[r.status]++); return c;}
+let ctl={view:'active', cat:'all', status:null, mapOpen:false, urgentOnly:false, year:2026, month:new Date().getMonth()+1, histCat:null, deptStatus:null, expandedMerge:new Set(), invalidOnly:false};
+function toggleUrgentOnly(){
+  ctl.urgentOnly=!ctl.urgentOnly;
+  if(ctl.urgentOnly){ ctl.cat='all'; ctl.status=null; ctl.deptStatus=null; }
+  render();
+}
+function toggleMergeExpand(id){
+  if(ctl.expandedMerge.has(id)) ctl.expandedMerge.delete(id); else ctl.expandedMerge.add(id);
+  render();
+}
+/* 병합된 신고를 사진과 함께 보여주는 작은 카드 — 원본 신고 카드를 펼치면 그 밑에 붙는다 */
+function mergedChildCard(child){
+  const photo = child.photoUrl
+    ? `<img src="${child.photoUrl}" style="width:56px;height:42px;object-fit:cover;border-radius:7px;border:1px solid var(--line);cursor:zoom-in;flex:0 0 auto" onclick="event.stopPropagation();openLightbox(event,'${child.id}')" alt="현장사진">`
+    : `<div style="width:56px;height:42px;border-radius:7px;background:#EEF1F4;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:11px;color:#B0B7C0">사진없음</div>`;
+  return `<div class="merged-child" onclick="event.stopPropagation();selectReport('${child.id}')">
+    ${photo}
+    <div class="merged-child-info">
+      <div class="merged-child-title">${child.id} · ${child.item||''}${child.subtype?' · '+child.subtype:''}</div>
+      <div class="merged-child-sub">${child.addr||''} · ${child.carrier||'-'} · ${fmt(child.createdAt)}</div>
+    </div>
+  </div>`;
+}
+function mergedPanelFor(r){
+  if(!r.mergedChildren || !r.mergedChildren.length) return '';
+  const expanded=ctl.expandedMerge.has(r.id);
+  return `<div class="merged-toggle" onclick="event.stopPropagation();toggleMergeExpand('${r.id}')">🔗 병합된 유사신고 ${r.mergedChildren.length}건 ${expanded?'접기 ▲':'펼쳐서 확인 ▼'}</div>
+    ${expanded?`<div class="merged-panel">${r.mergedChildren.map(mergedChildCard).join('')}</div>`:''}`;
+}
+const ACTIVE=['received','checking','hold']; // 진행 중(보류는 예산·자원 문제로 대기, 계속 추적 대상)
+const FINAL_STATUSES=['done','noaction','cancelled']; // 지자체 최종판단(처리완료·조치불요) 또는 취소·병합 — 이력·실적은 이 상태만 반영
+const isProcessed=r=>['done','noaction'].includes(r.status); // 처리율 산정 기준
+const isMerged=r=>!!r.mergedInto; // 중복신고로 다른 신고에 병합되어 취소·종결된 신고
+function relTime(d){
+  const startOfDay=x=>{const y=new Date(x);y.setHours(0,0,0,0);return y;};
+  const diffDays=Math.round((startOfDay(new Date())-startOfDay(d))/864e5);
+  const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  if(diffDays<=0) return '오늘 '+hm;
+  if(diffDays===1) return '어제 '+hm;
+  return diffDays+'일 전';
+}
+function fmtFull(d){return `${d.getFullYear()}. ${d.getMonth()+1}. ${d.getDate()}. ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+function shortAddr(a){const p=(a||'').split(' '); return p.slice(-2).join(' ');}
+
+function viewSwitch(){
+  return `<div class="view-switch">
+    <button class="vsw ${ctl.view==='active'?'on':''}" onclick="setView('active')">진행 중</button>
+    <button class="vsw ${ctl.view==='history'?'on':''}" onclick="setView('history')">이력·실적</button></div>`;
+}
+function setView(v){ctl.view=v; ctl.cat='all'; ctl.status=null; renderControl();}
+
+function renderControl(){
+  if(ctl.view==='history'){ $('content').innerHTML=viewSwitch()+'<div id="hist"></div>'; renderHistory(); return; }
+  // ===== 진행 중 보드: 접수됨·확인 중만 =====
+  const base=visibleFor(me).filter(r=>ACTIVE.includes(r.status));
+  const c=counts(base);
+  const delayed=base.filter(isDelayed).length;
+  const cc={safe:0,env:0,welfare:0}; base.forEach(r=>cc[r.type]++);
+  let list=base.filter(r=>(ctl.cat==='all'||r.type===ctl.cat)&&(!ctl.status||r.status===ctl.status)&&(!ctl.urgentOnly||r.urgent))
+              .sort((a,b)=> (a.type===null?0:1)-(b.type===null?0:1) || (b.urgent?1:0)-(a.urgent?1:0) || b.createdAt-a.createdAt);
+  const sc=(key,label,color)=>`<button class="stat ${ctl.status===key?'on':''}" onclick="setCtlStatus('${key}')">
+      <div class="n" style="color:${color}">${c[key]}</div><div class="l">${label}</div></button>`;
+  const urgentN=base.filter(r=>r.urgent).length;
+  const unclassN=base.filter(r=>r.type===null).length;
+  $('content').innerHTML=viewSwitch()+`
+    <div class="section-h">진행 중 현황 <span style="margin-left:auto;font-weight:600;color:var(--ink-2);font-size:11.5px">처리 완료된 신고는 「이력·실적」으로 이동합니다</span></div>
+    <div class="summary">
+      <button class="stat ${ctl.status===null?'on':''}" onclick="setCtlStatus(null)"><div class="n">${base.length}</div><div class="l">진행 중 전체</div></button>
+      <div class="stat ${unclassN?'alert':''}" style="cursor:default"><div class="n" style="color:${unclassN?'#8A94A0':'inherit'}">🔍 ${unclassN}</div><div class="l">AI 미분류</div></div>
+      <button class="stat ${ctl.urgentOnly?'on':''} ${urgentN?'alert':''}" onclick="toggleUrgentOnly()"><div class="n" style="color:${urgentN?'var(--post)':'inherit'}">🚨 ${urgentN}</div><div class="l">긴급 신고</div></button>
+      ${sc('received','접수됨',cssv('--s-received'))}
+      ${sc('checking','확인 중',cssv('--s-checking'))}
+      ${sc('hold','보류(예산·자원)',cssv('--s-hold'))}
+      <div class="stat ${delayed?'alert':''}" style="cursor:default"><div class="n">${delayed}</div><div class="l">10일+ 정체</div></div>
+    </div>
+    <div class="ctl-bar">
+      <div class="cat-tabs">
+        <button class="ctab ${ctl.cat==='all'?'on':''}" onclick="setCtlCat('all')">전체 <b>${base.length}</b></button>
+        <button class="ctab ${ctl.cat==='safe'?'on':''}" style="${ctl.cat==='safe'?`background:${cssv('--safe')};border-color:transparent;color:#fff`:''}" onclick="setCtlCat('safe')">⚠️ 안전 <b>${cc.safe}</b></button>
+        <button class="ctab ${ctl.cat==='env'?'on':''}" style="${ctl.cat==='env'?`background:${cssv('--env')};border-color:transparent;color:#fff`:''}" onclick="setCtlCat('env')">♻️ 환경 <b>${cc.env}</b></button>
+        <button class="ctab ${ctl.cat==='welfare'?'on':''}" style="${ctl.cat==='welfare'?`background:${cssv('--welfare')};border-color:transparent;color:#fff`:''}" onclick="setCtlCat('welfare')">🏠 복지 <b>${cc.welfare}</b></button>
+      </div>
+      <button class="map-toggle ${ctl.mapOpen?'on':''}" onclick="toggleCtlMap()">🗺 지도 ${ctl.mapOpen?'닫기':'보기'}</button>
+    </div>
+    <div id="ctlmap" class="ctlmap" style="display:${ctl.mapOpen?'block':'none'}"></div>
+    <div class="rows" id="rows">${list.length?list.map(rowLine).join(''):`<div class="empty">진행 중인 신고가 없습니다.</div>`}</div>`;
+  if(ctl.mapOpen) ensureKakao(()=>{ if($('ctlmap')) drawMap(base); });
+}
+
+/* ===== 이력·실적 (월별 + 연도별 누적) ===== */
+function setYear(y){ctl.year=+y; renderHistory();}
+function setMonth(m){ctl.month=+m; renderHistory();}
+function renderHistory(){
+  const el=$('hist'); if(!el) return;
+  const all=visibleFor(me);
+  const years=[...new Set(all.map(r=>r.createdAt.getFullYear()))].sort();
+  const year=ctl.year, month=ctl.month;
+  // 이력·실적은 지자체가 최종판단(처리완료·조치불요)했거나 취소·병합된 건만 반영한다 —
+  // 아직 확인중·보류로 판단이 안 끝난 건은 「진행 중」탭에만 있어야 여기서 실적이 부풀려지지 않는다.
+  const yr=all.filter(r=>r.createdAt.getFullYear()===year && FINAL_STATUSES.includes(r.status)); // 목록 표시용 — 취소건도 포함(이력 추적)
+  const statsYr=yr.filter(r=>r.status!=='cancelled'&&!isMerged(r)); // 실적 집계용 — 취소건·병합된 중복신고는 담당부서 워크로드가 아니므로 제외
+  const yTotal=statsYr.length, yProc=statsYr.filter(isProcessed).length, yRate=yTotal?Math.round(yProc/yTotal*100):0;
+  const yInvalid=yr.filter(r=>r.invalidReport).length; // 관제실이 오신고로 판단해 걸러낸 연간 건수
+  const monthly=Array.from({length:12},(_,i)=>statsYr.filter(r=>r.createdAt.getMonth()===i).length);
+  const maxM=Math.max(1,...monthly);
+  // 병합된 중복신고는 기본 목록에서 빼고(화면이 지저분해지지 않게) 「진행 중」탭의 🔗 병합 타일에서 한데 모아 확인한다.
+  const mon=yr.filter(r=>r.createdAt.getMonth()===month-1&&!isMerged(r)).sort((a,b)=>b.createdAt-a.createdAt);
+  const cancelledInMonth=mon.filter(r=>r.status==='cancelled').length;
+  const byCat=t=>{const l=statsYr.filter(r=>r.createdAt.getMonth()===month-1&&r.type===t),p=l.filter(isProcessed).length;
+    return {n:l.length,p,rate:l.length?Math.round(p/l.length*100):0};};
+  const cat=t=>{const x=byCat(t),C=CATS[t];
+    return `<button class="hcat ${ctl.histCat===t?'on':''}" onclick="setHistCat('${t}')" style="${ctl.histCat===t?`border-color:${C.color}`:''}">
+      <div class="hcat-h"><span class="type-tag" style="background:${C.color}">${C.label}</span></div>
+      <div class="hcat-n">${x.n}<span>건</span></div>
+      <div class="hcat-r">처리 ${x.p}건 · <b>${x.rate}%</b></div></button>`;};
+  const monFiltered = mon.filter(r=>(!ctl.histCat||r.type===ctl.histCat)&&(!ctl.invalidOnly||r.invalidReport));
+  const bars=monthly.map((v,i)=>`<button class="bar ${i===month-1?'on':''}" onclick="setMonth(${i+1})" title="${i+1}월 ${v}건">
+      <span class="bn">${v||''}</span><span class="bcol" style="height:${Math.round(v/maxM*100)}%"></span><span class="bl">${i+1}</span></button>`).join('');
+
+  el.innerHTML=`
+    <div class="hist-top">
+      <div class="year-sel">${years.map(y=>`<button class="ybtn ${y===year?'on':''}" onclick="setYear(${y})">${y}년</button>`).join('')}</div>
+      <div class="ystat"><div class="ys"><div class="ysn">${yTotal}</div><div class="ysl">${year}년 누적 접수</div></div>
+        <div class="ys"><div class="ysn" style="color:${cssv('--s-done')}">${yProc}</div><div class="ysl">처리 완료</div></div>
+        <div class="ys"><div class="ysn">${yRate}<span style="font-size:15px">%</span></div><div class="ysl">처리율</div></div>
+        <button class="ys ys-toggle ${ctl.invalidOnly?'on':''}" onclick="toggleInvalidOnly()" title="오신고만 걸러보기"><div class="ysn">${yInvalid}</div><div class="ysl">🗑 오신고${ctl.invalidOnly?' · 필터 중':''}</div></button></div>
+    </div>
+    <div class="section-h" style="margin-top:18px">📊 월별 신고 추이 <span style="margin-left:auto;font-weight:600;color:var(--ink-2);font-size:11.5px">막대를 누르면 그 달 상세 · 취소건은 실적 집계에서 제외</span></div>
+    <div class="trend">${bars}</div>
+    <div class="section-h" style="margin-top:20px">🗂 ${year}년 ${month}월 · 분야별 집계 <span style="margin-left:auto;font-weight:600;color:var(--ink-2);font-size:11.5px">카드를 누르면 그 분야만 아래 목록에 표시</span></div>
+    <div class="hcats">${cat('safe')}${cat('env')}${cat('welfare')}</div>
+    <div class="section-h" style="margin-top:18px">📋 ${year}년 ${month}월 신고 내역${ctl.histCat?` · ${CATS[ctl.histCat].label}만 보기 <button class="hcat-clear" onclick="setHistCat(null)">✕ 필터 해제</button>`:''} <span style="margin-left:auto;font-weight:600;color:var(--ink-2);font-size:11.5px">${monFiltered.length}건 · 최신순${cancelledInMonth?` (취소 ${cancelledInMonth}건 포함)`:''}</span></div>
+    <div class="rows">${monFiltered.length?monFiltered.map(rowLine).join(''):`<div class="empty">해당 조건의 신고가 없습니다.</div>`}</div>`;
+}
+function setHistCat(t){ctl.histCat = (ctl.histCat===t)?null:t; renderHistory(); }
+function toggleInvalidOnly(){ctl.invalidOnly=!ctl.invalidOnly; renderHistory();}
+
+function rowLine(r){
+  const unclassified = r.type===null && !r.invalidReport;
+  const c = r.invalidReport ? {color:'#6B7280'} : (unclassified ? {color:'#9AA4AE'} : CATS[r.type]);
+  const merged = mergedPanelFor(r);
+  return `<div>
+    <div class="row ${r.urgent?'urgent':''} ${unclassified?'unclassified':''}" onclick="selectReport('${r.id}')">
+    ${r.urgent?`<span class="row-urgent">🚨 긴급</span>`:''}
+    ${(r.dupCandidates&&r.dupCandidates.length)?`<span class="dup-badge">⚠️ 유사 ${r.dupCandidates.length}건</span>`:''}
+    ${unclassified?`<span class="row-unclass">${r.aiMode==='error'?'⚠️ 분류 실패':r.aiMode==='invalid'?'⚠️ 확인 필요':'🔍 분류 중'}</span>`:''}
+    <span class="row-tag" style="background:${c.color}">${r.invalidReport?'🗑 오신고':(unclassified?'미분류':c.label)}</span>
+    <span class="row-item">${r.invalidReport?'(오신고로 종결)':(unclassified?'(AI 분류 대기)':r.item)}${r.subtype?' · '+r.subtype:''}</span>
+    <span class="row-sub">${r.region} · ${shortAddr(r.addr)}</span>
+    <span class="row-carrier">${(r.carrier||'-').split('(')[0]}</span>
+    ${r.photo?'<span class="row-cam">📷</span>':''}
+    ${r.edited?'<span class="row-cam" title="집배원이 수정함">✏️</span>':''}
+    ${isDelayed(r)?'<span class="row-delay">정체</span>':''}
+    <span class="row-time">${relTime(r.createdAt)}</span>
+    ${statusPill(r)}</div>
+    ${merged}</div>`;
+}
+function setCtlCat(cat){ctl.cat=cat; ctl.urgentOnly=false; renderControl();}
+function setCtlStatus(s){ctl.status=s; ctl.urgentOnly=false; renderControl();}
+function toggleCtlMap(){ctl.mapOpen=!ctl.mapOpen; render();}
+
+function destroyMap(){
+  if(mapKind==='kakao'){ Object.values(mapMarkers).forEach(m=>{ try{m.setMap(null);}catch(e){} }); }
+  else if(mapKind==='leaflet' && map){ try{map.remove();}catch(e){} }
+  map=null; mapKind=null; mapMarkers={};
+}
+function drawMap(list){
+  const el=$('ctlmap'); if(!el) return;
+  destroyMap();
+  if(KAKAO_KEY && kakaoReady) drawKakaoMap(el,list);
+  else if(typeof L!=='undefined') drawLeafletMap(el,list);
+  else el.innerHTML='<div style="padding:30px;color:#48525C;font-size:13px;text-align:center">지도를 불러오지 못했습니다(네트워크). 목록으로 확인하세요.</div>';
+}
+/* 지도 마커: 분야별 색상(안전=빨강·환경=초록), 아래를 가리키는 화살표(핀) 모양.
+   복지는 좌표를 수집하지 않아 원천적으로 안 뜨지만, 방어적으로도 명시 제외한다. */
+function markerColorFor(r){
+  if(r.type==='welfare') return null;
+  if(r.type==null) return '#9AA4AE';
+  return cssv(CATS[r.type].color.replace('var(','').replace(')',''))||'#888';
+}
+function pinSvg(color,count){
+  const badge=(count&&count>1)?`<circle cx="24" cy="8" r="8" fill="#111827" stroke="#fff" stroke-width="2"/>
+    <text x="24" y="11.3" font-family="sans-serif" font-size="10" font-weight="800" fill="#fff" text-anchor="middle">${count>9?'9+':count}</text>`:'';
+  return `<svg width="32" height="38" viewBox="0 0 32 38" style="display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 22 14 22s14-11.5 14-22C28 6.3 21.7 0 14 0z" fill="${color}" stroke="#fff" stroke-width="2.5"/>
+    <circle cx="14" cy="14" r="5" fill="#fff"/>
+    ${badge}
+  </svg>`;
+}
+/* 같은 분야이고 약 35m 이내로 가까운 신고는 지도에서 핀 하나로 묶어 보여준다
+ * (겹친 핀이 서로를 가려 안 보이는 문제 방지). 실제 병합 여부 판단은 유사신고
+ * 배지·상세보기에서 담당자가 하고, 여기서는 어느 핀을 눌러야 할지만 정리해 준다. */
+function clusterForMap(list){
+  const pts=list.filter(r=>r.lat!=null&&r.lng!=null&&markerColorFor(r));
+  const used=new Set(), clusters=[], THRESH=0.00035;
+  for(const r of pts){
+    if(used.has(r.id)) continue;
+    const group=[r]; used.add(r.id);
+    for(const o of pts){
+      if(used.has(o.id)||o.type!==r.type) continue;
+      if(Math.abs(o.lat-r.lat)<THRESH && Math.abs(o.lng-r.lng)<THRESH){ group.push(o); used.add(o.id); }
+    }
+    clusters.push(group);
+  }
+  return clusters;
+}
+function openClusterPicker(group){
+  $('clusterList').innerHTML=group.map(g=>`
+    <div class="dup-item" style="cursor:pointer" onclick="closeClusterPicker();selectReport('${g.id}')">
+      <div><b>${g.id}</b> · ${g.item||'(미분류)'}${g.subtype?' · '+g.subtype:''}<br><span style="color:var(--ink-2);font-size:11.5px">${g.addr} · ${fmt(g.createdAt)}</span></div>
+      ${statusPill(g)}
+    </div>`).join('');
+  $('clusterModal').classList.add('on');
+}
+function closeClusterPicker(){ $('clusterModal').classList.remove('on'); }
+function drawKakaoMap(el,list){
+  mapKind='kakao';
+  const u=me;
+  const center=(u.region&&GEO[u.region])||{lat:34.66,lng:126.84};
+  map=new kakao.maps.Map(el,{center:new kakao.maps.LatLng(center.lat,center.lng), level:u.region?7:9});
+  clusterForMap(list).forEach(group=>{
+    const r=group[0], col=markerColorFor(r); if(!col) return;
+    const pin=document.createElement('div');
+    pin.style.cursor='pointer';
+    pin.innerHTML=pinSvg(col,group.length);
+    pin.title=group.length>1
+      ? `${CATS[r.type]?CATS[r.type].label:'미분류'} · 인근 신고 ${group.length}건 (눌러서 목록 보기)`
+      : `${CATS[r.type]?CATS[r.type].label:'미분류'} · ${r.item||''} · ${r.region} · ${r.addr}`;
+    pin.onclick=()=>group.length>1?openClusterPicker(group):selectReport(r.id);
+    const overlay=new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(r.lat,r.lng), content:pin, yAnchor:1, xAnchor:0.5});
+    overlay.setMap(map);
+    group.forEach(g=>mapMarkers[g.id]=overlay);
+  });
+}
+function drawLeafletMap(el,list){
+  mapKind='leaflet';
+  const u=me;
+  const center=(u.region&&GEO[u.region])||{lat:34.66,lng:126.84};
+  map=L.map(el,{zoomControl:true,attributionControl:false}).setView([center.lat,center.lng],u.region?12:11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  clusterForMap(list).forEach(group=>{
+    const r=group[0], col=markerColorFor(r); if(!col) return;
+    const icon=L.divIcon({html:pinSvg(col,group.length), className:'safety-pin-icon', iconSize:[32,38], iconAnchor:[16,38]});
+    const m=L.marker([r.lat,r.lng],{icon}).addTo(map);
+    if(group.length===1) m.bindPopup(`<b>${CATS[r.type]?CATS[r.type].label:'미분류'} · ${r.item||''}</b><br>${r.region} · ${r.addr}<br>${pillFor(r).label}`);
+    m.on('click',()=>group.length>1?openClusterPicker(group):selectReport(r.id));
+    group.forEach(g=>mapMarkers[g.id]=m);
+  });
+  setTimeout(()=>map.invalidateSize(),60);
+}
+/* 목록에서 신고를 누르면 상세정보를 열고, 지도가 열려 있으면 해당 위치로 이동 */
+function selectReport(id){
+  const r=reports.find(x=>x.id===id);
+  openDetail(id);
+  if(!r || !ctl.mapOpen || !map || r.lat==null || r.lng==null) return;
+  if(mapKind==='kakao'){
+    map.setLevel(3);
+    map.panTo(new kakao.maps.LatLng(r.lat,r.lng));
+  } else if(mapKind==='leaflet'){
+    map.flyTo([r.lat,r.lng], Math.max(map.getZoom(),15));
+  }
+}
+
+/* 세부내역 모달 */
+function openDetail(id){
+  const r=reports.find(x=>x.id===id); if(!r)return;
+  const unclassified = r.type===null;
+  const c = unclassified ? {color:'#9AA4AE', label:'미분류'} : CATS[r.type];
+  const st=pillFor(r);
+  const who=r.carrier||'-';
+  const row=(k,v)=>`<div class="d-row"><span class="d-k">${k}</span><span class="d-v">${v}</span></div>`;
+  let b='';
+  b+=row('분야', `<span class="type-tag" style="background:${c.color}">${c.label}</span> ${unclassified?'AI 분류 대기 중':r.item}`);
+  if(r.edited) b+=row('✏️ 수정 이력', `<span style="color:var(--ink-2)">집배원이 접수 후 내용을 수정함${r.editedAt?' · '+fmtFull(new Date(r.editedAt)):''}</span>`);
+  if(r.status==='cancelled' && r.mergedInto){
+    b+=row('🔗 병합 이력', `<span style="color:var(--ink-2)">${r.mergedInto}(으)로 병합됨 · 현재 상태: <b>${r.mergedIntoStatus?STATUS[r.mergedIntoStatus].label:'-'}</b>${r.mergedIntoReason?' · '+r.mergedIntoReason:''}${r.cancelledAt?' · '+fmtFull(new Date(r.cancelledAt)):''}</span>`);
+  } else if(r.status==='cancelled'){
+    const byLabel = r.cancelledBy==='control' ? '관제실이 취소·종결 처리함'
+                  : r.cancelledBy==='dept'    ? '담당 부서가 취소·종결 처리함'
+                  : '집배원 본인이 취소함';
+    b+=row('🗑 취소 이력', `<span style="color:var(--ink-2)">${byLabel}${r.cancelledAt?' · '+fmtFull(new Date(r.cancelledAt)):''}</span>`);
+  }
+  if(r.carrierUrgent) b+=row('신고자 긴급 지정', `<span style="color:var(--post);font-weight:800">🚨 현장에서 직접 긴급으로 지정</span>`);
+  if(r.subtype) b+=row('파손 유형', `<span style="font-weight:800">${r.subtype}</span>`);
+  if(r.type===null){
+    const waitMsg = r.aiMode==='error'
+      ? '⚠️ AI 분류 실패(호출 오류) — 아래에서 직접 분류해 주세요'
+      : r.aiMode==='invalid'
+      ? '⚠️ AI가 안전·환경 위험 사진으로 인식하지 못했어요 — 사진을 확인하고 아래에서 직접 분류해 주세요'
+      : '🔍 AI가 사진을 분류하는 중입니다 (몇 초 후 자동 반영, 새로고침 불필요)';
+    b+=row('분류 상태', `<span style="color:var(--ink-2)">${waitMsg}</span>`);
+  } else if(r.aiMode==='openai' || r.aiMode==='stub'){
+    const modeTag = r.aiMode==='openai'
+      ? '<span style="color:#0B8A5B;font-weight:800">🟢 실제 AI(GPT-4o-mini) 자동분류</span>'
+      : '<span style="color:#9AA4AE;font-weight:800">⚪ 데모 임시 분류 (API 키 미등록)</span>';
+    b+=row('분류 방식', modeTag);
+  } else if(r.aiMode==='manual'){
+    b+=row('분류 방식', `<span style="font-weight:800">담당자·집배원이 직접 지정함</span>`);
+  }
+  if(r.urgent) b+=row('긴급도', `<span style="color:var(--post);font-weight:800">🚨 긴급 (신고자 지정)</span>`);
+  b+=row('현재 상태', `<span class="status-pill" style="background:${st.color}">${st.label}</span>`);
+  b+=row('신고자', who);
+  b+=row('접수 시각', fmtFull(r.createdAt));
+  if(r.type==='welfare'&&r.welfare){const w=r.welfare;
+    const privacyText=r.privacyLevel==='masked'
+      ? '<span style="color:#0E44A8;font-weight:800">🔐 개인정보 비식별 표시 · 상세정보는 관할 복지담당자만 열람</span>'
+      : '<span style="color:#087349;font-weight:800">🔓 관할 복지담당자 권한 · 업무처리를 위한 원문 열람</span>';
+    b+=row('개인정보 보호', privacyText);
+    b+=row('대상', `${w.name} · ${w.age} · ${w.household}`);
+    b+=row('조치 요청', w.action);
+    b+=row('사유', w.reason);
+    b+=row('주소', r.addr);
+  } else {
+    b+=row('위치', r.addr||'(주소 확인 중)');
+    if(r.lat!=null && r.lng!=null) b+=row('좌표', `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`);
+    if(r.memo) b+=row('설명', r.memo);
+  }
+  if(r.reason) b+=row(r.status==='hold'?'⏸ 보류 사유':'처리 내역', r.reason);
+  const canModerate = me.kind==='control'||me.kind==='dept';
+  const photo=r.photoUrl?`<img class="d-photo" src="${r.photoUrl}" onclick="openLightbox(event,'${r.id}')">`:'';
+  const mosaicNote = r.photoMosaic?`<div style="font-size:11.5px;color:var(--ink-2);margin-top:6px">🖌 ${r.mosaicBy||''}${r.mosaicAt?' · '+fmtFull(new Date(r.mosaicAt)):''} 모자이크 처리됨</div>`:'';
+  const mosaicBtn = (r.photo && canModerate)?`<button class="mosaic-btn" onclick="openMosaicEditor('${r.id}')">🖌 사진 모자이크 처리${r.photoMosaic?' (다시 편집)':''}</button>`:'';
+
+  // 관제실 전용: 미분류 신고를 사진 보고 직접 분류 (또는 무관한 신고면 취소 종결)
+  let classifyUI='';
+  if(r.type===null && me.kind==='control'){
+    const opts=[['road','🕳️ 도로위험'],['facility','🚦 시설물 파손·고장'],['safe_other','⚠️ 기타 안전위험요소'],['waste','🗑️ 쓰레기·폐기물'],['env_other','♻️ 기타 환경위험']];
+    classifyUI=`<div class="classify-box">
+      <div class="classify-h">🔍 관제실 직접 분류 (AI 미분류 상태)</div>
+      <div class="classify-grid">${opts.map(o=>`<button class="classify-btn" onclick="manualClassify('${r.id}','${o[0]}')">${o[1]}</button>`).join('')}</div>
+      <button class="classify-btn dismiss" style="margin-top:8px;width:100%" onclick="dismissInvalid('${r.id}')">🗑 실제 위험이 아님 · 무관한 신고로 종결</button>
+    </div>`;
+  }
+
+  // 위치·시간이 비슷한 신고가 있으면 관제실·담당 부서가 직접 병합 여부를 판단
+  let dupUI='';
+  if(canModerate && r.dupCandidates && r.dupCandidates.length){
+    const items=r.dupCandidates.map(d=>`
+      <div class="dup-item">
+        <div><b>${d.id}</b> · ${d.addr||'(주소 없음)'} · ${d.carrier||'-'}${d.photo?' · 📷':''}<br><span style="color:var(--ink-2);font-size:11.5px">${fmt(d.createdAt)}</span></div>
+        <div class="dup-actions">
+          <button class="dup-dismiss-btn" onclick="dismissDup('${r.id}','${d.id}')">별개 사건</button>
+          <button class="dup-merge-btn" onclick="mergeReport('${d.id}','${r.id}')">중복 · 병합</button>
+        </div>
+      </div>`).join('');
+    dupUI=`<div class="classify-box">
+      <div class="classify-h">⚠️ 위치·시간이 비슷한 신고 ${r.dupCandidates.length}건 발견</div>
+      ${items}
+    </div>`;
+  }
+
+  $('detailBody').innerHTML=`<div class="d-title">${r.id} · 신고 세부내역</div>${b}${photo}${mosaicNote}${mosaicBtn}${classifyUI}${dupUI}`;
+  $('detail').classList.add('on');
+}
+async function mergeReport(id,intoId){
+  if(!confirm(`이 신고를 중복으로 판단해 ${intoId} 신고로 병합 처리하시겠어요?\n(이 신고는 취소 처리되며, 되돌릴 수 없습니다)`)) return;
+  try{
+    await api('/api/reports/'+id+'/merge',{method:'PATCH',body:JSON.stringify({intoId})});
+    toast('중복신고로 병합 처리되었습니다');
+    closeDetail();
+    await refresh();
+  }catch(e){ toast('병합 실패 · 다시 시도'); }
+}
+async function dismissDup(id,otherId){
+  try{
+    await api('/api/reports/'+id+'/dismiss-dup',{method:'PATCH',body:JSON.stringify({otherId})});
+    toast('별개 사건으로 확인 — 다시 후보로 뜨지 않습니다');
+    closeDetail();
+    await refresh();
+  }catch(e){ toast('처리 실패 · 다시 시도'); }
+}
+async function manualClassify(id,category){
+  let subtype=null;
+  if(category==='road'){
+    subtype=prompt('세부유형을 입력하세요 (파임 / 낙하물 / 심한 균열 / 기타)','파임');
+    if(subtype===null) return; // 취소
+    if(!['파임','낙하물','심한 균열','기타'].includes(subtype)) subtype='기타';
+  }
+  try{
+    await api('/api/reports/'+id,{method:'PATCH',body:JSON.stringify({category,subtype})});
+    toast('분류가 지정되었습니다');
+    closeDetail();
+  }catch(e){ toast('분류 실패 · 다시 시도'); }
+}
+async function dismissInvalid(id){
+  if(!confirm('실제 안전·환경 위험이 아닌 신고로 판단해 종결하시겠어요?\n(예: 무관한 사진, 오조작 등 — 되돌릴 수 없습니다)')) return;
+  try{
+    await api('/api/reports/'+id+'/dismiss-invalid',{method:'PATCH'});
+    toast('오신고로 판단해 종결 처리되었습니다');
+    closeDetail();
+  }catch(e){ toast('처리 실패 · 다시 시도'); }
+}
+function closeDetail(){$('detail').classList.remove('on');}
+
+/* ============ 지자체 부서 화면 ============ */
+function renderDept(){
+  const u=me;
+  const full=visibleFor(u).filter(r=>!isMerged(r)).sort((a,b)=> (a.type===null?0:1)-(b.type===null?0:1) || (b.urgent?1:0)-(a.urgent?1:0) || b.createdAt-a.createdAt);
+  const c=counts(full);
+  const typeColor=CATS[u.type].color;
+  const urgentN=full.filter(r=>r.urgent).length;
+  const delayedN=full.filter(isDelayed).length;
+  const list = full.filter(r=>(!ctl.deptStatus||r.status===ctl.deptStatus)&&(!ctl.urgentOnly||r.urgent));
+  const sc=(key,label,color)=>`<button class="stat ${ctl.deptStatus===key?'on':''}" onclick="setDeptStatus('${key}')">
+      <div class="n" style="color:${color}">${c[key]}</div><div class="l">${label}</div></button>`;
+  const showMap = u.type!=='welfare'; // 복지과는 좌표를 수집하지 않으므로 지도 자체를 제공하지 않음
+  const mapList = full.filter(r=>ACTIVE.includes(r.status));
+  $('content').innerHTML=`
+    <div class="summary">
+      <button class="stat ${ctl.deptStatus===null?'on':''}" onclick="setDeptStatus(null)"><div class="n">${full.length}</div><div class="l">내 담당 신고</div></button>
+      <button class="stat ${ctl.urgentOnly?'on':''} ${urgentN?'alert':''}" onclick="toggleUrgentOnly()"><div class="n" style="color:${urgentN?'var(--post)':'inherit'}">🚨 ${urgentN}</div><div class="l">긴급 신고</div></button>
+      ${sc('received','접수됨',cssv('--s-received'))}
+      ${sc('checking','확인 중',cssv('--s-checking'))}
+      ${sc('hold','보류',cssv('--s-hold'))}
+      ${sc('done','처리 완료',cssv('--s-done'))}
+      <div class="stat ${delayedN?'alert':''}" style="cursor:default"><div class="n">${delayedN}</div><div class="l">10일+ 정체</div></div>
+    </div>
+    <div class="section-h">🗂 ${u.region} · <span class="filter-tag" style="background:${typeColor}">${CATS[u.type].label}</span> 신고 처리${ctl.deptStatus?` · <b>${STATUS[ctl.deptStatus].label}</b>만 보기 <button class="hcat-clear" onclick="setDeptStatus(null)">✕ 필터 해제</button>`:''}
+      <span style="margin-left:auto;font-weight:600;color:var(--ink-2);font-size:11.5px">내 지역·내 부서 신고만 표시됩니다</span></div>
+    ${showMap?`<div class="ctl-bar"><button class="map-toggle ${ctl.mapOpen?'on':''}" onclick="toggleCtlMap()">🗺 지도 ${ctl.mapOpen?'닫기':'보기'}</button></div>
+    <div id="ctlmap" class="ctlmap" style="display:${ctl.mapOpen?'block':'none'}"></div>`:''}
+    <div class="list" style="max-height:none">${list.length?list.map(r=>reportCard(r,{actions:true})).join(''):`<div class="empty">해당 조건의 신고가 없습니다.</div>`}</div>`;
+  if(showMap && ctl.mapOpen) ensureKakao(()=>{ if($('ctlmap')) drawMap(mapList); });
+}
+function setDeptStatus(s){ctl.deptStatus=s; ctl.urgentOnly=false; renderDept();}
+async function setStatus(id,st){
+  try{ await api('/api/reports/'+id,{method:'PATCH',body:JSON.stringify({status:st})}); }
+  catch(e){ toast('변경 실패'); return; }
+  await refresh();
+  toast(`상태 변경: ${STATUS[st].label}`);
+}
+async function setReason(id,val){
+  try{ await api('/api/reports/'+id,{method:'PATCH',body:JSON.stringify({reason:val})}); }catch(e){}
+}
+
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+let lbReportId=null;
+function openLightbox(e,id){ e.stopPropagation(); const r=reports.find(x=>x.id===id); if(!r||!r.photoUrl)return;
+  lbReportId=id;
+  $('lbImg').src=r.photoUrl;
+  const btn=$('lbMosaicBtn');
+  const canModerate=me.kind==='control'||me.kind==='dept';
+  btn.style.display=canModerate?'block':'none';
+  btn.textContent='🖌 사진 모자이크 처리'+(r.photoMosaic?' (다시 편집)':'');
+  $('lightbox').classList.add('on'); }
+function closeLightbox(){ $('lightbox').classList.remove('on'); }
+
+/* ============ 수동 모자이크 처리 ============
+ * 얼굴·번호판 등이 우연히 찍힌 사진을 관제실·담당 부서가 직접 가릴 수 있게 한다.
+ * AI 자동 블러는 인식 누락 위험이 있어 채택하지 않고, 사람이 눈으로 보고 필요한
+ * 부분만 모자이크(픽셀화)한 뒤 원본을 그 사진으로 교체한다. */
+let mosaicState=null; // {id, img, rects, canvas, ctx}
+function openMosaicEditor(id){
+  const r=reports.find(x=>x.id===id); if(!r||!r.photoUrl) return;
+  const img=new Image();
+  img.onload=()=>{
+    const canvas=$('mosaicCanvas');
+    const maxW=500;
+    const scale=Math.min(1, maxW/img.naturalWidth);
+    canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+    canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+    const ctx=canvas.getContext('2d');
+    mosaicState={id, img, rects:[], canvas, ctx};
+    redrawMosaicCanvas();
+    bindMosaicDrag();
+    $('mosaicModal').classList.add('on');
+  };
+  img.onerror=()=>toast('사진을 불러오지 못했습니다');
+  img.src=r.photoUrl;
+}
+function redrawMosaicCanvas(){
+  const {img,ctx,canvas,rects}=mosaicState;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  rects.forEach(rect=>pixelateRect(ctx,rect));
+}
+function pixelateRect(ctx,{x,y,w,h}){
+  if(w<=0||h<=0) return;
+  const block=Math.max(6, Math.round(Math.min(w,h)/10));
+  const data=ctx.getImageData(x,y,w,h);
+  for(let by=0; by<h; by+=block){
+    for(let bx=0; bx<w; bx+=block){
+      const bw=Math.min(block,w-bx), bh=Math.min(block,h-by);
+      let sr=0,sg=0,sb=0,n=0;
+      for(let j=0;j<bh;j++) for(let i=0;i<bw;i++){
+        const idx=((by+j)*w+(bx+i))*4;
+        sr+=data.data[idx]; sg+=data.data[idx+1]; sb+=data.data[idx+2]; n++;
+      }
+      const ar=Math.round(sr/n), ag=Math.round(sg/n), ab=Math.round(sb/n);
+      for(let j=0;j<bh;j++) for(let i=0;i<bw;i++){
+        const idx=((by+j)*w+(bx+i))*4;
+        data.data[idx]=ar; data.data[idx+1]=ag; data.data[idx+2]=ab;
+      }
+    }
+  }
+  ctx.putImageData(data,x,y);
+}
+function bindMosaicDrag(){
+  const canvas=mosaicState.canvas;
+  let dragging=false, startX=0, startY=0;
+  const pos=e=>{
+    const rect=canvas.getBoundingClientRect();
+    const t=e.touches&&e.touches[0];
+    const cx=(t?t.clientX:e.clientX)-rect.left, cy=(t?t.clientY:e.clientY)-rect.top;
+    return {x:cx*(canvas.width/rect.width), y:cy*(canvas.height/rect.height)};
+  };
+  const down=e=>{ e.preventDefault(); dragging=true; const p=pos(e); startX=p.x; startY=p.y; };
+  const move=e=>{
+    if(!dragging) return; e.preventDefault();
+    const p=pos(e);
+    redrawMosaicCanvas();
+    mosaicState.ctx.strokeStyle='#F0324F'; mosaicState.ctx.lineWidth=2;
+    mosaicState.ctx.strokeRect(Math.min(startX,p.x),Math.min(startY,p.y),Math.abs(p.x-startX),Math.abs(p.y-startY));
+  };
+  const up=e=>{
+    if(!dragging) return; dragging=false;
+    const p=pos(e);
+    const rect={x:Math.round(Math.min(startX,p.x)), y:Math.round(Math.min(startY,p.y)), w:Math.round(Math.abs(p.x-startX)), h:Math.round(Math.abs(p.y-startY))};
+    if(rect.w>6 && rect.h>6) mosaicState.rects.push(rect);
+    redrawMosaicCanvas();
+  };
+  canvas.onmousedown=down; canvas.onmousemove=move; window.onmouseup=up;
+  canvas.ontouchstart=down; canvas.ontouchmove=move; canvas.ontouchend=up;
+}
+function undoMosaicRect(){
+  if(!mosaicState||!mosaicState.rects.length) return;
+  mosaicState.rects.pop();
+  redrawMosaicCanvas();
+}
+function closeMosaicEditor(){
+  $('mosaicModal').classList.remove('on');
+  window.onmouseup=null;
+  mosaicState=null;
+}
+async function saveMosaicPhoto(){
+  if(!mosaicState) return;
+  if(!mosaicState.rects.length){ toast('가릴 영역을 먼저 선택하세요'); return; }
+  const btn=$('mosaicSaveBtn'); btn.disabled=true; btn.textContent='저장 중…';
+  const dataUrl=mosaicState.canvas.toDataURL('image/jpeg',0.85);
+  const id=mosaicState.id;
+  try{
+    await api('/api/reports/'+id+'/mosaic',{method:'PATCH',body:JSON.stringify({photoBase64:dataUrl})});
+    toast('모자이크 처리 완료');
+    closeMosaicEditor();
+    closeDetail();
+    await refresh();
+  }catch(e){ toast('저장 실패 · 다시 시도'); }
+  finally{ btn.disabled=false; btn.textContent='저장'; }
+}
+
+/* 시작 */
+boot();
+</script>
+</body>
+</html>
