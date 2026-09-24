@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>위험성평가 · 장흥우체국 안전보건</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<style>
+  :root{
+    --ink:#0E1216; --ink-2:#48525C; --line:#DDE2E7; --panel:#fff; --bg:#EEF1F4; --console:#10141A;
+    --post:#E4002B; --ok:#0B8A5B; --warn:#D98200; --danger:#C8102E; --ai:#1D4ED8; --ai-bg:#E8F1FF;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Pretendard',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;}
+  button,input,textarea,select{font-family:inherit;}
+  button{cursor:pointer;}
+  .hidden{display:none !important;}
+
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(120% 90% at 50% -10%,#232A33,#12161C 60%,#0B0E12);}
+  .lg{width:100%;max-width:400px;color:#fff;}
+  .lg h1{font-size:22px;margin:10px 0 4px;} .lg p{color:#AEB6BF;font-size:13px;margin:0 0 20px;}
+  .lg input{width:100%;border:1px solid #2E3742;background:#141A21;color:#fff;border-radius:12px;padding:14px;font-size:15px;margin-bottom:10px;}
+  .lg button{width:100%;border:none;background:var(--post);color:#fff;font-size:15px;font-weight:800;padding:15px;border-radius:12px;}
+  .lg .err{color:#FF7B7B;font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px;}
+  .badge{background:var(--post);color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:6px;}
+
+  .top{background:var(--console);color:#fff;display:flex;align-items:center;gap:12px;padding:12px 20px;position:sticky;top:0;z-index:40;}
+  .top .sys{font-weight:800;font-size:15px;} .top .sys small{display:block;font-size:11px;color:#8A94A0;font-weight:600;}
+  .top .sp{flex:1;}
+  .tbtn{border:1px solid #333B45;background:transparent;color:#C6CDD4;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:700;}
+  .tabs{display:flex;gap:6px;padding:12px 20px 0;max-width:1200px;margin:0 auto;}
+  .tab{border:1.5px solid var(--line);background:#fff;border-radius:10px 10px 0 0;padding:10px 16px;font-size:13.5px;font-weight:800;color:var(--ink-2);border-bottom:none;}
+  .tab.on{background:var(--console);color:#fff;border-color:var(--console);}
+  .tab .n{background:var(--post);color:#fff;border-radius:999px;font-size:11px;padding:1px 7px;margin-left:6px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px 20px 60px;}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+  .ph{font-size:15px;font-weight:800;margin:0 0 4px;} .psub{font-size:12.5px;color:var(--ink-2);margin:0 0 14px;}
+  .empty{border:1px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--ink-2);font-size:13px;}
+
+  /* 대기함 카드 */
+  .inbox-card{border:1px solid var(--line);border-left:5px solid var(--warn);border-radius:12px;padding:14px;margin-bottom:12px;display:flex;gap:14px;}
+  .inbox-card.carrier{border-left-color:var(--danger);}
+  .inbox-card img{width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid var(--line);flex:0 0 auto;cursor:zoom-in;background:#F3F5F7;}
+  .noimg{width:120px;height:120px;border-radius:10px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--ink-2);font-size:12px;text-align:center;flex:0 0 auto;}
+  .ic-body{flex:1;min-width:0;}
+  .ic-meta{font-size:12.5px;color:var(--ink-2);font-weight:700;}
+  .ic-meta .who{color:var(--ink);font-size:14px;font-weight:800;}
+  .src-tag{font-size:11px;font-weight:800;border-radius:5px;padding:2px 7px;color:#fff;}
+  .src-carrier{background:var(--danger);} .src-staff{background:var(--ok);} .src-transfer{background:#6D28D9;}
+  .ai-box{background:var(--ai-bg);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;}
+  .ai-box .tag{background:var(--ai);color:#fff;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 7px;margin-right:6px;}
+  .ai-box b{color:var(--ai);}
+  .row-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .btn{border:1.5px solid var(--line);background:#fff;border-radius:9px;padding:9px 14px;font-size:13px;font-weight:800;color:var(--ink);}
+  .btn.primary{background:var(--console);border-color:var(--console);color:#fff;}
+  .btn.danger{border-color:var(--danger);color:var(--danger);}
+  .btn:disabled{opacity:.5;cursor:default;}
+
+  /* 위험성평가표 */
+  .ratable{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .ratable th,.ratable td{border:1px solid var(--line);padding:7px 8px;vertical-align:middle;text-align:center;}
+  .ratable th{background:#F4F6F8;font-weight:800;color:var(--ink-2);white-space:nowrap;}
+  .ratable td.l{text-align:left;}
+  .ratable .factor{min-width:180px;} .ratable .ctrl{min-width:130px;white-space:pre-line;}
+  .ratable img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;}
+  .score{width:44px;text-align:center;border:1.5px solid var(--line);border-radius:7px;padding:6px 2px;font-size:14px;font-weight:800;}
+  .score.ai{border-color:var(--ai);background:var(--ai-bg);}
+  .rv{font-size:16px;font-weight:800;}
+  .allow{font-size:11.5px;font-weight:800;border-radius:5px;padding:2px 7px;color:#fff;display:inline-block;}
+  .allow.ok{background:var(--ok);} .allow.no{background:var(--danger);}
+  .mini{border:1.5px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;width:100%;}
+  .mini:focus,.score:focus{outline:none;border-color:var(--ai);}
+  .aihint{font-size:11px;color:var(--ai);margin-top:3px;cursor:pointer;text-decoration:underline;}
+  .save-row{font-size:11px;color:var(--ink-2);}
+  .st-pill{font-size:11px;font-weight:800;border-radius:999px;padding:2px 8px;color:#fff;}
+  .st-assessing{background:var(--warn);} .st-assessed{background:var(--ai);} .st-done{background:var(--ok);}
+
+  /* 청 보고 */
+  .rep-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0;}
+  .rep-card{background:#F7F9FA;border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;}
+  .rep-card .n{font-size:30px;font-weight:800;} .rep-card .l{font-size:12px;color:var(--ink-2);font-weight:700;margin-top:4px;}
+  .rep-sec{margin-top:16px;} .rep-sec h4{font-size:13px;margin:0 0 8px;}
+  .imp-row{display:flex;align-items:center;gap:10px;font-size:13px;padding:8px 10px;background:#F7F9FA;border-radius:9px;margin-bottom:6px;}
+  .arrow{font-weight:800;color:var(--ok);}
+  .datasrc{font-size:11.5px;color:var(--ink-2);margin-top:10px;}
+
+  .modal{position:fixed;inset:0;background:rgba(10,14,18,.6);display:none;align-items:center;justify-content:center;z-index:100;padding:16px;}
+  .modal.on{display:flex;}
+  .card{background:#fff;border-radius:16px;padding:22px;width:100%;max-width:520px;max-height:90vh;overflow:auto;}
+  .card h3{margin:0 0 12px;font-size:18px;}
+  .fld{margin-bottom:12px;} .fld label{display:block;font-size:12px;font-weight:800;color:var(--ink-2);margin-bottom:5px;}
+  .fld input,.fld textarea,.fld select{width:100%;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font-size:14px;}
+  .fld textarea{min-height:60px;resize:vertical;}
+  .lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:200;}
+  .lb.on{display:flex;} .lb img{max-width:92%;max-height:92%;border-radius:8px;}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--console);color:#fff;padding:12px 20px;border-radius:999px;font-size:13px;font-weight:700;opacity:0;transition:.25s;z-index:300;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  @media(max-width:820px){.rep-grid{grid-template-columns:repeat(2,1fr);} .wrap{padding:12px;} .ratable{font-size:11.5px;}}
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <div class="lg">
+    <span class="badge">우체국</span>
+    <h1>위험성평가 · 안전보건</h1>
+    <p>총괄국 안전보건담당자 계정으로 로그인하세요.</p>
+    <input id="lid" placeholder="아이디" autocapitalize="off" onkeydown="if(event.key==='Enter')doLogin()">
+    <input id="lpw" type="password" placeholder="비밀번호" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="err" id="lerr"></div>
+    <button onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="top">
+    <span class="badge">우체국</span>
+    <div class="sys">산업안전 위험성평가<small id="who">—</small></div>
+    <div class="sp"></div>
+    <button class="tbtn" onclick="logout()">로그아웃</button>
+  </div>
+  <div class="panel" id="on-knowledge" style="margin:12px 20px 0">안전지식 저장소 연결 상태: 로그인 후 확인</div>
+<div class="tabs">
+    <button class="tab on" id="tab-inbox" onclick="setTab('inbox')">판별 대기함 <span class="n hidden" id="inboxN"></span></button>
+    <button class="tab" id="tab-table" onclick="setTab('table')">위험성평가표</button>
+    <button class="tab" id="tab-report" onclick="setTab('report')">청 보고</button>
+  </div>
+  <div class="wrap" id="content"></div>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()"><div class="card" id="modalCard"></div></div>
+<div class="lb" id="lb" onclick="this.classList.remove('on')"><img id="lbImg" src="" alt=""></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hm=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;};
+let token=sessionStorage.getItem('cv_risk_token')||null, me=null, R=null, ws=null, poll=null, tab='inbox', reportData=null, reportDays=30;
+
+async function api(path,opts={}){
+  opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  if(token) opts.headers.Authorization='Bearer '+token;
+  const r=await fetch(path,opts);
+  if(r.status===401){ logout(); throw new Error('다시 로그인하세요'); }
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error||'요청 실패');
+  return d;
+}
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2200);}
+function lightbox(src){ $('lbImg').src=src; $('lb').classList.add('on'); }
+
+async function boot(){
+  if(token){ try{ const d=await api('/api/me'); if(d.user.kind==='safety_mgr'){ me=d.user; return enter(); } }catch(e){} }
+  $('login').classList.remove('hidden');
+}
+async function doLogin(){
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:$('lid').value.trim(),pw:$('lpw').value})});
+    const d=await r.json();
+    if(!r.ok){ $('lerr').textContent=d.error||'로그인 실패'; return; }
+    if(d.user.kind!=='safety_mgr'){ $('lerr').textContent='안전보건담당자 계정이 아닙니다.'; return; }
+    token=d.token; me=d.user; sessionStorage.setItem('cv_risk_token',token); enter();
+  }catch(e){ $('lerr').textContent='서버 연결 실패'; }
+}
+function logout(){
+  if(token) fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{});
+  token=null; me=null; sessionStorage.removeItem('cv_risk_token');
+  if(ws){ ws.onclose=null; try{ws.close();}catch(e){} } clearInterval(poll);
+  $('app').classList.add('hidden'); $('login').classList.remove('hidden');
+}
+function enter(){
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('who').textContent=`${me.org} · ${me.name}`;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const open=()=>{ if(!token) return; ws=new WebSocket(`${proto}://${location.host}?token=${token}`);
+    ws.onmessage=e=>{ try{ const t=JSON.parse(e.data).type; if(t==='risk'||t==='safety') load(); }catch(_){} };
+    ws.onclose=()=>{ if(token) setTimeout(open,3000); }; };
+  open(); poll=setInterval(load,60000); load();
+}
+function setTab(t){ tab=t; document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id==='tab-'+t)); render(); }
+
+async function load(){
+  try{ R=await api('/api/risk/state'); }catch(e){ return; }
+  $('inboxN').textContent=R.inbox.length; $('inboxN').classList.toggle('hidden',!R.inbox.length);
+  render();
+}
+const procName=id=>R.processes.find(p=>p.id===id)?.name||'-';
+function render(){
+  if(!R) return;
+  if(tab==='inbox') renderInbox();
+  else if(tab==='table') renderTable();
+  else renderReport();
+}
+
+/* ---------- 판별 대기함 ---------- */
+function renderInbox(){
+  const list=R.inbox;
+  $('content').innerHTML=`<div class="panel">
+    <div class="ph">판별 대기함</div>
+    <div class="psub">현장에서 올라온 구조위험 사진입니다. 내근직원 신고는 바로, 집배원 신고는 확인 후 위험성평가로 올리세요. AI가 위험유형·유해위험요인·강도 초안과 누적 데이터 기반 빈도를 제안합니다.</div>
+    <div id="inboxList">${list.length?list.map(inboxCard).join(''):'<div class="empty">대기 중인 신고가 없습니다.</div>'}</div>
+  </div>`;
+}
+function inboxCard(it){
+  const d=it.aiDraft||{};
+  const srcLabel = it.source==='carrier'?'집배원':it.source==='transfer'?'소통팀장 이관':'내근직원';
+  const srcCls = it.source==='carrier'?'src-carrier':it.source==='transfer'?'src-transfer':'src-staff';
+  const img = it.photoUrl ? `<img src="${it.photoUrl}" onclick="lightbox(this.src)" alt="현장 사진">` : `<div class="noimg">사진 없음<br>(음성 이관)</div>`;
+  const ai = d.factor ? `<div class="ai-box"><span class="tag">AI 초안</span>
+    위험유형 <b>${esc(d.hazardLabel||'')}</b> · 예상 공정 <b>${esc(procName(it.proc))}</b><br>
+    유해위험요인: ${esc(d.factor)}<br>
+    중대성(강도) 초안 <b>${d.severity}</b> — ${esc(d.severityText||'')}<br>
+    가능성(빈도) 초안 <b>${d.frequency}</b> — ${esc(d.frequencyReason||'')}${d.frequencyHasData?'':' <span style="color:var(--warn)">※ 데이터 부족</span>'}</div>`
+    : `<div class="ai-box"><span class="tag">AI</span> 사진 분석 중…</div>`;
+  return `<div class="inbox-card ${it.source}">
+    ${img}
+    <div class="ic-body">
+      <div class="ic-meta"><span class="who">${esc(it.reporter)}</span> · <span class="src-tag ${srcCls}">${srcLabel}</span> · ${hm(it.createdAt)}${it.reporterZone?' · '+esc(it.reporterZone):''}</div>
+      ${it.note?`<div style="font-size:13px;margin-top:6px">${esc(it.note)}</div>`:''}
+      ${it.transferNote?`<div style="font-size:12px;color:#6D28D9;margin-top:4px">↪ ${esc(it.transferNote)}</div>`:''}
+      ${ai}
+      <div class="row-btns">
+        <button class="btn primary" onclick="triage('${it.id}','promote')">위험성평가로 등록</button>
+        <button class="btn" onclick="triage('${it.id}','external')">외부(지자체) 회부</button>
+        <button class="btn danger" onclick="triage('${it.id}','invalid')">오신고 폐기</button>
+        ${it.source!=='transfer'?`<button class="btn" onclick="toUrgent('${it.id}')">지금 위험 → 긴급전파 요청</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+async function triage(id,decision){
+  if(decision!=='promote' && !confirm(decision==='external'?'외부 사안으로 회부할까요?':'오신고로 폐기할까요?')) return;
+  try{ await api('/api/risk/items/'+id+'/triage',{method:'POST',body:JSON.stringify({decision})});
+    toast(decision==='promote'?'위험성평가표에 등록했습니다':'처리했습니다');
+    if(decision==='promote') setTab('table'); else load();
+  }catch(e){ toast(e.message); }
+}
+async function toUrgent(id){
+  const text=prompt('소통팀장에게 보낼 긴급 주의 문구','현장 위험 발견 · 주의 바랍니다');
+  if(text===null) return;
+  try{ await api('/api/risk/items/'+id+'/to-urgent',{method:'POST',body:JSON.stringify({text,level:'caution',zones:'all'})}); toast('소통팀장에 전파 요청했습니다'); }
+  catch(e){ toast(e.message); }
+}
+
+/* ---------- 위험성평가표 (교재 서식) ---------- */
+function renderTable(){
+  const rows=R.registered.filter(it=>it.status==='assessing'||it.status==='assessed'||it.status==='done');
+  $('content').innerHTML=`<div class="panel">
+    <div class="ph">위험성평가표 — 공정: 소포 외 <span class="psub" style="display:inline">(위험성 = 가능성 × 중대성, ${R.threshold}점 이상 허용불가)</span></div>
+    <div class="psub">AI 초안 점수는 파란 칸입니다. 담당자가 확정하면 위험성·허용여부가 자동 계산됩니다. 빈도 근거는 밑줄을 누르면 보입니다.</div>
+    <div style="overflow-x:auto">
+    <table class="ratable">
+      <thead><tr>
+        <th>공정</th><th>작업내용</th><th>유해위험요인</th><th>현재 안전보건조치</th>
+        <th>가능성<br>(빈도)</th><th>중대성<br>(강도)</th><th>위험성</th><th>허용<br>여부</th>
+        <th>위험성 감소대책</th><th>개선후<br>위험성</th><th>개선예정</th><th>담당</th><th>상태</th>
+      </tr></thead>
+      <tbody>${rows.length?rows.map(rowHtml).join(''):'<tr><td colspan="13" class="empty">등록된 평가 항목이 없습니다. 대기함에서 등록하세요.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+function rowHtml(it){
+  const rv=it.riskValue, allow=it.allow;
+  const st={assessing:['평가중','st-assessing'],assessed:['평가완료','st-assessed'],done:['개선완료','st-done']}[it.status];
+  const freqAI=it.aiDraft&&it.frequency==null, sevAI=it.aiDraft&&it.severity==null;
+  const photo=it.photoUrl||it.beforePhotoUrl;
+  return `<tr>
+    <td>${esc(procName(it.proc))}</td>
+    <td class="l">${esc(it.workContent||'-')}</td>
+    <td class="l factor">${esc(it.factor||it.aiDraft?.factor||'-')}</td>
+    <td class="l ctrl">${photo?`<img src="${photo}" onclick="lightbox(this.src)"><br>`:''}${esc(it.currentControl||'-')}</td>
+    <td><input class="score ${freqAI?'ai':''}" id="f-${it.id}" value="${it.frequency??it.aiDraft?.frequency??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')">
+      ${it.aiDraft?.frequencyReason?`<div class="aihint" onclick="alert('${esc(it.aiDraft.frequencyReason).replace(/'/g,"\\'")}')">근거</div>`:''}</td>
+    <td><input class="score ${sevAI?'ai':''}" id="s-${it.id}" value="${it.severity??it.aiDraft?.severity??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')"></td>
+    <td class="rv">${rv??'-'}</td>
+    <td>${allow==null?'-':`<span class="allow ${allow?'ok':'no'}">${allow?'허용':'허용불가'}</span>`}</td>
+    <td class="l" style="min-width:150px">${it.reduction?esc(it.reduction):(it.aiDraft?.controls?`<span style="color:var(--ai);font-size:11.5px">AI 추천: ${it.aiDraft.controls.map(esc).join(' / ')}</span>`:'-')}</td>
+    <td>${it.afterRisk??'-'}</td>
+    <td>${esc(it.dueDate||'-')}</td>
+    <td>${esc(it.owner||'-')}</td>
+    <td><span class="st-pill ${st[1]}">${st[0]}</span><br><button class="btn" style="padding:5px 9px;margin-top:5px;font-size:11.5px" onclick="editRow('${it.id}')">상세·입력</button></td>
+  </tr>`;
+}
+async function saveScore(id){
+  const f=$('f-'+id).value.trim(), s=$('s-'+id).value.trim();
+  const body={}; if(f) body.frequency=+f; if(s) body.severity=+s;
+  try{ await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)}); load(); }catch(e){ toast(e.message); }
+}
+function editRow(id){
+  const it=R.registered.find(x=>x.id===id); const d=it.aiDraft||{};
+  const opt=(arr,cur,val,lab)=>arr.map(x=>`<option value="${x[val]}" ${cur===x[val]?'selected':''}>${x[lab]}</option>`).join('');
+  const hzArr=Object.entries(R.hazardTypes).map(([k,v])=>({k,label:v.label}));
+  $('modalCard').innerHTML=`<h3>위험성평가 상세 · ${it.id}</h3>
+    <div class="fld"><label>공정</label><select id="e-proc">${R.processes.map(p=>`<option value="${p.id}" ${it.proc===p.id?'selected':''}>${p.name}</option>`).join('')}</select></div>
+    <div class="fld"><label>작업내용</label><input id="e-work" value="${esc(it.workContent||'')}" placeholder="예: 롤파렛 취급"></div>
+    <div class="fld"><label>위험유형</label><select id="e-hz">${hzArr.map(x=>`<option value="${x.k}" ${it.hazard===x.k?'selected':''}>${x.label}</option>`).join('')}</select></div>
+    <div class="fld"><label>유해위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div>
+    <div class="fld"><label>현재 안전보건조치</label><textarea id="e-ctrl">${esc(it.currentControl||'')}</textarea></div>
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label>가능성(빈도) 1~5</label><input id="e-f" value="${it.frequency??d.frequency??''}" inputmode="numeric"></div>
+      <div class="fld" style="flex:1"><label>중대성(강도) 1~5</label><input id="e-s" value="${it.severity??d.severity??''}" inputmode="numeric"></div>
+    </div>
+    ${d.frequencyReason?`<div class="ai-box" style="margin-bottom:12px"><span class="tag">AI 빈도 근거</span>${esc(d.frequencyReason)}</div>`:''}
+    <div class="fld"><label>위험성 감소대책</label><textarea id="e-red" placeholder="${d.controls?esc(d.controls.join(' / ')):''}">${esc(it.reduction||'')}</textarea>
+      ${d.controls?`<div class="aihint" onclick="document.getElementById('e-red').value='${esc(d.controls.join('\\n')).replace(/'/g,"\\'")}'">AI 추천 대책 넣기</div>`:''}</div>
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"></div>
+      <div class="fld" style="flex:1"><label>관리부서</label><input id="e-dept" value="${esc(it.dept||'')}"></div>
+      <div class="fld" style="flex:1"><label>담당자</label><input id="e-owner" value="${esc(it.owner||'')}"></div>
+    </div>
+    <div class="row-btns">
+      <button class="btn primary" onclick="saveRow('${id}')">저장</button>
+      ${it.status!=='done'?`<button class="btn" onclick="openImprove('${id}')">개선완료 처리</button>`:''}
+      ${it.status==='done'?`<button class="btn" onclick="showResult('${id}')">이행결과서 보기</button>`:''}
+      <button class="btn" onclick="closeModal()">닫기</button>
+    </div>`;
+  $('modal').classList.add('on');
+}
+async function saveRow(id){
+  const g=x=>document.getElementById(x).value.trim();
+  const body={proc:g('e-proc'),hazard:g('e-hz'),workContent:g('e-work'),factor:g('e-factor'),currentControl:g('e-ctrl'),
+    reduction:g('e-red'),dueDate:g('e-due'),dept:g('e-dept'),owner:g('e-owner')};
+  const f=g('e-f'), s=g('e-s'); if(f)body.frequency=+f; if(s)body.severity=+s;
+  try{ await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)}); toast('저장했습니다'); closeModal(); load(); }
+  catch(e){ toast(e.message); }
+}
+function openImprove(id){
+  const it=R.registered.find(x=>x.id===id);
+  $('modalCard').innerHTML=`<h3>개선조치 완료 · ${it.id}</h3>
+    <div class="psub">개선 후 사진과 개선 후 위험성을 입력하면 이행결과서가 만들어집니다.</div>
+    <div class="fld"><label>개선 후 사진</label><input type="file" accept="image/*" id="e-after"></div>
+    <div class="fld"><label>개선 후 위험성 (숫자)</label><input id="e-arisk" value="${it.afterRisk??''}" inputmode="numeric" placeholder="예: 4"></div>
+    <div class="fld"><label>감소대책(최종)</label><textarea id="e-red2">${esc(it.reduction||'')}</textarea></div>
+    <div class="row-btns"><button class="btn primary" onclick="saveImprove('${id}')">개선완료 저장</button><button class="btn" onclick="editRow('${id}')">뒤로</button></div>`;
+}
+function fileToDataUrl(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height,M=1600;if(w>M||h>M){const s=M/Math.max(w,h);w=(w*s)|0;h=(h*s)|0;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);res(c.toDataURL('image/jpeg',0.82));};img.onerror=rej;img.src=e.target.result;};r.onerror=rej;r.readAsDataURL(f);});}
+async function saveImprove(id){
+  const body={afterRisk:document.getElementById('e-arisk').value.trim(),reduction:document.getElementById('e-red2').value.trim()};
+  const f=document.getElementById('e-after').files[0];
+  if(f){ try{ body.afterPhotoBase64=await fileToDataUrl(f); }catch(e){} }
+  try{ await api('/api/risk/items/'+id+'/improve',{method:'POST',body:JSON.stringify(body)}); toast('개선완료 처리했습니다'); closeModal(); load(); }
+  catch(e){ toast(e.message); }
+}
+function showResult(id){
+  const it=R.registered.find(x=>x.id===id);
+  const before=(it.frequency&&it.severity)?it.frequency*it.severity:'-';
+  $('modalCard').innerHTML=`<h3>개선조치 이행결과서</h3>
+    <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">
+      <div style="display:flex">
+        <div style="flex:1;text-align:center;border-right:1px solid var(--line)"><div style="background:#F4F6F8;font-size:12px;font-weight:800;padding:6px">개선 전</div>${it.beforePhotoUrl?`<img src="${it.beforePhotoUrl}" style="width:100%;height:150px;object-fit:cover" onclick="lightbox(this.src)">`:'<div class="noimg" style="width:100%;height:150px;border:none">사진 없음</div>'}</div>
+        <div style="flex:1;text-align:center"><div style="background:#F4F6F8;font-size:12px;font-weight:800;padding:6px">개선 후</div>${it.afterPhotoUrl?`<img src="${it.afterPhotoUrl}" style="width:100%;height:150px;object-fit:cover" onclick="lightbox(this.src)">`:'<div class="noimg" style="width:100%;height:150px;border:none">사진 없음</div>'}</div>
+      </div>
+      <div style="padding:12px;font-size:13px;line-height:1.7">
+        <b>유해위험요인</b> ${esc(it.factor||'-')}<br>
+        <b>감소대책</b> ${esc(it.reduction||'-')}<br>
+        <b>위험성</b> ${before} → <span style="color:var(--ok);font-weight:800">${it.afterRisk??'-'}</span><br>
+        <b>담당/부서</b> ${esc(it.owner||'-')} / ${esc(it.dept||'-')} · <b>완료</b> ${it.doneAt?hm(it.doneAt):'-'}
+      </div>
+    </div>
+    <div class="row-btns"><button class="btn" onclick="closeModal()">닫기</button></div>`;
+}
+function closeModal(){ $('modal').classList.remove('on'); }
+
+/* ---------- 청 보고 ---------- */
+async function renderReport(){
+  $('content').innerHTML=`<div class="panel">
+    <div class="ph">청 누적 보고</div>
+    <div class="psub">기간을 선택하면 그동안 쌓인 위험성평가·개선 실적이 자동 집계됩니다. 그대로 전남지방우정청에 제출할 수 있습니다.</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+      <span style="font-weight:800;font-size:13px">기간</span>
+      ${[30,60,90].map(d=>`<button class="btn ${reportDays===d?'primary':''}" onclick="setDays(${d})">최근 ${d}일</button>`).join('')}
+      <button class="btn" onclick="window.print()" style="margin-left:auto">인쇄</button>
+    </div>
+    <div id="repBody"><div class="empty">불러오는 중…</div></div>
+  </div>`;
+  try{ reportData=await api('/api/risk/report-summary?days='+reportDays); renderRepBody(); }
+  catch(e){ $('repBody').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+function setDays(d){ reportDays=d; renderReport(); }
+function renderRepBody(){
+  const r=reportData;
+  const el=$('repBody'); if(!el) return;
+  el.innerHTML=`
+    <div style="font-size:13px;color:var(--ink-2);margin-bottom:4px">${r.office} · ${new Date(r.generatedAt).toLocaleDateString('ko-KR')} 생성 · 최근 ${r.days}일</div>
+    <div class="rep-grid">
+      <div class="rep-card"><div class="n">${r.total}</div><div class="l">평가 등록</div></div>
+      <div class="rep-card"><div class="n" style="color:var(--danger)">${r.highRisk}</div><div class="l">허용불가(고위험)</div></div>
+      <div class="rep-card"><div class="n" style="color:var(--ok)">${r.actionRate==null?'-':r.actionRate+'%'}</div><div class="l">고위험 조치율</div></div>
+      <div class="rep-card"><div class="n" style="color:var(--warn)">${r.pending}</div><div class="l">미조치 잔여</div></div>
+    </div>
+    ${r.byProc.length?`<div class="rep-sec"><h4>공정별 분포</h4>${r.byProc.map(p=>`<div class="imp-row"><span style="flex:1">${esc(p.proc)}</span><b>${p.count}건</b></div>`).join('')}</div>`:''}
+    ${r.improved.length?`<div class="rep-sec"><h4>개선 전/후 위험성 감소</h4>${r.improved.map(i=>`<div class="imp-row"><span style="flex:1">${esc(i.proc||'')} · ${esc((i.factor||'').slice(0,30))}</span><b>${i.before}</b> <span class="arrow">→</span> <b style="color:var(--ok)">${i.after}</b></div>`).join('')}</div>`:''}
+    <div class="datasrc">※ 빈도 산정 데이터 출처: ${r.dataSource==='supabase'?'Supabase 누적 DB':'샘플 데이터(프로토타입) — 향후 Supabase 연결 예정'}</div>`;
+}
+boot();
+</script>
+
+<script>
+(function(){async function refreshKnowledge(){if(!window.me||me.kind!=='safety_mgr')return;try{const d=await api('/api/on/knowledge/status');document.getElementById('on-knowledge').innerHTML='<b>📚 안전지식 저장소</b> · '+(d.connected?'연결됨':'미연결')+'<p>'+d.message+'</p><small>공개 사고사례·법령·우체국 승인 자료 검색은 향후 저장소 연결 후 사용합니다. 현재 AI 초안은 검증된 외부 근거가 아니며 담당자 현장 확인이 필요합니다.</small>'; }catch(e){document.getElementById('on-knowledge').textContent=e.message;}}
+const old=window.enter;window.enter=function(...args){const r=old.apply(this,args);refreshKnowledge();return r;};})();
+</script>
+</body>
+</html>

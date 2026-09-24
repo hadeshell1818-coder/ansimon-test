@@ -1,0 +1,19 @@
+{
+  "name": "ansimon-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "안심ON 테스트 서버",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "bcryptjs": "^2.4.3",
+    "helmet": "^8.0.0",
+    "express-rate-limit": "^7.5.0"
+  }
+}
