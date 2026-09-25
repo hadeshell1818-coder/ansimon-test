@@ -1233,7 +1233,7 @@ window.openReturnReport=async function(focus){
 };
 window.closeReturnReport=function(){returnActive=false;document.getElementById('on-return-layer')?.remove();};
 async function onRefresh(){
- if(!returnActive||!window.me)return;
+ if(!returnActive||!me)return;
  const el=document.getElementById('on-return');if(!el)return;
  try{const d=await api('/api/on/return/me');const r=d.report;
  el.innerHTML=`<div class="card" style="padding:16px"><h3 style="margin:0 0 8px">업무종료 보고 <small style="font-size:12px;color:#6a7a76">${escON(d.date)}</small></h3>
@@ -1260,7 +1260,7 @@ async function onRefresh(){
  catch(e){msg.textContent=e.message||'전송 실패 · 다시 시도해 주세요';btn.disabled=false;}};
  }catch(e){el.textContent='업무종료 보고를 불러오지 못했습니다: '+e.message;}
 }
-async function noticesON(){if(!window.me)return;let host=document.getElementById('on-notices');if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}if(!host)return;try{const d=await api('/api/on/notices');host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+ (d.notices.length?d.notices.map(n=>`<div style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});}catch(e){host.textContent='공지사항 조회 실패: '+e.message;}}
+async function noticesON(){if(!me)return;let host=document.getElementById('on-notices');if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}if(!host)return;try{const d=await api('/api/on/notices');host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+ (d.notices.length?d.notices.map(n=>`<div style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});}catch(e){host.textContent='공지사항 조회 실패: '+e.message;}}
 const old=window.home;window.home=async function(...args){const r=await old.apply(this,args);await onRefresh();await noticesON();return r;};
 })();
 </script>
