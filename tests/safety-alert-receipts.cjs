@@ -29,6 +29,7 @@ const context = vm.createContext({
   toast() {},
 });
 vm.runInContext(script.slice(script.indexOf('function renderAlertSent()'), script.indexOf('function voiceDetail(')), context);
+vm.runInContext(script.slice(script.indexOf('async function openHistory('), script.indexOf('function showTab(')), context);
 context.renderAlertSent();
 assert.match(elements.alertSentList.innerHTML, /확인 1\/2명/);
 assert.match(elements.alertSentList.innerHTML, /미확인자 1명/);
@@ -36,4 +37,12 @@ assert.match(elements.alertSentList.innerHTML, /주의.*확인 0\/2명.*미확�
 context.showAlertMissing('A1');
 assert.match(dialog, /이집배/);
 assert.doesNotMatch(dialog, /김집배/);
+context.H = { alerts: context.S.alerts };
+context.alertDetail('A1');
+assert.match(dialog, /수정·재발송/);
+assert.match(dialog, /deleteAlert/);
+context.H.alerts[0].deletedAt = '2026-09-25T02:00:00Z';
+context.alertDetail('A1');
+assert.match(dialog, /삭제된 알림/);
+assert.doesNotMatch(dialog, /deleteAlert/);
 console.log('PASS: sent alert receipt count and missing recipient list');

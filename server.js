@@ -1235,7 +1235,7 @@ app.get('/api/safety/state', (req, res) => {
       push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
       calls: SAFE.calls.filter(c => isToday(c.at)).map(c => ({ ...c, carrier: carrierLabel(rosterById(c.carrierId)) })),
-      alerts: SAFE.alerts.filter(a => isToday(a.createdAt)),
+      alerts: SAFE.alerts.filter(a => !a.deletedAt && isToday(a.createdAt)),
       shifts: shiftRows(today),
     });
   }
@@ -1244,9 +1244,11 @@ app.get('/api/safety/state', (req, res) => {
   const day = (SAFE.shifts[today] || {})[me.id];
   res.json({
     role: 'carrier', today, callNumber: SAFETY_CALL_NUMBER, me: { id: me.id, name: me.name, zone: me.zone, zoneName: zoneById(me.zone)?.name },
-    alerts: SAFE.alerts.filter(a => a.targets.includes(me.id) &&
+    alerts: SAFE.alerts.filter(a => !a.deletedAt && a.targets.includes(me.id) &&
       (isToday(a.createdAt) || (a.repeatUntilAck && !(a.acks || {})[me.id])))
-      .map(a => ({ id: a.id, level: a.level, text: a.text, createdAt: a.createdAt, sender: a.sender, acked: !!(a.acks || {})[me.id] })),
+      .map(a => ({ id: a.id, level: a.level, text: a.text, createdAt: a.createdAt,
+        updatedAt: a.updatedAt, version: a.version || 0, sender: a.sender,
+        acked: !!(a.acks || {})[me.id] })),
     myHazards: SAFE.hazards.filter(h => h.carrierId === me.id && isToday(h.createdAt))
       .map(h => ({ id: h.id, createdAt: h.createdAt, transcript: h.transcript, status: h.status })),
     shift: day ? { status: day.status, source: day.source, at: day.at } : null,
@@ -1307,7 +1309,7 @@ function createAlert(u, b) {
   const a = {
     id: nextSafeId('A'), level, text, zones, targets: alertTargets(zones),
     createdAt: new Date().toISOString(), sender: `${u.org} ${u.name}`, acks: {},
-    repeatUntilAck: true, lastPushAt: Date.now(),
+    repeatUntilAck: true, lastPushAt: Date.now(), version: 1,
   };
   SAFE.alerts.unshift(a);
   return a;
@@ -1345,7 +1347,7 @@ async function resendUnacknowledged(now = Date.now()) {
   const jobs = [];
   let changed = false;
   for (const item of [...SAFE.alerts, ...(SAFE.notices || [])]) {
-    if (!item.repeatUntilAck) continue;
+    if (!item.repeatUntilAck || item.deletedAt) continue;
     const pending = item.targets.filter(id => !(item.acks || {})[id]);
     if (!pending.length) { item.repeatUntilAck = false; changed = true; continue; }
     if (now - item.lastPushAt < PUSH_REPEAT_MS) continue;
@@ -1366,6 +1368,32 @@ app.post('/api/safety/alerts', (req, res) => {
   saveSafety(); broadcastSafety();
   sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok: true, alert: a });
+});
+app.patch('/api/safety/alerts/:id', (req, res) => {
+  const u = userFromReq(req);
+  if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const a = SAFE.alerts.find(x => x.id === req.params.id && !x.deletedAt);
+  if (!a) return res.status(404).json({ error: '알림을 찾을 수 없습니다.' });
+  const level = req.body?.level, text = String(req.body?.text || '').trim().slice(0, 200);
+  if (!LEVELS[level] || !text) return res.status(400).json({ error: '단계와 내용을 확인하세요.' });
+  a.edits = a.edits || [];
+  a.edits.push({ level:a.level, text:a.text, at:new Date().toISOString(), by:u.name });
+  a.level = level; a.text = text; a.updatedAt = new Date().toISOString();
+  a.updatedBy = u.name; a.version = (a.version || 1) + 1;
+  a.acks = {}; a.repeatUntilAck = true; a.lastPushAt = Date.now();
+  saveSafety(); broadcastSafety();
+  sendSafetyPush(a).catch(e => console.error('safety push', e.message));
+  res.json({ ok:true, alert:a });
+});
+app.delete('/api/safety/alerts/:id', (req, res) => {
+  const u = userFromReq(req);
+  if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const a = SAFE.alerts.find(x => x.id === req.params.id && !x.deletedAt);
+  if (!a) return res.status(404).json({ error: '알림을 찾을 수 없습니다.' });
+  a.deletedAt = new Date().toISOString(); a.deletedBy = u.name;
+  a.repeatUntilAck = false;
+  saveSafety(); broadcastSafety();
+  res.json({ ok:true });
 });
 
 app.get('/api/push/config', (req, res) => {
@@ -1391,7 +1419,10 @@ app.post('/api/push/subscribe', (req, res) => {
 app.post('/api/safety/alerts/:id/ack', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const a = SAFE.alerts.find(x => x.id === req.params.id);
-  if (!a || !a.targets.includes(me.id)) return res.status(404).json({ error: 'not found' });
+  if (!a || a.deletedAt || !a.targets.includes(me.id)) return res.status(404).json({ error: 'not found' });
+  if (req.body?.version != null && Number(req.body.version) !== (a.version || 0)) {
+    return res.status(409).json({ error: '알림 내용이 변경되었습니다. 새 내용을 확인해 주세요.' });
+  }
   a.acks = a.acks || {};
   if (!a.acks[me.id]) {
     a.acks[me.id] = new Date().toISOString();
