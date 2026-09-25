@@ -492,10 +492,66 @@ else {
 /* ===================== 역할별 조회 필터 ===================== */
 function visibleReports(user) {
   if (user.kind === 'control') return reports;
-  if (user.kind === 'dept') return reports.filter(r => r.region === user.region && r.type === user.type);
+  if (user.kind === 'dept') return reports.filter(r => (!r.routing || r.routing === 'external') && r.region === user.region && r.type === user.type);
   if (user.kind === 'carrier') return reports.filter(r => r.carrierId === user.id);
   return [];
 }
+
+
+/* Routing is separate from photo classification; one report owns its linked risk task. */
+function reportRoute(r) {
+  if (r.type === 'welfare' || r.type === 'env') return 'external';
+  if (r.routeChoice === 'internal' || r.requestedInternal) return 'internal';
+  if (r.routeChoice === 'external') return 'external';
+  if (r.type !== 'safe') return 'external';
+  if (/우체국|우편집중국|집배센터/.test(r.buildingName || '') ||
+      /우체국|우편집중국|집배센터/.test(r.addr || '')) return 'confirmation';
+  return 'external';
+}
+function routeReport(r) {
+  const routing = reportRoute(r);
+  if (r.routing !== routing) {
+    r.routingHistory = r.routingHistory || [];
+    r.routingHistory.push({from:r.routing, to:routing, at:new Date().toISOString()});
+  }
+  r.routing = routing;
+  const existing = RISK.items.find(it => it.fromReport === r.id);
+  if (routing !== 'internal') {
+    if (existing) { existing.routingInactive = true; saveRisk(); broadcastRisk(); }
+    return;
+  }
+  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; saveRisk(); broadcastRisk(); return; }
+  const photoFile = r.photoUrl ? path.basename(r.photoUrl.split('?')[0]) : null;
+  const item = {
+    id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier',
+    reporter:r.carrier, reporterOrg:r.reporterOrg, createdAt:new Date().toISOString(),
+    addr:r.addr, lat:r.lat, lng:r.lng,
+    note:[r.addr, r.item, r.memo].filter(Boolean).join(' · '),
+    photoFile, beforePhotoFile:photoFile, afterPhotoFile:null,
+    proc:null, hazard:null, aiMode:'review', aiDraft:null,
+    factor:null, currentControl:null, frequency:null, severity:null,
+    reduction:null, afterRisk:null, dueDate:null, dept:null, owner:null, doneAt:null
+  };
+  RISK.items.unshift(item);
+  r.riskId=item.id;
+  saveRisk(); broadcastRisk();
+}
+app.get('/api/reports/:id/routing', (req,res) => {
+  const u=userFromReq(req), r=reports.find(x=>x.id===req.params.id);
+  if(!u || !r || r.carrierId!==u.id) return res.status(404).json({error:'not found'});
+  res.json({id:r.id,routing:r.routing||'external',type:r.type,addr:r.addr,
+    aiMode:r.aiMode||null,classificationPending:r.aiMode==null||r.aiMode==='pending'});
+});
+app.post('/api/reports/:id/routing', (req,res) => {
+  const u=userFromReq(req), r=reports.find(x=>x.id===req.params.id);
+  if(!u || !r || r.carrierId!==u.id) return res.status(404).json({error:'not found'});
+  if(r.routing!=='confirmation') return res.status(409).json({error:'내부 여부 확인 대상이 아닙니다.'});
+  const choice=req.body?.choice;
+  if(!['internal','external'].includes(choice)) return res.status(400).json({error:'내부·외부를 선택하세요.'});
+  r.routeChoice=choice;
+  routeReport(r); save(); broadcast();
+  res.json({ok:true,routing:r.routing});
+});
 
 /* ===================== 중복신고 후보 탐지 =====================
  * 같은 분야·같은 항목이고, 위치가 가깝고(200m 이내), 접수 시각이 가깝고(72시간 이내),
@@ -548,7 +604,7 @@ function savePhoto(id, dataUrl) {
 function canViewReport(user, report) {
   if (!user || !report) return false;
   if (user.kind === 'control') return true;
-  if (user.kind === 'dept') return report.region === user.region && report.type === user.type;
+  if (user.kind === 'dept') return (!report.routing || report.routing === 'external') && report.region === user.region && report.type === user.type;
   if (user.kind === 'carrier') return report.carrierId === user.id;
   return false;
 }
@@ -657,6 +713,8 @@ app.post('/api/reports', reportLimiter, (req, res) => {
   const r = {
     id, type: b.type || null, item: b.item || null, subtype: null, region: b.region || u.region || '장흥군',
     addr: b.addr || '', lat: b.lat ?? null, lng: b.lng ?? null,
+    buildingName: String(b.buildingName || '').slice(0,100),
+    requestedInternal: b.requestedInternal === true, routing: 'review',
     status: 'received', reason: '', memo: b.memo || '',
     photo: !!photoUrl, photoUrl, welfare: b.welfare || null,
     photoPrivacy: photoUrl ? (b.photoPrivacy || 'client-mask-unknown') : null,
@@ -668,7 +726,7 @@ app.post('/api/reports', reportLimiter, (req, res) => {
     edited: false, editedAt: null, cancelledAt: null, cancelledBy: null,
     photoMosaic: false, mosaicBy: null, mosaicAt: null, mergedInto: null, dupDismissed: [], invalidReport: false,
   };
-  reports.unshift(r); save(); broadcast();
+  reports.unshift(r); routeReport(r); save(); broadcast();
   res.json({ report: publicReport(u, r) });
 
   if (needsClassification && photoUrl) {
@@ -688,18 +746,15 @@ async function classifyReport(r, photoBase64) {
   let mapped = null, subtype = null, aiMode;
   const cats = Object.keys(CATEGORY_MAP);
   if (!key) {
-    aiMode = 'stub';
-    const cat = Math.random() < 0.1 ? 'invalid' : cats[Math.floor(Math.random() * cats.length)];
-    if (cat === 'invalid') { aiMode = 'invalid'; }
-    else { mapped = CATEGORY_MAP[cat]; if (cat === 'road') subtype = ['파임', '낙하물', '심한 균열', '기타'][Math.floor(Math.random() * 4)]; }
+    aiMode = 'error';
   } else {
     try {
       const prompt = `이 사진은 우체국 집배원이 "안전·환경 위험 신고"를 위해 촬영한 사진입니다.
-먼저 사진이 실제로 도로·시설물·환경 문제를 보여주는지 판단하세요. 사람 신체 일부, 얼굴, 하늘, 실내, 문서, 음식, 동물 등 안전·환경 위험과 무관한 내용이면 invalid로 분류하세요.
+먼저 사진이 실제로 도로·시설물·환경 문제를 보여주는지 판단하세요. 위험요소가 없는 사람 신체 일부, 얼굴, 하늘, 문서, 음식, 동물 등 안전·환경 위험과 무관한 내용이면 invalid로 분류하세요.
 
 실제 안전·환경 문제가 보이면 다음 중 하나로 분류하세요:
 - road: 도로위험 (파임·낙하물·심한 균열 등)
-- facility: 시설물 파손·고장 (신호등·가로등·소화전·공원시설 등)
+- facility: 시설물 파손·고장 (건물 내부 계단·바닥·난간 파손, 신호등·가로등·소화전·공원시설 등)
 - safe_other: 위 두 가지에 해당하지 않는 기타 안전위험요소
 - waste: 쓰레기·폐기물 방치
 - env_other: 위에 해당하지 않는 기타 환경위험
@@ -752,13 +807,14 @@ JSON만 답하세요: {"category":"road|facility|safe_other|waste|env_other|inva
   if (!live) return;
   if (mapped) { live.type = mapped.type; live.item = mapped.item; live.subtype = subtype; }
   live.aiMode = aiMode;
+  routeReport(live);
   save(); broadcast();
 }
 
 app.patch('/api/reports/:id', (req, res) => {
   const u = userFromReq(req); if (!u || (u.kind !== 'dept' && u.kind !== 'control')) return res.status(403).json({ error: 'forbidden' });
   const r = reports.find(x => x.id === req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
-  if (u.kind === 'dept' && (r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
+  if (u.kind === 'dept' && ((r.routing && r.routing !== 'external') || r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
   const b = req.body || {};
   if (b.status) {
     r.status = b.status;
@@ -772,6 +828,7 @@ app.patch('/api/reports/:id', (req, res) => {
     r.aiMode = 'manual';
   }
   r.updatedAt = new Date().toISOString();
+  routeReport(r);
   save(); broadcast();
   res.json({ report: publicReport(u, r) });
 });
@@ -781,7 +838,7 @@ app.patch('/api/reports/:id', (req, res) => {
 app.patch('/api/reports/:id/merge', (req, res) => {
   const u = userFromReq(req); if (!u || (u.kind !== 'dept' && u.kind !== 'control')) return res.status(403).json({ error: 'forbidden' });
   const r = reports.find(x => x.id === req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
-  if (u.kind === 'dept' && (r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
+  if (u.kind === 'dept' && ((r.routing && r.routing !== 'external') || r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
   const intoId = (req.body || {}).intoId;
   const into = reports.find(x => x.id === intoId);
   if (!into) return res.status(400).json({ error: '병합 대상 신고를 찾을 수 없습니다.' });
@@ -802,7 +859,7 @@ app.patch('/api/reports/:id/merge', (req, res) => {
 app.patch('/api/reports/:id/dismiss-dup', (req, res) => {
   const u = userFromReq(req); if (!u || (u.kind !== 'dept' && u.kind !== 'control')) return res.status(403).json({ error: 'forbidden' });
   const r = reports.find(x => x.id === req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
-  if (u.kind === 'dept' && (r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
+  if (u.kind === 'dept' && ((r.routing && r.routing !== 'external') || r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
   const other = reports.find(x => x.id === (req.body || {}).otherId);
   if (!other) return res.status(400).json({ error: '대상 신고를 찾을 수 없습니다.' });
   r.dupDismissed = r.dupDismissed || [];
@@ -820,7 +877,7 @@ app.patch('/api/reports/:id/dismiss-dup', (req, res) => {
 app.patch('/api/reports/:id/dismiss-invalid', (req, res) => {
   const u = userFromReq(req); if (!u || (u.kind !== 'dept' && u.kind !== 'control')) return res.status(403).json({ error: 'forbidden' });
   const r = reports.find(x => x.id === req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
-  if (u.kind === 'dept' && (r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
+  if (u.kind === 'dept' && ((r.routing && r.routing !== 'external') || r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
   r.status = 'cancelled';
   r.reason = `${u.kind === 'control' ? '관제실' : (u.org || u.role)}이 무관한 신고(오조작·해당없음)로 판단해 종결 처리함`;
   r.cancelledAt = new Date().toISOString();
@@ -837,7 +894,7 @@ app.patch('/api/reports/:id/dismiss-invalid', (req, res) => {
 app.patch('/api/reports/:id/mosaic', (req, res) => {
   const u = userFromReq(req); if (!u || (u.kind !== 'dept' && u.kind !== 'control')) return res.status(403).json({ error: 'forbidden' });
   const r = reports.find(x => x.id === req.params.id); if (!r) return res.status(404).json({ error: 'not found' });
-  if (u.kind === 'dept' && (r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
+  if (u.kind === 'dept' && ((r.routing && r.routing !== 'external') || r.region !== u.region || r.type !== u.type)) return res.status(403).json({ error: '관할 아님' });
   if (!r.photo || !r.photoUrl) return res.status(400).json({ error: '사진이 없는 신고입니다.' });
   const b = req.body || {};
   if (!b.photoBase64) return res.status(400).json({ error: '모자이크 처리된 사진이 필요합니다.' });
@@ -892,6 +949,7 @@ app.patch('/api/reports/:id/edit', (req, res) => {
 
   r.edited = true;
   r.editedAt = new Date().toISOString();
+  routeReport(r);
   save(); broadcast();
   res.json({ report: publicReport(u, r) });
 
@@ -1654,8 +1712,8 @@ app.get('/api/risk/state', async (req, res) => {
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
     sevText: SEV_TEXT, freqText: FREQ_TEXT, threshold: RISK_THRESHOLD,
-    inbox: RISK.items.filter(it => it.status === 'inbox').map(itemForMgr),
-    registered: RISK.items.filter(it => it.status !== 'inbox').map(itemForMgr),
+    inbox: RISK.items.filter(it => !it.routingInactive && it.status === 'inbox').map(itemForMgr),
+    registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
   });
 });
 
@@ -1730,7 +1788,11 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const dec = (req.body || {}).decision;
   if (dec === 'promote') it.status = 'assessing';
-  else if (dec === 'external') { it.status = 'discarded'; it.discardReason = '외부(지자체) 사안으로 회부'; }
+  else if (dec === 'external') {
+    it.status = 'discarded'; it.discardReason = '외부(지자체) 사안으로 회부';
+    const original=reports.find(r=>r.id===it.fromReport);
+    if(original){ original.requestedInternal=false; original.routeChoice='external'; routeReport(original); save(); broadcast(); }
+  }
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();

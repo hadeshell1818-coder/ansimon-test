@@ -213,7 +213,7 @@ function inboxCard(it){
     유해위험요인: ${esc(d.factor)}<br>
     중대성(강도) 초안 <b>${d.severity}</b> — ${esc(d.severityText||'')}<br>
     가능성(빈도) 초안 <b>${d.frequency}</b> — ${esc(d.frequencyReason||'')}${d.frequencyHasData?'':' <span style="color:var(--warn)">※ 데이터 부족</span>'}</div>`
-    : `<div class="ai-box"><span class="tag">AI</span> 사진 분석 중…</div>`;
+    : `<div class="ai-box"><span class="tag">AI</span> ${it.aiMode==='review'?'내부 안전신고 · 담당자 위험요인 검토 대기':'사진 분석 중…'}</div>`;
   return `<div class="inbox-card ${it.source}">
     ${img}
     <div class="ic-body">

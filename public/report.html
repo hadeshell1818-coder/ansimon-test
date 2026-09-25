@@ -418,6 +418,7 @@ function startQuickReport(){
   $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="home()">‹ 뒤로</button></div>
     <div class="h" style="font-size:18px">사진을 찍으면 위치까지<br>자동으로 접수됩니다</div>
     <div style="font-size:12.5px;color:var(--ink-2);margin:-6px 0 16px">분야는 AI가 자동으로 분류해요. 잘못 분류되면 나중에 직접 고칠 수 있어요.<br>※ 갤러리 사진은 촬영 당시 위치와 다를 수 있어 위치를 직접 선택해요.<br>📷 HTTPS 암호화 전송 · 사진은 서명형 만료 URL로만 접근 가능합니다.</div>
+    <label style="display:block;margin-bottom:12px"><input type="checkbox" onchange="cur.requestedInternal=this.checked"> 내부 업무위험</label>
     <button class="urgent-toggle" id="urgentBtn" onclick="toggleUrgent()">🚨 지금 위험한 상황이에요 (즉시 조치 필요)</button>
     <input type="file" accept="image/*" capture="environment" class="hidden" id="cam" onchange="onQuickPhoto(event,true)">
     <input type="file" accept="image/*" class="hidden" id="camGallery" onchange="onQuickPhoto(event,false)">
@@ -488,10 +489,11 @@ async function submitWithManualLocation(){
   const btn=$('saveBtn'); btn.disabled=true; btn.textContent='접수 중…';
   cur.addr=address;
   try{
-    await api('/api/reports',{method:'POST',body:JSON.stringify({
+    const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:hasCoordinates?cur.lat:null, lng:hasCoordinates?cur.lng:null,
+      buildingName:cur.buildingName||'', requestedInternal:!!cur.requestedInternal,
       memo:cur.memo||'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
-    doneScreen();
+    await reportRoutingScreen(result.report.id);
   }catch(e){ btn.disabled=false; btn.textContent='위치 확정하고 접수 ›'; toast('전송 실패 · 다시 시도해 주세요'); }
 }
 async function quickSubmit(lat,lng){
@@ -505,6 +507,7 @@ async function quickSubmit(lat,lng){
           if(st===kakao.maps.services.Status.OK&&r[0]){
             const road=r[0].road_address, jibun=r[0].address;
             cur.addr=(road&&road.address_name)||(jibun&&jibun.address_name)||'';
+            cur.buildingName=road?.building_name||'';
             cur.region=regionFromKakaoAddr(jibun)||regionFromKakaoAddr(road)||me.region;
           }
           res();
@@ -519,11 +522,60 @@ async function quickSubmit(lat,lng){
   }catch(e){ /* 주소 실패해도 좌표는 있으니 계속 진행 */ }
 
   try{
-    await api('/api/reports',{method:'POST',body:JSON.stringify({
+    const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
+      buildingName:cur.buildingName||'', requestedInternal:!!cur.requestedInternal,
       memo:cur.memo||'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
-    doneScreen();
+    await reportRoutingScreen(result.report.id);
   }catch(e){ toast('전송 실패 · 다시 시도해 주세요'); home(); }
+}
+
+
+let routingView=0;
+async function reportRoutingScreen(id){
+  const version=++routingView;
+  $('cw').innerHTML='<div class="h">신고 접수 완료</div><p id="routeState" role="status">신고 분류 확인 중…</p><div id="routeActions"></div>';
+  const state=$('routeState'),actions=$('routeActions');
+  const active=()=>routingView===version&&$('routeState')===state;
+  const show=async()=>{
+    try{
+      const r=await api('/api/reports/'+encodeURIComponent(id)+'/routing');
+      if(!active())return;
+      if(r.routing==='confirmation'){
+        state.textContent='우체국 내의 위험인가요?';
+        actions.innerHTML='<button class="save" data-choice="internal">예 · 우체국 내부</button><button class="save" data-choice="external">아니요 · 외부 위험</button>';
+        actions.querySelectorAll('[data-choice]').forEach(btn=>btn.onclick=async()=>{
+          actions.querySelectorAll('button').forEach(b=>b.disabled=true);
+          try{
+            await api('/api/reports/'+encodeURIComponent(id)+'/routing',{method:'POST',body:JSON.stringify({choice:btn.dataset.choice})});
+            await show();
+          }catch(error){toast(error.message);actions.querySelectorAll('button').forEach(b=>b.disabled=false);}
+        });
+        return;
+      }
+      if(r.routing==='review'){
+        state.textContent='접수되었습니다. 분류·담당 확인 대기 중입니다.';
+        actions.innerHTML='<button class="save">다시 확인</button>';
+        actions.firstElementChild.onclick=show;
+        return;
+      }
+      if(r.classificationPending){
+        state.textContent='신고 내용을 분류 중입니다…';
+        actions.innerHTML='';
+        return true;
+      }
+      state.textContent=r.routing==='internal'?'우체국 안전관리담당자에게 접수되었습니다.':'외부 관할 담당부서 접수함으로 배정되었습니다.';
+      actions.innerHTML='<button class="save">홈으로</button>';
+      actions.firstElementChild.onclick=home;
+      return false;
+    }catch(error){if(active()){state.textContent='신고는 접수되었습니다. 배정 상태를 다시 확인해 주세요.';actions.innerHTML='<button class="save">다시 확인</button>';actions.firstElementChild.onclick=show;}}
+  };
+  let pending=await show();
+  for(let i=0;i<15&&active();i++){
+    if(!pending)break;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    if(active())pending=await show();
+  }
 }
 
 let kakaoLoading=false, kakaoCbs=[];
@@ -623,6 +675,7 @@ async function searchAddr(){
         if(!address)return;
         // Keep the chosen address even when coordinate lookup is unavailable.
         cur.lat=null;cur.lng=null;cur.addr=address;
+        cur.buildingName=data.buildingName||'';
         cur.region=data.sigungu||'';
         $('addr').value=address;
         setLocReady();
@@ -705,6 +758,7 @@ async function viewReportDetail(id){
   try{ mine=(await api('/api/reports')).reports; }catch(e){ toast('불러오기 실패'); return; }
   const r=mine.find(x=>x.id===id);
   if(!r){ toast('신고를 찾을 수 없습니다'); return; }
+  if(r.routing==='confirmation') return reportRoutingScreen(r.id);
   const LOCKED=['done','noaction','cancelled'];
   const unclassified = r.type===null;
   const pending = unclassified && r.aiMode===null; // 아직 AI 처리 중 (수정 막아야 - 충돌 방지)
