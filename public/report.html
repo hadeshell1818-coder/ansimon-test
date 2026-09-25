@@ -205,6 +205,11 @@
   .history-link{width:100%;border:1px solid #dce5ee;border-radius:13px;background:#fff;padding:14px 15px;text-align:left;font-size:13px;font-weight:750;color:#4b627b;font-family:inherit;box-shadow:0 2px 9px rgba(35,55,80,.04);}.history-link span{float:right;font-size:17px;color:#3b82c4}
   .history-link:active{transform:scale(.985);background:#f5f9ff;}
   .home-emergency-note{font-size:10.5px;color:#7b858f;text-align:center;line-height:1.5;margin-top:12px}
+  .addr-results{display:grid;gap:7px;margin-top:9px;max-height:250px;overflow:auto;}
+  .addr-result{width:100%;border:1px solid #d8e1e8;border-radius:10px;background:#fff;padding:10px 11px;text-align:left;font:inherit;color:#263746;}
+  .addr-result b{display:block;font-size:13px;line-height:1.4;}
+  .addr-result span{display:block;margin-top:3px;font-size:11px;line-height:1.35;color:#74808b;}
+  .addr-result:active{background:#eef6ff;border-color:#73a9da;}
   .return-overlay{position:fixed;inset:0;z-index:2100;background:#f6f8f9;overflow:auto;padding:16px 16px 36px;}
   .return-overlay .return-head{max-width:480px;margin:0 auto 12px;display:flex;align-items:center;gap:12px;font-size:17px;font-weight:800}
   .return-overlay .return-back{border:1px solid #dbe3e6;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;font-size:13px}
@@ -587,6 +592,27 @@ function addressQueries(raw){
   const province=region==='장흥군'?'전라남도 ':'';
   return [...new Set([raw,spaced,region&&`${region} ${spaced}`,province&&`${province}${region} ${spaced}`].filter(Boolean))];
 }
+let addressCandidates=[];
+function selectAddressCandidate(index){
+  const c=addressCandidates[index], msg=$('addrMsg'); if(!c||!msg)return;
+  applySearchedLocation(c.lat,c.lng,c.address,c.region,msg);
+}
+function renderAddressCandidates(items,msg){
+  const unique=[];
+  for(const item of items){
+    const key=`${item.lat.toFixed(6)},${item.lng.toFixed(6)},${item.address}`;
+    if(!unique.some(x=>x.key===key)) unique.push({...item,key});
+  }
+  addressCandidates=unique.slice(0,10);
+  if(!addressCandidates.length){
+    msg.textContent='주소를 찾지 못했습니다. 예: 전라남도 장흥군 장흥읍 장흥로 15';
+    msg.style.color='#C70026';
+    return;
+  }
+  msg.style.color='#3A4550';
+  msg.innerHTML=`<div style="font-size:12px;font-weight:800;margin-top:9px">검색 결과 ${addressCandidates.length}건 · 주소를 선택하세요</div><div class="addr-results">${addressCandidates.map((c,i)=>`<button type="button" class="addr-result" data-addr-index="${i}"><b>${sfEsc(c.address)}</b>${c.detail?`<span>${sfEsc(c.detail)}</span>`:''}</button>`).join('')}</div>`;
+  msg.querySelectorAll('[data-addr-index]').forEach(btn=>btn.onclick=()=>selectAddressCandidate(Number(btn.dataset.addrIndex)));
+}
 
 function searchAddr(){
   const q=($('addrTyped')&&$('addrTyped').value||'').trim();
@@ -596,51 +622,35 @@ function searchAddr(){
   msg.textContent='주소 확인 중…';
   msg.style.color='#3A4550';
 
-  ensureKakao(()=>{
+  ensureKakao(async()=>{
     if(!(KAKAO_KEY&&kakaoReady&&window.kakao&&kakao.maps&&kakao.maps.services)){
       msg.textContent='지도 서비스를 준비 중입니다. 잠시 후 다시 눌러 주세요.';
       msg.style.color='#3A4550';
       return;
     }
 
-    const geo=new kakao.maps.services.Geocoder(), queries=addressQueries(q);
-
-    // 정확한 주소부터 지역명이 보완된 주소까지 순서대로 확인한다.
-    const tryAddress=i=>{
-      if(i>=queries.length) return tryKeyword(0);
-      geo.addressSearch(queries[i],(res,st)=>{
-        if(st!==kakao.maps.services.Status.OK || !res[0]) return tryAddress(i+1);
-        const la=parseFloat(res[0].y), ln=parseFloat(res[0].x);
-        const r=res[0].road_address, j=res[0].address;
-        const shown=(r&&r.address_name)||(j&&j.address_name)||queries[i];
-        const region=regionFromKakaoAddr(j)||regionFromKakaoAddr(r)||(me&&me.region);
-        applySearchedLocation(la,ln,shown,region,msg);
-      });
-    };
-
-    // 주소 DB에 없으면 읍·면·건물명 검색으로 한 번 더 찾는다.
-    const places=new kakao.maps.services.Places();
-    const tryKeyword=i=>{
-      if(i>=queries.length){
-        msg.textContent='주소를 찾지 못했습니다. 예: 전라남도 장흥군 장흥읍 장흥로 15';
-        msg.style.color='#C70026';
-        return;
-      }
-      places.keywordSearch(queries[i],(data,status)=>{
-        if(status!==kakao.maps.services.Status.OK || !data || !data[0]) return tryKeyword(i+1);
-        const p=data[0], la=parseFloat(p.y), ln=parseFloat(p.x);
-        const shown=p.road_address_name||p.address_name||p.place_name||queries[i];
-        geo.coord2Address(ln,la,(cres,cst)=>{
-          let region=(me&&me.region);
-          if(cst===kakao.maps.services.Status.OK && cres[0]){
-            const cr=cres[0].road_address, cj=cres[0].address;
-            region=regionFromKakaoAddr(cj)||regionFromKakaoAddr(cr)||region;
-          }
-          applySearchedLocation(la,ln,shown,region,msg);
-        });
-      });
-    };
-    tryAddress(0);
+    const geo=new kakao.maps.services.Geocoder(), places=new kakao.maps.services.Places(), queries=addressQueries(q);
+    const addressSearch=query=>new Promise(resolve=>geo.addressSearch(query,(data,status)=>resolve(status===kakao.maps.services.Status.OK?(data||[]):[])));
+    const keywordSearch=query=>new Promise(resolve=>places.keywordSearch(query,(data,status)=>resolve(status===kakao.maps.services.Status.OK?(data||[]):[])));
+    const [addressSets,placeSets]=await Promise.all([
+      Promise.all(queries.map(addressSearch)),
+      Promise.all(queries.map(keywordSearch)),
+    ]);
+    const items=[];
+    addressSets.flat().forEach(result=>{
+      const road=result.road_address, jibun=result.address;
+      const address=(road&&road.address_name)||(jibun&&jibun.address_name);
+      if(!address)return;
+      const detail=road&&jibun&&road.address_name!==jibun.address_name?`지번 ${jibun.address_name}`:'';
+      items.push({lat:parseFloat(result.y),lng:parseFloat(result.x),address,detail,region:regionFromKakaoAddr(jibun)||regionFromKakaoAddr(road)||(me&&me.region)});
+    });
+    placeSets.flat().forEach(place=>{
+      const address=place.road_address_name||place.address_name||place.place_name;
+      if(!address)return;
+      const detail=[place.place_name,place.address_name].filter(v=>v&&v!==address).join(' · ');
+      items.push({lat:parseFloat(place.y),lng:parseFloat(place.x),address,detail,region:(me&&me.region)});
+    });
+    renderAddressCandidates(items,msg);
   });
 }
 function resetMapEl(){
