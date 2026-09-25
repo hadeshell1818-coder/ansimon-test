@@ -977,7 +977,7 @@ function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');
  *  - 안전 알림 수신: 긴급=화면 고정+긴 진동+경고음+음성, 확인 필수 / 주의·전달말씀=진동+상단 흐르는 글자
  * 구역 명부에 없는 계정(예: 영업과 직원)은 이 기능이 보이지 않는다.
  * ===================================================================== */
-let SF=null, sfWs=null, sfPoll=null, sfRemind=null, sfActx=null, sfShiftPick=null;
+let SF=null, sfWs=null, sfPoll=null, sfRemind=null, sfReconnect=null, sfConnect=null, sfLoading=null, sfActx=null, sfShiftPick=null;
 const SF_LV={urgent:['긴급','var(--urgent)'],caution:['주의','var(--caution)'],notice:['전달말씀','var(--notice)']};
 const SF_HZ={pending:['관제실 확인 중','#7C8794'],dispatched:['알림 전파됨','#0B8A5B'],closed:['종결','#9AA4AE']};
 const SF_BELL='<svg class="bell" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"/></svg>';
@@ -1012,27 +1012,48 @@ async function sfInit(){
   await sfLoad();
   if(!SF || SF.role!=='carrier') return;
   const proto=location.protocol==='https:'?'wss':'ws';
-  const open=()=>{ if(!token) return;
-    sfWs=new WebSocket(`${proto}://${location.host}?token=${token}`);
-    sfWs.onmessage=e=>{ try{ if(JSON.parse(e.data).type==='safety') sfLoad(); }catch(_){} };
-    sfWs.onclose=()=>{ if(token) setTimeout(open,3000); };
+  sfConnect=()=>{ if(!token || SF?.role!=='carrier' || !navigator.onLine) return;
+    if(sfWs && (sfWs.readyState===WebSocket.OPEN || sfWs.readyState===WebSocket.CONNECTING)) return;
+    clearTimeout(sfReconnect);
+    const ws=new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+    sfWs=ws;
+    ws.onopen=()=>{ if(sfWs===ws) sfLoad(); };
+    ws.onmessage=e=>{ try{ if(JSON.parse(e.data).type==='safety') sfLoad(); }catch(_){} };
+    ws.onerror=()=>{ try{ws.close();}catch(_){} };
+    ws.onclose=()=>{ if(sfWs!==ws) return; sfWs=null; if(token) sfReconnect=setTimeout(sfConnect,3000); };
   };
-  open();
-  sfPoll=setInterval(sfLoad,60000);            // 연결이 끊겨도 1분마다 확인
+  sfConnect();
+  sfPoll=setInterval(()=>{                     // 모바일 절전 후 복귀해도 빠르게 따라잡는다
+    if(document.visibilityState==='visible') sfResume();
+  },15000);
   sfRemind=setInterval(()=>{                    // 미확인 긴급 알림은 90초마다 재알림
     const p=sfPendingUrgent(); if(p.length) sfRing('urgent',p[0].text);
   },90000);
 }
 function sfStop(){
   if(sfWs){ sfWs.onclose=null; try{sfWs.close();}catch(e){} sfWs=null; }
-  clearInterval(sfPoll); clearInterval(sfRemind); SF=null;
+  clearInterval(sfPoll); clearInterval(sfRemind); clearTimeout(sfReconnect);
+  sfConnect=null; sfLoading=null; SF=null;
   $('sfOverlay').classList.remove('on'); $('sfTicker').classList.add('hidden');
 }
 async function sfLoad(){
-  try{ SF=await api('/api/safety/state'); }catch(e){ return; }
-  if(SF.role!=='carrier') return;
-  sfHandleAlerts(); sfRenderTicker(); sfRenderBox();
+  if(sfLoading) return sfLoading;
+  sfLoading=(async()=>{
+    try{ SF=await api('/api/safety/state'); }catch(e){ return; }
+    if(SF.role!=='carrier') return;
+    sfHandleAlerts(); sfRenderTicker(); sfRenderBox();
+  })().finally(()=>{ sfLoading=null; });
+  return sfLoading;
 }
+async function sfResume(){
+  if(!token) return;
+  await sfLoad();
+  if(SF?.role==='carrier' && (!sfWs || sfWs.readyState===WebSocket.CLOSED)) sfConnect?.();
+}
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') sfResume(); });
+window.addEventListener('focus',sfResume);
+window.addEventListener('pageshow',sfResume);
+window.addEventListener('online',sfResume);
 const sfPendingUrgent=()=>(SF?.alerts||[]).filter(a=>a.level==='urgent'&&!a.acked).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
 
 function sfHandleAlerts(){

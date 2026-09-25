@@ -1810,6 +1810,18 @@ server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
   } catch { socket.destroy(); }
 });
-wss.on('connection', ws => { ws.send(JSON.stringify({ type: 'hello' })); });
+wss.on('connection', ws => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  ws.send(JSON.stringify({ type: 'hello' }));
+});
+const wsHeartbeat = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    try { ws.ping(); } catch { ws.terminate(); }
+  });
+}, 30000);
+wsHeartbeat.unref();
 
 server.listen(PORT, () => console.log(`▶ 생활안전·복지 신고 서버 실행 :${PORT}`));
