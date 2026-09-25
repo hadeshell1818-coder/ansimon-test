@@ -171,6 +171,10 @@
   .sf-al{border-left:4px solid var(--line);padding:8px 10px;margin-bottom:8px;background:#F7F9FA;border-radius:0 10px 10px 0;}
   .sf-al .m{font-size:11px;color:var(--ink-2);font-weight:700;margin-bottom:3px;}
   .sf-al .t{font-size:14px;font-weight:700;line-height:1.45;}
+  .sf-inline-head{font-size:18px;font-weight:800;color:var(--ink);margin:0 0 8px;}
+  .sf-inline-meta{font-size:12px;color:var(--ink-2);margin-bottom:12px;}
+  .sf-inline-text{font-size:18px;font-weight:700;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:45vh;overflow-y:auto;}
+  .sf-inline-ack{width:100%;margin-top:18px;padding:15px;border:0;border-radius:8px;background:#17365d;color:#fff;font-size:17px;font-weight:800;}
 
   /* 안심ON 홈: 부드러운 색면 + 또렷한 기능 버튼 (동작 로직 변경 없음) */
   .wrap{padding:15px 16px 26px;background:linear-gradient(180deg,#f5f8fc 0%,#fbfcfe 68%);}
@@ -259,7 +263,7 @@
   <div class="ohint">운행 중이면 안전한 곳에 정차한 뒤 눌러주세요</div>
 </div>
 <div class="sf-banner" id="sfBanner" onclick="sfHideBanner();sfOpenAlerts()"><span class="lv" id="sfBLv"></span><span class="tx" id="sfBTx"></span></div>
-<div class="sf-modal" id="sfModal" onclick="if(event.target===this)this.classList.remove('on')"><div class="sf-sheet" id="sfSheet"></div></div>
+<div class="sf-modal" id="sfModal" onclick="if(event.target===this&&!sfActiveAlert)this.classList.remove('on')"><div class="sf-sheet" id="sfSheet"></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1147,7 +1151,7 @@ function sfStop(){
   if(sfWs){ sfWs.onclose=null; try{sfWs.close();}catch(e){} sfWs=null; }
   clearInterval(sfPoll); clearTimeout(sfReconnect);
   sfConnect=null; sfLoading=null; SF=null; sfActiveAlert=null;
-  $('sfOverlay').classList.remove('on'); $('sfTicker').classList.add('hidden');
+  $('sfOverlay').classList.remove('on'); $('sfModal').classList.remove('on'); $('sfTicker').classList.add('hidden');
 }
 async function sfLoad(){
   if(sfLoading) return sfLoading;
@@ -1182,28 +1186,40 @@ function sfHandleAlerts(){
   const fresh=SF.alerts.filter(a=>a.version && !a.acked && !seen.has(sfAlertKey(a)))
     .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt));
   const active=SF.alerts.find(a=>!a.acked && a.id===sfActiveAlert?.id && a.version===sfActiveAlert?.version);
-  const selected=alertId ? (clicked&&!clicked.acked?clicked:null) : (fresh[0]||active);
+  const latest=[...SF.alerts].sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt))[0];
+  const selected=alertId ? (clicked&&!clicked.acked?clicked:null) : (fresh[0]||active||(!latest?.acked?latest:null));
   if(selected){
     const alreadyOpen=sfActiveAlert?.id===selected.id && sfActiveAlert?.version===selected.version;
     sfShowOverlay(selected);
-    if(!alreadyOpen && (alertId || fresh.includes(selected))) sfRing(selected.level,selected.text);
-  }else{ sfActiveAlert=null; $('sfOverlay').classList.remove('on'); }
+    if(!alreadyOpen) sfRing(selected.level,selected.text);
+  }else{
+    if(sfActiveAlert) $('sfModal').classList.remove('on');
+    sfActiveAlert=null; $('sfOverlay').classList.remove('on');
+  }
   sfMarkSeen(fresh.map(sfAlertKey));
   if(alertId){sfRequestedAlertId=null;const url=new URL(location.href);url.searchParams.delete('alert');history.replaceState(null,'',url.pathname+url.search+url.hash);}
 }
 function sfShowOverlay(a){
   sfActiveAlert={id:a.id,version:a.version};
+  $('sfAckBtn').dataset.id=a.id; $('sfAckBtn').disabled=false;
+  if(a.level!=='urgent'){
+    $('sfOverlay').classList.remove('on');
+    $('sfSheet').innerHTML=`<div class="sf-inline-head">${SF_LV[a.level][0]} 안전 알림</div><div class="sf-inline-meta">${sfTime(a.updatedAt||a.createdAt)} · ${sfEsc(a.sender)}</div><div class="sf-inline-text">${sfEsc(a.text)}</div><button class="sf-inline-ack" id="sfInlineAck" onclick="sfAck()">확인했습니다</button>`;
+    $('sfModal').classList.add('on');
+    return;
+  }
+  $('sfModal').classList.remove('on');
   $('sfOverlay').classList.toggle('caution',a.level==='caution');
   $('sfOverlay').classList.toggle('notice',a.level==='notice');
   $('sfOHead').textContent=SF_LV[a.level][0]+' 안전 알림';
   $('sfOMeta').textContent=`${sfTime(a.updatedAt||a.createdAt)} · ${a.sender}`;
   $('sfOText').textContent=a.text;
   $('sfOCount').textContent='';
-  $('sfAckBtn').dataset.id=a.id; $('sfAckBtn').disabled=false;
   $('sfOverlay').classList.add('on');
 }
 async function sfAck(){
-  const b=$('sfAckBtn'), id=b.dataset.id; if(!id) return; b.disabled=true;
+  const b=$('sfAckBtn'), inline=$('sfInlineAck'), id=b.dataset.id; if(!id) return;
+  b.disabled=true; if(inline) inline.disabled=true;
   try{ await api('/api/safety/alerts/'+id+'/ack',{method:'POST',body:JSON.stringify({version:sfActiveAlert?.version||0})});
     const a=SF.alerts.find(x=>x.id===id); if(a) a.acked=true;
     try{ navigator.vibrate&&navigator.vibrate(0); speechSynthesis&&speechSynthesis.cancel(); }catch(e){}
@@ -1211,7 +1227,7 @@ async function sfAck(){
     $('sfOverlay').classList.remove('on');
     $('sfModal').classList.remove('on');
     sfRenderTicker();
-  }catch(e){ b.disabled=false; toast(e.message||'전송 실패 · 다시 눌러주세요'); await sfLoad(); }
+  }catch(e){ b.disabled=false; if(inline) inline.disabled=false; toast(e.message||'전송 실패 · 다시 눌러주세요'); await sfLoad(); }
 }
 let sfBannerTimer=null;
 function sfShowBanner(a){
