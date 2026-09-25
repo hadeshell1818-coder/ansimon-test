@@ -186,7 +186,7 @@
   .delivery .home-tile{border-color:#f5d9cb}.delivery .tile-icon{background:#ffede4;color:#b9563d}
   .reporting .home-tile{border-color:#d9eafa}.reporting .tile-icon{background:#e8f3ff;color:#3679c3}
   .returning .home-tile{border-color:#d4eee1}.returning .tile-icon{background:#e3f5eb;color:#268469}
-  /* 홈 화면: 선명한 구역 색상, 업무종료 보고는 간결하게 */
+  /* 홈 화면: 선명한 구역 색상, 귀국보고는 간결하게 */
   .home-section.delivery{--section-accent:#d94a36;--section-ink:#8c2c20;background:#ffdfd5;border-color:#f4ad9e;box-shadow:0 5px 15px rgba(191,66,47,.12);}
   .home-section.reporting{--section-accent:#186ac0;--section-ink:#164e91;background:#d8eaff;border-color:#96c4f4;box-shadow:0 5px 15px rgba(27,105,184,.11);}
   .home-section.returning{--section-accent:#188568;--section-ink:#17644f;background:#d7f2e7;border-color:#8dd4b8;box-shadow:none;padding:11px 13px;margin-bottom:11px;border-radius:15px;}
@@ -197,7 +197,7 @@
   .reporting .tile-icon{background:#cbe2ff;color:#1457a0;}
   .returning .tile-icon{background:#c5ead9;color:#17644f;}
   .returning .home-section-title{font-size:13px;margin-bottom:8px;}
-  .returning .home-grid{gap:8px;}
+  .returning .home-grid{grid-template-columns:1fr;gap:8px;}
   .returning .home-tile{min-height:53px;padding:8px 6px;gap:6px;flex-direction:row;font-size:13px;border-radius:10px;box-shadow:none;}
   .returning .tile-icon{width:26px;height:26px;border-radius:8px;font-size:16px;flex:0 0 26px;}
   .home-tile:active{transform:scale(.97);box-shadow:0 1px 4px rgba(36,55,75,.06);background:#fafcff;}
@@ -352,11 +352,10 @@ function home(){
         <button class="home-tile" onclick="pickCat('welfare')"><span class="tile-icon">♡</span>복지신고</button>
       </div>
     </section>
-    <section class="home-section returning" aria-label="업무종료 보고">
-      <div class="home-section-title">업무종료 보고</div>
+    <section class="home-section returning" aria-label="귀국보고">
+      <div class="home-section-title">귀국보고</div>
       <div class="home-grid">
-        <button class="home-tile" onclick="openReturnReport('body')"><span class="tile-icon">♡</span>건강 이상</button>
-        <button class="home-tile" onclick="openReturnReport('equipment')"><span class="tile-icon">⚙</span>장비 이상</button>
+        <button class="home-tile" onclick="openReturnReport()"><span class="tile-icon">✓</span>귀국보고</button>
       </div>
     </section>
     <button class="history-link" onclick="showReportHistory()">내 신고내역 · 처리현황 <span>›</span></button>
@@ -1159,7 +1158,7 @@ function sfShiftHomeHtml(){
     <div class="shift-device-note">장비 상태 점검은 별도 저장 기능 연결 후 추가됩니다.</div>`;
 }
 function sfBoxHtml(){ return (SF&&SF.role==='carrier')?`<div class="sf-box" id="sfBox">${sfBoxInner()}</div>`:'<div id="sfBox"></div>'; }
-function sfRenderBox(){ /* 업무종료 보고는 귀국보고 전용 화면에서 신체·장비를 함께 저장합니다. */ }
+function sfRenderBox(){ /* 귀국보고 전용 화면에서 신체·장비를 함께 저장합니다. */ }
 function sfBoxInner(){
   const st=SF.shift?.status||null, cur=sfShiftPick||st;
   const mine=(SF.myHazards||[]).slice(0,3).map(h=>`<div>🎙 ${sfTime(h.createdAt)} ${sfEsc((h.transcript||'음성 신고').slice(0,22))}<b style="color:${SF_HZ[h.status][1]}">${SF_HZ[h.status][0]}</b></div>`).join('');
@@ -1274,7 +1273,7 @@ boot();
 </script>
 
 <script>
-/* M-06: 건강·장비 이상 두 버튼은 동일한 귀국보고 기록으로 연결됩니다. */
+/* M-06: 귀국 여부와 건강·장비 상태를 한 화면에서 함께 기록합니다. */
 (function(){
 const escON=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let returnActive=false;
@@ -1282,7 +1281,7 @@ window.openReturnReport=async function(focus){
   returnActive=true;
   let layer=document.getElementById('on-return-layer');
   if(!layer){layer=document.createElement('div');layer.id='on-return-layer';layer.className='return-overlay';document.body.appendChild(layer);}
-  layer.innerHTML='<div class="return-head"><button class="return-back" onclick="closeReturnReport()">‹ 뒤로</button>업무종료 보고</div><section id="on-return" aria-live="polite">불러오는 중…</section>';
+  layer.innerHTML='<div class="return-head"><button class="return-back" onclick="closeReturnReport()">‹ 뒤로</button>귀국보고</div><section id="on-return" aria-live="polite">불러오는 중…</section>';
   await onRefresh();
   const field=document.getElementById(focus==='equipment'?'return-equip-field':'return-body-field');
   if(field)field.scrollIntoView({block:'center',behavior:'smooth'});
@@ -1292,7 +1291,7 @@ async function onRefresh(){
  if(!returnActive||!me)return;
  const el=document.getElementById('on-return');if(!el)return;
  try{const d=await api('/api/on/return/me');const r=d.report;
- el.innerHTML=`<div class="card" style="padding:16px"><h3 style="margin:0 0 8px">업무종료 보고 <small style="font-size:12px;color:#6a7a76">${escON(d.date)}</small></h3>
+ el.innerHTML=`<div class="card" style="padding:16px"><h3 style="margin:0 0 8px">귀국보고 <small style="font-size:12px;color:#6a7a76">${escON(d.date)}</small></h3>
  <p style="font-size:12px;color:#65746c">배달을 마치고 귀국한 뒤 건강과 장비 상태를 확인해 주세요.</p>
  ${r?`<p style="font-size:12px;color:#28754d">✓ 오늘 보고 완료 · ${escON(new Date(r.at).toLocaleTimeString('ko-KR'))} (정정 가능)</p>`:''}
  <label style="margin:10px 0 2px"><input type="checkbox" id="on-returned" ${r?'checked':''}> 배달을 마치고 귀국했습니다</label>
@@ -1312,9 +1311,9 @@ async function onRefresh(){
  if(!body||!equip){msg.textContent='건강·장비 상태를 각각 선택해 주세요.';return;}
  const bodyIssue=body.value==='yes',equipmentIssue=equip.value==='yes';
  if((bodyIssue&&!el.querySelector('#on-body-detail').value.trim())||(equipmentIssue&&!el.querySelector('#on-equip-detail').value.trim())){msg.textContent='이상이 있는 항목에 간단한 설명을 적어주세요.';return;}
- btn.disabled=true;try{await api('/api/on/return',{method:'POST',body:JSON.stringify({returned:true,bodyIssue,equipmentIssue,bodyDetail:el.querySelector('#on-body-detail').value,equipmentDetail:el.querySelector('#on-equip-detail').value})});toast('업무종료 보고가 접수되었습니다');closeReturnReport();}
+ btn.disabled=true;try{await api('/api/on/return',{method:'POST',body:JSON.stringify({returned:true,bodyIssue,equipmentIssue,bodyDetail:el.querySelector('#on-body-detail').value,equipmentDetail:el.querySelector('#on-equip-detail').value})});toast('귀국보고가 접수되었습니다');closeReturnReport();}
  catch(e){msg.textContent=e.message||'전송 실패 · 다시 시도해 주세요';btn.disabled=false;}};
- }catch(e){el.textContent='업무종료 보고를 불러오지 못했습니다: '+e.message;}
+ }catch(e){el.textContent='귀국보고를 불러오지 못했습니다: '+e.message;}
 }
 async function noticesON(){if(!me)return;let host=document.getElementById('on-notices');if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}if(!host)return;try{const d=await api('/api/on/notices');host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+ (d.notices.length?d.notices.map(n=>`<div style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});}catch(e){host.textContent='공지사항 조회 실패: '+e.message;}}
 const old=window.home;window.home=async function(...args){const r=await old.apply(this,args);await onRefresh();await noticesON();return r;};
