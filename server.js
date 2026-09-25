@@ -936,7 +936,7 @@ const kstDate = (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice
 
 /* 집배 구역·명부 — ⚠️ 시연용 예시 데이터. 실제 집배구·인원·PDA 번호로 교체할 것.
  * places: 음성 속 지명을 구역으로 매칭할 때 쓰는 키워드 / near: 인접 구역 */
-const ZONES = [
+let ZONES = [
   { id: 'jh1', name: '장흥1구',   area: '장흥읍 북부',     places: ['건산', '기양', '장흥읍 북'],      near: ['jh2', 'jh3', 'by'],       lat: 34.692, lng: 126.905 },
   { id: 'jh2', name: '장흥2구',   area: '장흥읍 동부',     places: ['평화', '순지', '장흥읍 동'],      near: ['jh1', 'jh3', 'ay', 'ys'], lat: 34.683, lng: 126.925 },
   { id: 'jh3', name: '장흥3구',   area: '장흥읍 남부',     places: ['예양', '원도', '흥성로', '장흥읍'], near: ['jh1', 'jh2', 'ay', 'ys'], lat: 34.672, lng: 126.905 },
@@ -946,7 +946,7 @@ const ZONES = [
   { id: 'dd',  name: '대덕구',    area: '대덕읍·회진면',   places: ['대덕', '회진', '신리', '노력도'], near: ['gs'],                     lat: 34.540, lng: 126.880 },
   { id: 'by',  name: '부산·유치구', area: '부산면·유치면', places: ['부산면', '유치', '보림사', '탐진댐'], near: ['jh1'],                 lat: 34.740, lng: 126.890 },
 ];
-const ROSTER = [ // id가 로그인 계정 id와 같으면 해당 계정과 연결된다(jip = 김철수)
+let ROSTER = [ // id가 로그인 계정 id와 같으면 해당 계정과 연결된다(jip = 김철수)
   { id: 'jip', name: '김철수', zone: 'jh3', phone: '010-0000-0003' },
   { id: 'c01', name: '정민수', zone: 'jh1', phone: '010-0000-0001' },
   { id: 'c02', name: '최은비', zone: 'jh2', phone: '010-0000-0002' },
@@ -962,13 +962,13 @@ const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` :
 const isSafetyCtl = u => !!u && u.kind === 'safety' && u.org === SAFETY_OFFICE;
 const safetyCarrier = u => (u && u.kind === 'carrier') ? rosterById(u.id) : null;
 
-let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {} };
+let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, notices: [], zones: null, roster: null };
 function saveSafety() {
   try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); }
 }
 function loadSafety() {
   if (!fs.existsSync(SAFETY_FILE)) return false;
-  try { SAFE = Object.assign(SAFE, JSON.parse(fs.readFileSync(SAFETY_FILE, 'utf8'))); return true; }
+  try { SAFE = Object.assign(SAFE, JSON.parse(fs.readFileSync(SAFETY_FILE, 'utf8'))); if (Array.isArray(SAFE.zones) && SAFE.zones.length) ZONES = SAFE.zones; if (Array.isArray(SAFE.roster) && SAFE.roster.length) ROSTER = SAFE.roster; return true; }
   catch (e) { console.error('safety load fail', e); return false; }
 }
 const nextSafeId = p => p + (SAFE.seq++);
@@ -1332,6 +1332,93 @@ app.get('/api/safety/files/:hid/:kind', (req, res) => {
   res.sendFile(full);
 });
 
+
+/* ===== 안심ON v2: 귀국보고(건강+장비), 공지, 구역/집배원 기준정보 ===== */
+function ensureSafetyCollections(){
+  SAFE.returns = SAFE.returns || {}; SAFE.notices = SAFE.notices || [];
+  SAFE.zones = ZONES; SAFE.roster = ROSTER;
+}
+function returnRows(d){
+  ensureSafetyCollections(); const day=SAFE.returns[d]||{};
+  return ROSTER.map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zone,phone:r.phone||'',report:day[r.id]||null}));
+}
+function returnSummary(rows){
+  const reported=rows.filter(r=>r.report).length, body=rows.filter(r=>r.report?.bodyIssue).length, equipment=rows.filter(r=>r.report?.equipmentIssue).length;
+  const issue=rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)).length;
+  const actionPending=rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)&&r.report.action?.status!=='done').length;
+  return {target:rows.length,reported,missing:rows.length-reported,body,equipment,issue,actionPending,ok:reported-issue};
+}
+app.get('/api/on/return/me',(req,res)=>{
+  const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'집배원 계정만 이용할 수 있습니다.'});
+  const d=kstDate(); ensureSafetyCollections(); res.json({date:d,report:(SAFE.returns[d]||{})[me.id]||null});
+});
+app.post('/api/on/return',(req,res)=>{
+  const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'집배원 계정만 이용할 수 있습니다.'});
+  const b=req.body||{}; if(b.returned!==true)return res.status(400).json({error:'귀국 확인이 필요합니다.'});
+  const bodyIssue=!!b.bodyIssue,equipmentIssue=!!b.equipmentIssue;
+  const bodyDetail=String(b.bodyDetail||'').trim().slice(0,300),equipmentDetail=String(b.equipmentDetail||'').trim().slice(0,300);
+  if(bodyIssue&&!bodyDetail)return res.status(400).json({error:'건강 이상 내용을 간단히 적어주세요.'});
+  if(equipmentIssue&&!equipmentDetail)return res.status(400).json({error:'장비 이상 내용을 간단히 적어주세요.'});
+  const d=kstDate(); ensureSafetyCollections(); SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][me.id];
+  SAFE.returns[d][me.id]={returned:true,bodyIssue,equipmentIssue,bodyDetail:bodyIssue?bodyDetail:'',equipmentDetail:equipmentIssue?equipmentDetail:'',at:new Date().toISOString(),action:prev?.action||null};
+  saveSafety(); broadcastSafety(); res.json({ok:true});
+});
+app.get('/api/on/returns',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String(req.query.date||kstDate()).slice(0,10); const rows=returnRows(d);
+  res.json({date:d,rosterSource:'등록 집배원 명부',summary:returnSummary(rows),rows});
+});
+app.post('/api/on/returns/:cid/action',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String((req.body||{}).date||kstDate()).slice(0,10);
+  ensureSafetyCollections(); const r=(SAFE.returns[d]||{})[req.params.cid]; if(!r)return res.status(404).json({error:'보고 내역이 없습니다.'});
+  r.action={detail:String((req.body||{}).detail||'').trim().slice(0,300),owner:String((req.body||{}).owner||u.name).trim().slice(0,50),status:['pending','in_progress','done'].includes((req.body||{}).status)?(req.body||{}).status:'in_progress',at:new Date().toISOString(),by:u.name};
+  saveSafety(); broadcastSafety(); res.json({ok:true});
+});
+app.get('/api/on/notices',(req,res)=>{
+  const u=userFromReq(req); if(!u)return res.status(401).json({error:'unauthorized'}); ensureSafetyCollections(); const me=safetyCarrier(u);
+  let list=SAFE.notices; if(me) list=list.filter(n=>n.targets.includes(me.id));
+  res.json({notices:list.map(n=>({...n,acked:me?!!(n.acks||{})[me.id]:undefined}))});
+});
+app.post('/api/on/notices',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},title=String(b.title||'').trim().slice(0,80),body=String(b.body||'').trim().slice(0,500);
+  const targets=Array.isArray(b.targets)?b.targets.filter(id=>rosterById(id)):[]; if(!title||!body||!targets.length)return res.status(400).json({error:'제목·내용·대상을 확인하세요.'});
+  ensureSafetyCollections(); SAFE.notices.unshift({id:nextSafeId('N'),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString()}); saveSafety(); broadcastSafety(); res.json({ok:true});
+});
+app.post('/api/on/notices/:id/ack',(req,res)=>{
+  const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'forbidden'}); const n=SAFE.notices.find(x=>x.id===req.params.id); if(!n||!n.targets.includes(me.id))return res.status(404).json({error:'not found'});
+  n.acks=n.acks||{}; n.acks[me.id]=n.acks[me.id]||new Date().toISOString(); saveSafety(); broadcastSafety(); res.json({ok:true});
+});
+app.get('/api/safety/history',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
+  res.json({hazards:SAFE.hazards.map(hazardForCtl),calls:SAFE.calls.map(c=>({...c,carrier:carrierLabel(rosterById(c.carrierId))})),alerts:SAFE.alerts});
+});
+
+/* 안전활동 통계·증빙 조회 — 기간별 음성신고/통화/알림/업무종료 원자료와 집계 */
+app.get('/api/safety/evidence',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
+  const end=String(req.query.end||kstDate()).slice(0,10), start=String(req.query.start||end).slice(0,10);
+  const inRange=t=>{ const d=kstDate(new Date(t).getTime()); return d>=start&&d<=end; };
+  const hazards=SAFE.hazards.filter(h=>inRange(h.createdAt)).map(hazardForCtl);
+  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(c=>({...c,carrier:carrierLabel(rosterById(c.carrierId))}));
+  const alerts=SAFE.alerts.filter(a=>inRange(a.createdAt));
+  const returns=[];
+  Object.keys(SAFE.returns||{}).filter(d=>d>=start&&d<=end).sort().forEach(date=>{
+    returnRows(date).forEach(r=>returns.push({date,...r}));
+  });
+  const reports=returns.filter(r=>r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue);
+  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length},hazards,calls,alerts,returns});
+});
+app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
+app.post('/api/safety/config/zones',(req,res)=>{
+ const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const b=req.body||{},name=String(b.name||'').trim();if(!name)return res.status(400).json({error:'구역명을 입력하세요.'});
+ const id=String(b.id||('z'+Date.now())).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,30);if(zoneById(id))return res.status(409).json({error:'이미 있는 구역 ID입니다.'});
+ ZONES.push({id,name,area:String(b.area||'').trim().slice(0,80),places:[],near:[],lat:null,lng:null});ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});
+});
+app.patch('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const z=zoneById(req.params.id);if(!z)return res.status(404).json({error:'not found'});const b=req.body||{};if(b.name!=null)z.name=String(b.name).trim().slice(0,50);if(b.area!=null)z.area=String(b.area).trim().slice(0,80);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+app.delete('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});if(ROSTER.some(r=>r.zone===req.params.id))return res.status(409).json({error:'이 구역에 등록된 집배원을 먼저 이동 또는 삭제하세요.'});ZONES=ZONES.filter(z=>z.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+app.post('/api/safety/config/roster',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const b=req.body||{},id=String(b.id||'').trim(),name=String(b.name||'').trim();if(!id||!name||!zoneById(b.zone))return res.status(400).json({error:'계정 ID·이름·구역을 확인하세요.'});if(rosterById(id))return res.status(409).json({error:'이미 등록된 계정 ID입니다.'});ROSTER.push({id,name,zone:b.zone,phone:String(b.phone||'').trim().slice(0,30)});ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+app.patch('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const r=rosterById(req.params.id);if(!r)return res.status(404).json({error:'not found'});const b=req.body||{};if(b.name!=null)r.name=String(b.name).trim().slice(0,50);if(b.phone!=null)r.phone=String(b.phone).trim().slice(0,30);if(b.zone&&zoneById(b.zone))r.zone=b.zone;ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+app.delete('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});ROSTER=ROSTER.filter(r=>r.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+
 loadSafety();
 
 /* =========================================================================
@@ -1683,84 +1770,6 @@ function ensureRiskDemo() {
 }
 
 loadRisk();
-
-
-/* ================= 안심ON AGENTS 확장: 귀국보고/지식저장소 =================
- * 시범용 JSON 저장. 실서비스 전 DB, 접근통제, 백업 및 승인된 자료 연계 필요.
- */
-const ON_FILE = path.join(__dirname, 'ansimon-extra.json');
-let ON = { returns: {}, actions: {}, announcements: [], knowledge: [] };
-try { if (fs.existsSync(ON_FILE)) ON = { ...ON, ...JSON.parse(fs.readFileSync(ON_FILE,'utf8')) }; }
-catch (e) { console.error('안심ON 확장자료 읽기 실패',e); }
-const saveON = () => fs.writeFileSync(ON_FILE, JSON.stringify(ON));
-const onDate = () => kstDate();
-const onKey = (date,id) => `${date}:${id}`;
-const onText = (v,max=500) => String(v??'').trim().slice(0,max);
-const onCtl = u => isSafetyCtl(u);
-const onCarrier = u => !!safetyCarrier(u);
-const onRoster = date => ROSTER.map(r => ({...r, zoneName:zoneById(r.zone)?.name||r.zone,
-  report:ON.returns[onKey(date,r.id)]||null, action:ON.actions[onKey(date,r.id)]||null}));
-app.get('/api/on/return/me',(req,res)=>{
- const u=userFromReq(req); if(!onCarrier(u)) return res.status(403).json({error:'집배원 계정만 조회할 수 있습니다.'});
- const date=onDate(); res.json({date,report:ON.returns[onKey(date,u.id)]||null});
-});
-app.post('/api/on/return',(req,res)=>{
- const u=userFromReq(req); if(!onCarrier(u)) return res.status(403).json({error:'집배원 계정만 보고할 수 있습니다.'});
- const b=req.body||{};
- if(b.returned!==true || typeof b.bodyIssue!=='boolean' || typeof b.equipmentIssue!=='boolean') return res.status(400).json({error:'귀국 확인 및 신체·장비 이상 유무를 선택하세요.'});
- const bodyDetail=onText(b.bodyDetail,300),equipmentDetail=onText(b.equipmentDetail,300);
- if((b.bodyIssue&&!bodyDetail)||(b.equipmentIssue&&!equipmentDetail)) return res.status(400).json({error:'이상 항목의 상세 내용을 입력하세요.'});
- const date=onDate(),key=onKey(date,u.id),prev=ON.returns[key],now=new Date().toISOString();
- ON.returns[key]={id:key,date,carrierId:u.id,returned:true,bodyIssue:b.bodyIssue,equipmentIssue:b.equipmentIssue,
- bodyDetail:b.bodyIssue?bodyDetail:'',equipmentDetail:b.equipmentIssue?equipmentDetail:'',at:now,
- history:[...(prev?.history||[]),...(prev?[{at:prev.at,bodyIssue:prev.bodyIssue,equipmentIssue:prev.equipmentIssue,bodyDetail:prev.bodyDetail,equipmentDetail:prev.equipmentDetail}]:[])].slice(-30)};
- if(!b.bodyIssue&&!b.equipmentIssue) delete ON.actions[key];
- else if(prev && (prev.bodyIssue!==b.bodyIssue||prev.equipmentIssue!==b.equipmentIssue||prev.bodyDetail!==bodyDetail||prev.equipmentDetail!==equipmentDetail)) delete ON.actions[key];
- saveON();broadcastSafety();res.json({ok:true,report:ON.returns[key]});
-});
-app.get('/api/on/returns',(req,res)=>{
- const u=userFromReq(req);if(!onCtl(u))return res.status(403).json({error:'소통실 권한이 필요합니다.'});
- const date=/^\d{4}-\d{2}-\d{2}$/.test(req.query.date||'')?req.query.date:onDate();
- const rows=onRoster(date),reported=rows.filter(r=>r.report),body=rows.filter(r=>r.report?.bodyIssue),equipment=rows.filter(r=>r.report?.equipmentIssue);
- res.json({date,rosterSource:'시연용 명부: 실제 당일 근무명단 연계 필요',rows,summary:{target:rows.length,reported:reported.length,missing:rows.length-reported.length,body:body.length,equipment:equipment.length,issue:rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)).length,actionPending:rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)&&r.action?.status!=='done').length}});
-});
-app.post('/api/on/returns/:id/action',(req,res)=>{
- const u=userFromReq(req);if(!onCtl(u))return res.status(403).json({error:'소통실 권한이 필요합니다.'});
- const date=/^\d{4}-\d{2}-\d{2}$/.test(req.body?.date||'')?req.body.date:onDate();
- if(!ROSTER.some(r=>r.id===req.params.id))return res.status(404).json({error:'대상자 없음'});
- const key=onKey(date,req.params.id),r=ON.returns[key];if(!r||( !r.bodyIssue&&!r.equipmentIssue))return res.status(400).json({error:'이상 보고가 없습니다.'});
- const status=req.body?.status,detail=onText(req.body?.detail,1000),owner=onText(req.body?.owner,80);
- if(!['pending','in_progress','done'].includes(status)||!detail||!owner)return res.status(400).json({error:'조치상태·담당자·조치사항을 입력하세요.'});
- const prev=ON.actions[key];ON.actions[key]={status,detail,owner,at:new Date().toISOString(),by:u.id,history:[...(prev?.history||[]),...(prev?[{...prev,history:undefined}]:[])].slice(-30)};
- saveON();broadcastSafety();res.json({ok:true,action:ON.actions[key]});
-});
-/* 공개자료/기관승인 자료를 위한 연결 계약: 실제 Supabase 미연결 시 근거를 만들어내지 않는다. */
-app.get('/api/on/knowledge/status',(req,res)=>{
- const u=userFromReq(req);if(!u||!['safety_mgr','safety'].includes(u.kind))return res.status(403).json({error:'권한 없음'});
- res.json({connected:false,provider:null,documents:0,collections:['PUBLIC','POST_OFFICE','ASSESSMENT_RULES'],message:'외부 안전지식 저장소 미연결: 근거자료 자동검색 및 근거 기반 점수 산정 사용 불가'});
-});
-app.post('/api/on/knowledge/search',(req,res)=>{
- const u=userFromReq(req);if(!u||u.kind!=='safety_mgr')return res.status(403).json({error:'안전관리담당자 권한이 필요합니다.'});
- res.json({connected:false,query:onText(req.body?.query,300),regulations:[],accidentCases:[],previousAssessments:[],ruleSets:[],message:'연결된 근거자료 없음. 담당자가 현장정보와 승인된 기준표를 직접 확인하세요.'});
-});
-/* 단일 공지사항: 긴급 위험알림과 별도로 작성·확인 추적 */
-app.get('/api/on/notices',(req,res)=>{
- const u=userFromReq(req);if(!u)return res.status(401).json({error:'로그인이 필요합니다.'});
- if(onCtl(u))return res.json({notices:ON.announcements});
- if(onCarrier(u))return res.json({notices:ON.announcements.filter(n=>n.targets.includes(u.id)).map(n=>({...n,acked:!!n.acks[u.id],acks:undefined}))});
- return res.status(403).json({error:'권한 없음'});
-});
-app.post('/api/on/notices',(req,res)=>{
- const u=userFromReq(req);if(!onCtl(u))return res.status(403).json({error:'소통실 권한이 필요합니다.'});
- const title=onText(req.body?.title,100),body=onText(req.body?.body,1000),targets=[...new Set((req.body?.targets||[]).filter(id=>ROSTER.some(r=>r.id===id)))];
- if(!title||!body||!targets.length)return res.status(400).json({error:'제목·내용·대상자를 입력하세요.'});
- const n={id:crypto.randomUUID(),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString()};ON.announcements.unshift(n);saveON();broadcastSafety();res.json({ok:true,id:n.id});
-});
-app.post('/api/on/notices/:id/ack',(req,res)=>{
- const u=userFromReq(req);if(!onCarrier(u))return res.status(403).json({error:'집배원 권한이 필요합니다.'});
- const n=ON.announcements.find(x=>x.id===req.params.id&&x.targets.includes(u.id));if(!n)return res.status(404).json({error:'공지 없음'});
- n.acks[u.id]=new Date().toISOString();saveON();broadcastSafety();res.json({ok:true});
-});
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.redirect('/dashboard.html'));
