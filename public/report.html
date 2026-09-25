@@ -205,11 +205,6 @@
   .history-link{width:100%;border:1px solid #dce5ee;border-radius:13px;background:#fff;padding:14px 15px;text-align:left;font-size:13px;font-weight:750;color:#4b627b;font-family:inherit;box-shadow:0 2px 9px rgba(35,55,80,.04);}.history-link span{float:right;font-size:17px;color:#3b82c4}
   .history-link:active{transform:scale(.985);background:#f5f9ff;}
   .home-emergency-note{font-size:10.5px;color:#7b858f;text-align:center;line-height:1.5;margin-top:12px}
-  .addr-results{display:grid;gap:7px;margin-top:9px;max-height:250px;overflow:auto;}
-  .addr-result{width:100%;border:1px solid #d8e1e8;border-radius:10px;background:#fff;padding:10px 11px;text-align:left;font:inherit;color:#263746;}
-  .addr-result b{display:block;font-size:13px;line-height:1.4;}
-  .addr-result span{display:block;margin-top:3px;font-size:11px;line-height:1.35;color:#74808b;}
-  .addr-result:active{background:#eef6ff;border-color:#73a9da;}
   .return-overlay{position:fixed;inset:0;z-index:2100;background:#f6f8f9;overflow:auto;padding:16px 16px 36px;}
   .return-overlay .return-head{max-width:480px;margin:0 auto 12px;display:flex;align-items:center;gap:12px;font-size:17px;font-weight:800}
   .return-overlay .return-back{border:1px solid #dbe3e6;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;font-size:13px}
@@ -474,8 +469,8 @@ function showManualLocationPicker(){
         <button class="lmode" onclick="openAddrInput()">✍️ 주소 입력</button>
       </div>
       <div id="addrBox" style="display:none;margin-top:11px">
-        <input class="addr-in" id="addrTyped" placeholder="예: 장흥읍 흥성로 45" onkeydown="if(event.key==='Enter')searchAddr()">
-        <button class="addr-go" onclick="searchAddr()">확인</button>
+        <input class="addr-in" id="addrTyped" placeholder="도로명·건물명 (예: 장흥로15)" onkeydown="if(event.key==='Enter')searchAddr()">
+        <button class="addr-go" onclick="searchAddr()">검색</button>
         <div class="addr-msg" id="addrMsg"></div>
       </div>
       <div id="cmap"></div>
@@ -586,72 +581,70 @@ function applySearchedLocation(la,ln,shown,region,msg){
   setTimeout(()=>{ if(msg && msg.textContent.startsWith('✓')) msg.textContent=''; },1800);
 }
 
-function addressQueries(raw){
-  const spaced=raw.replace(/([가-힣A-Za-z])\s*(\d+(?:-\d+)?)$/,'$1 $2').replace(/\s+/g,' ').trim();
-  const region=(me&&me.region)||'';
-  const province=region==='장흥군'?'전라남도 ':'';
-  return [...new Set([raw,spaced,region&&`${region} ${spaced}`,province&&`${province}${region} ${spaced}`].filter(Boolean))];
+function normalizeAddressQuery(raw){
+  return raw.trim().replace(/([가-힣A-Za-z])\s*(\d+(?:-\d+)?)$/, '$1 $2').replace(/\s+/g,' ');
 }
-let addressCandidates=[];
-function selectAddressCandidate(index){
-  const c=addressCandidates[index], msg=$('addrMsg'); if(!c||!msg)return;
-  applySearchedLocation(c.lat,c.lng,c.address,c.region,msg);
+let postcodeLoader=null, addressSearchVersion=0;
+function loadPostcode(){
+  if(window.kakao?.Postcode || window.daum?.Postcode) return Promise.resolve();
+  if(postcodeLoader) return postcodeLoader;
+  postcodeLoader=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const timer=setTimeout(()=>{script.remove();reject(new Error('주소 검색 연결이 지연되고 있습니다. 다시 검색해 주세요.'));},12000);
+    script.src='https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+    script.onload=()=>{clearTimeout(timer);resolve();};
+    script.onerror=()=>{clearTimeout(timer);script.remove();reject(new Error('주소 검색에 연결하지 못했습니다. 다시 검색해 주세요.'));};
+    document.head.appendChild(script);
+  }).catch(error=>{postcodeLoader=null;throw error;});
+  return postcodeLoader;
 }
-function renderAddressCandidates(items,msg){
-  const unique=[];
-  for(const item of items){
-    const key=`${item.lat.toFixed(6)},${item.lng.toFixed(6)},${item.address}`;
-    if(!unique.some(x=>x.key===key)) unique.push({...item,key});
-  }
-  addressCandidates=unique.slice(0,10);
-  if(!addressCandidates.length){
-    msg.textContent='주소를 찾지 못했습니다. 예: 전라남도 장흥군 장흥읍 장흥로 15';
-    msg.style.color='#C70026';
-    return;
-  }
-  msg.style.color='#3A4550';
-  msg.innerHTML=`<div style="font-size:12px;font-weight:800;margin-top:9px">검색 결과 ${addressCandidates.length}건 · 주소를 선택하세요</div><div class="addr-results">${addressCandidates.map((c,i)=>`<button type="button" class="addr-result" data-addr-index="${i}"><b>${sfEsc(c.address)}</b>${c.detail?`<span>${sfEsc(c.detail)}</span>`:''}</button>`).join('')}</div>`;
-  msg.querySelectorAll('[data-addr-index]').forEach(btn=>btn.onclick=()=>selectAddressCandidate(Number(btn.dataset.addrIndex)));
-}
-
-function searchAddr(){
-  const q=($('addrTyped')&&$('addrTyped').value||'').trim();
-  const msg=$('addrMsg');
-  if(!q){ msg.textContent='주소를 입력해 주세요.'; msg.style.color='#C70026'; return; }
-
-  msg.textContent='주소 확인 중…';
-  msg.style.color='#3A4550';
-
-  ensureKakao(async()=>{
-    if(!(KAKAO_KEY&&kakaoReady&&window.kakao&&kakao.maps&&kakao.maps.services)){
-      msg.textContent='지도 서비스를 준비 중입니다. 잠시 후 다시 눌러 주세요.';
-      msg.style.color='#3A4550';
-      return;
-    }
-
-    const geo=new kakao.maps.services.Geocoder(), places=new kakao.maps.services.Places(), queries=addressQueries(q);
-    const addressSearch=query=>new Promise(resolve=>geo.addressSearch(query,(data,status)=>resolve(status===kakao.maps.services.Status.OK?(data||[]):[])));
-    const keywordSearch=query=>new Promise(resolve=>places.keywordSearch(query,(data,status)=>resolve(status===kakao.maps.services.Status.OK?(data||[]):[])));
-    const [addressSets,placeSets]=await Promise.all([
-      Promise.all(queries.map(addressSearch)),
-      Promise.all(queries.map(keywordSearch)),
-    ]);
-    const items=[];
-    addressSets.flat().forEach(result=>{
-      const road=result.road_address, jibun=result.address;
-      const address=(road&&road.address_name)||(jibun&&jibun.address_name);
-      if(!address)return;
-      const detail=road&&jibun&&road.address_name!==jibun.address_name?`지번 ${jibun.address_name}`:'';
-      items.push({lat:parseFloat(result.y),lng:parseFloat(result.x),address,detail,region:regionFromKakaoAddr(jibun)||regionFromKakaoAddr(road)||(me&&me.region)});
-    });
-    placeSets.flat().forEach(place=>{
-      const address=place.road_address_name||place.address_name||place.place_name;
-      if(!address)return;
-      const detail=[place.place_name,place.address_name].filter(v=>v&&v!==address).join(' · ');
-      items.push({lat:parseFloat(place.y),lng:parseFloat(place.x),address,detail,region:(me&&me.region)});
-    });
-    renderAddressCandidates(items,msg);
-  });
+async function searchAddr(){
+  const input=$('addrTyped'), msg=$('addrMsg');
+  const query=normalizeAddressQuery(input?.value||'');
+  if(!query){msg.textContent='도로명이나 건물명을 입력해 주세요.';return;}
+  const version=++addressSearchVersion;
+  const current=()=>version===addressSearchVersion && $('addrMsg')===msg && normalizeAddressQuery(input.value)===query;
+  msg.textContent='주소 검색 중…';
+  try{
+    await loadPostcode();
+    if(!current())return;
+    msg.textContent='';
+    const host=document.createElement('div');
+    host.style.cssText='width:100%;height:460px;max-height:65vh;margin-top:8px;';
+    msg.appendChild(host);
+    const Postcode=window.kakao?.Postcode||window.daum?.Postcode;
+    new Postcode({
+      width:'100%',height:'100%',minWidth:240,
+      oncomplete:data=>{
+        if(!current())return;
+        const address=data.userSelectedType==='J'?data.jibunAddress:data.roadAddress;
+        if(!address)return;
+        // Keep the chosen address even when coordinate lookup is unavailable.
+        cur.lat=null;cur.lng=null;cur.addr=address;
+        cur.region=data.sigungu||'';
+        $('addr').value=address;
+        setLocReady();
+        $('coord').textContent='';
+        msg.textContent='주소 선택 완료 · 지도 위치 확인 중…';
+        const failure=()=>{
+          if(!current())return;
+          msg.textContent='주소는 선택됐지만 지도 위치를 확인하지 못했습니다. 지도에서 위치를 지정해 주세요.';
+        };
+        const timer=setTimeout(failure,12000);
+        ensureKakao(()=>{
+          if(!current()){clearTimeout(timer);return;}
+          if(!window.kakao?.maps?.services || !kakaoReady){clearTimeout(timer);failure();return;}
+          new kakao.maps.services.Geocoder().addressSearch(address,(results,status)=>{
+            clearTimeout(timer);
+            if(!current())return;
+            const match=results?.[0], lat=Number(match?.y), lng=Number(match?.x);
+            if(status!==kakao.maps.services.Status.OK || !Number.isFinite(lat)||!Number.isFinite(lng)){failure();return;}
+            applySearchedLocation(lat,lng,address,data.sigungu,msg);
+          });
+        });
+      }
+    }).embed(host,{q:query});
+  }catch(error){if(current())msg.textContent=error.message;}
 }
 function resetMapEl(){
   const el=$('cmap'); if(!el) return null;
@@ -806,8 +799,8 @@ async function editReport(id){
         <button class="lmode" onclick="openAddrInput()">✍️ 주소 입력</button>
       </div>
       <div id="addrBox" style="display:none;margin-top:11px">
-        <input class="addr-in" id="addrTyped" placeholder="예: 장흥읍 흥성로 45" onkeydown="if(event.key==='Enter')searchAddr()">
-        <button class="addr-go" onclick="searchAddr()">확인</button>
+        <input class="addr-in" id="addrTyped" placeholder="도로명·건물명 (예: 장흥로15)" onkeydown="if(event.key==='Enter')searchAddr()">
+        <button class="addr-go" onclick="searchAddr()">검색</button>
         <div class="addr-msg" id="addrMsg"></div>
       </div>
       <div id="cmap"></div>
@@ -898,8 +891,8 @@ function welfareForm(){
         <button class="lmode" onclick="openAddrInput()">✍️ 주소 입력</button>
       </div>
       <div id="addrBox" style="display:none;margin-top:11px">
-        <input class="addr-in" id="addrTyped" placeholder="예: 장흥읍 물레방앗간길 7" onkeydown="if(event.key==='Enter')searchAddr()">
-        <button class="addr-go" onclick="searchAddr()">확인</button>
+        <input class="addr-in" id="addrTyped" placeholder="도로명·건물명 (예: 장흥로15)" onkeydown="if(event.key==='Enter')searchAddr()">
+        <button class="addr-go" onclick="searchAddr()">검색</button>
         <div class="addr-msg" id="addrMsg"></div>
       </div>
       <div id="cmap"></div>
