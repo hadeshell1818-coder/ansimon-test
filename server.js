@@ -962,7 +962,7 @@ const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` :
 const isSafetyCtl = u => !!u && u.kind === 'safety' && u.org === SAFETY_OFFICE;
 const safetyCarrier = u => (u && u.kind === 'carrier') ? rosterById(u.id) : null;
 
-let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, notices: [], zones: null, roster: null };
+let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], zones: null, roster: null };
 function saveSafety() {
   try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); }
 }
@@ -1335,18 +1335,22 @@ app.get('/api/safety/files/:hid/:kind', (req, res) => {
 
 /* ===== 안심ON v2: 귀국보고(건강+장비), 공지, 구역/집배원 기준정보 ===== */
 function ensureSafetyCollections(){
-  SAFE.returns = SAFE.returns || {}; SAFE.notices = SAFE.notices || [];
+  SAFE.returns = SAFE.returns || {}; SAFE.absences = SAFE.absences || {}; SAFE.notices = SAFE.notices || [];
   SAFE.zones = ZONES; SAFE.roster = ROSTER;
 }
 function returnRows(d){
-  ensureSafetyCollections(); const day=SAFE.returns[d]||{};
-  return ROSTER.map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zone,phone:r.phone||'',report:day[r.id]||null}));
+  ensureSafetyCollections(); const day=SAFE.returns[d]||{}, absent=SAFE.absences[d]||{};
+  return ROSTER.map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zone,phone:r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
 }
 function returnSummary(rows){
-  const reported=rows.filter(r=>r.report).length, body=rows.filter(r=>r.report?.bodyIssue).length, equipment=rows.filter(r=>r.report?.equipmentIssue).length;
-  const issue=rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)).length;
-  const actionPending=rows.filter(r=>r.report&&(r.report.bodyIssue||r.report.equipmentIssue)&&r.report.action?.status!=='done').length;
-  return {target:rows.length,reported,missing:rows.length-reported,body,equipment,issue,actionPending,ok:reported-issue};
+  const active=rows.filter(r=>!r.absence), reportedRows=active.filter(r=>r.report), reported=reportedRows.length;
+  const healthOnly=reportedRows.filter(r=>r.report.bodyIssue&&!r.report.equipmentIssue).length;
+  const equipmentOnly=reportedRows.filter(r=>!r.report.bodyIssue&&r.report.equipmentIssue).length;
+  const both=reportedRows.filter(r=>r.report.bodyIssue&&r.report.equipmentIssue).length;
+  const ok=reportedRows.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length;
+  const controlConfirmed=reportedRows.filter(r=>r.report.source==='control').length;
+  const actionPending=reportedRows.filter(r=>(r.report.bodyIssue||r.report.equipmentIssue)&&r.report.action?.status!=='done').length;
+  return {total:rows.length,absent:rows.length-active.length,target:active.length,reported,missing:active.length-reported,ok,healthOnly,equipmentOnly,both,issue:healthOnly+equipmentOnly+both,controlConfirmed,selfReported:reported-controlConfirmed,actionPending};
 }
 app.get('/api/on/return/me',(req,res)=>{
   const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'집배원 계정만 이용할 수 있습니다.'});
@@ -1360,12 +1364,29 @@ app.post('/api/on/return',(req,res)=>{
   if(bodyIssue&&!bodyDetail)return res.status(400).json({error:'건강 이상 내용을 간단히 적어주세요.'});
   if(equipmentIssue&&!equipmentDetail)return res.status(400).json({error:'장비 이상 내용을 간단히 적어주세요.'});
   const d=kstDate(); ensureSafetyCollections(); SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][me.id];
-  SAFE.returns[d][me.id]={returned:true,bodyIssue,equipmentIssue,bodyDetail:bodyIssue?bodyDetail:'',equipmentDetail:equipmentIssue?equipmentDetail:'',at:new Date().toISOString(),action:prev?.action||null};
+  SAFE.returns[d][me.id]={returned:true,source:'self',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?bodyDetail:'',equipmentDetail:equipmentIssue?equipmentDetail:'',at:new Date().toISOString(),action:prev?.action||null};
   saveSafety(); broadcastSafety(); res.json({ok:true});
 });
 app.get('/api/on/returns',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String(req.query.date||kstDate()).slice(0,10); const rows=returnRows(d);
   res.json({date:d,rosterSource:'등록 집배원 명부',summary:returnSummary(rows),rows});
+});
+app.post('/api/on/absences',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},d=String(b.date||kstDate()).slice(0,10);
+  ensureSafetyCollections(); SAFE.absences[d]={};
+  const items=Array.isArray(b.items)?b.items:[]; items.forEach(x=>{if(rosterById(x.id)){const reason=String(x.reason||'결원').trim().slice(0,80);SAFE.absences[d][x.id]={reason,at:new Date().toISOString(),by:u.name};}});
+  saveSafety();broadcastSafety();const rows=returnRows(d);res.json({ok:true,date:d,summary:returnSummary(rows),rows});
+});
+app.post('/api/on/returns/:cid/control-confirm',(req,res)=>{
+  const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},d=String(b.date||kstDate()).slice(0,10), cid=req.params.cid;
+  if(!rosterById(cid))return res.status(404).json({error:'집배원을 찾을 수 없습니다.'}); ensureSafetyCollections();
+  if((SAFE.absences[d]||{})[cid])return res.status(409).json({error:'오늘 결원 처리된 집배원입니다.'});
+  const bodyIssue=!!b.bodyIssue,equipmentIssue=!!b.equipmentIssue,callNote=String(b.callNote||'').trim().slice(0,300);
+  if(!callNote)return res.status(400).json({error:'간단한 통화내역을 적어주세요.'});
+  SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][cid];
+  SAFE.returns[d][cid]={returned:true,source:'control',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?String(b.bodyDetail||'').trim().slice(0,300):'',equipmentDetail:equipmentIssue?String(b.equipmentDetail||'').trim().slice(0,300):'',callNote,confirmedBy:u.name,at:new Date().toISOString(),action:prev?.action||null};
+  SAFE.calls.unshift({id:nextSafeId('C'),carrierId:cid,at:new Date().toISOString(),note:'[귀국 미보고 확인] '+callNote,by:u.name});
+  saveSafety();broadcastSafety();res.json({ok:true});
 });
 app.post('/api/on/returns/:cid/action',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String((req.body||{}).date||kstDate()).slice(0,10);
@@ -1404,8 +1425,8 @@ app.get('/api/safety/evidence',(req,res)=>{
   Object.keys(SAFE.returns||{}).filter(d=>d>=start&&d<=end).sort().forEach(date=>{
     returnRows(date).forEach(r=>returns.push({date,...r}));
   });
-  const reports=returns.filter(r=>r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue);
-  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length},hazards,calls,alerts,returns});
+  const reports=returns.filter(r=>r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue), absences=returns.filter(r=>r.absence);
+  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts,returns});
 });
 app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
 app.post('/api/safety/config/zones',(req,res)=>{
