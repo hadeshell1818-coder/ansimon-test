@@ -253,7 +253,9 @@
 
 <script>
 /* ===== 상태 ===== */
-let token=sessionStorage.getItem('cv_token')||null;
+// 모바일/PWA 창이 운영체제에 의해 종료돼도 서버 세션이 유효한 동안 로그인을 복구한다.
+let token=localStorage.getItem('cv_token')||sessionStorage.getItem('cv_token')||null;
+if(token){ localStorage.setItem('cv_token',token); sessionStorage.removeItem('cv_token'); }
 let me=null, KAKAO_KEY='', kakaoReady=false;
 let cur={};
 const $=id=>document.getElementById(id);
@@ -302,7 +304,7 @@ async function doLogin(){
     const d=await r.json();
     if(!r.ok){ $('lerr').textContent=d.error||'로그인 실패'; return; }
     if(d.user.kind!=='carrier'){ $('lerr').textContent='집배원·직원 계정으로 로그인하세요.'; return; }
-    token=d.token; me=d.user; sessionStorage.setItem('cv_token',token);
+    token=d.token; me=d.user; localStorage.setItem('cv_token',token);
     $('lid').value='';$('lpw').value='';$('lerr').textContent='';
     showApp();
   }catch(e){ $('lerr').textContent='서버 연결 실패'; }
@@ -311,6 +313,7 @@ function logout(){
   if(token) fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{});
   token=null;
   me=null;
+  localStorage.removeItem('cv_token');
   sessionStorage.removeItem('cv_token');
   sfStop();
   $('app').classList.add('hidden');
