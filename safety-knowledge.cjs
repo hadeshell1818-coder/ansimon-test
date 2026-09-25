@@ -50,7 +50,8 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     configured,
     async list() {
       if (!configured) return { connected: false, documents: [], candidates: seeds, message: 'Supabase 미연결 · 출처 후보만 준비됨' };
-      const documents = await call('?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,created_at&order=created_at.desc&limit=500');
+      const documents = await call('?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,created_at,safety_import_rows(count)&order=created_at.desc&limit=500');
+      documents.forEach(doc => { doc.case_count = doc.safety_import_rows?.[0]?.count || 0; });
       return { connected: true, documents, candidates: seeds, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 (최대 500건 표시)` };
     },
     async search(query) {

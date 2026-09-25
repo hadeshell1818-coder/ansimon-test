@@ -103,7 +103,7 @@ function renderSourceRows() {
     const url = safeSourceUrl(item.source_url);
     return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small></td>
       <td>${item.stored ? 'Supabase 등록' : '출처 후보 · 미적재'}<small>${status[item.review_status] || '검토 대기'}</small></td>
-      <td>${esc(item.rights_note)}<small>원문 본문·AI 색인 미등록</small></td></tr>`;
+      <td>${esc(item.rights_note)}<small>${item.case_count ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록` : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
 function renderLibrary() {
