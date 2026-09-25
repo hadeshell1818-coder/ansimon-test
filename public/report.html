@@ -581,6 +581,13 @@ function applySearchedLocation(la,ln,shown,region,msg){
   setTimeout(()=>{ if(msg && msg.textContent.startsWith('✓')) msg.textContent=''; },1800);
 }
 
+function addressQueries(raw){
+  const spaced=raw.replace(/([가-힣A-Za-z])\s*(\d+(?:-\d+)?)$/,'$1 $2').replace(/\s+/g,' ').trim();
+  const region=(me&&me.region)||'';
+  const province=region==='장흥군'?'전라남도 ':'';
+  return [...new Set([raw,spaced,region&&`${region} ${spaced}`,province&&`${province}${region} ${spaced}`].filter(Boolean))];
+}
+
 function searchAddr(){
   const q=($('addrTyped')&&$('addrTyped').value||'').trim();
   const msg=$('addrMsg');
@@ -596,43 +603,44 @@ function searchAddr(){
       return;
     }
 
-    const geo=new kakao.maps.services.Geocoder();
+    const geo=new kakao.maps.services.Geocoder(), queries=addressQueries(q);
 
-    // 1차: 정확한 도로명/지번 주소 검색
-    geo.addressSearch(q,(res,st)=>{
-      if(st===kakao.maps.services.Status.OK && res[0]){
+    // 정확한 주소부터 지역명이 보완된 주소까지 순서대로 확인한다.
+    const tryAddress=i=>{
+      if(i>=queries.length) return tryKeyword(0);
+      geo.addressSearch(queries[i],(res,st)=>{
+        if(st!==kakao.maps.services.Status.OK || !res[0]) return tryAddress(i+1);
         const la=parseFloat(res[0].y), ln=parseFloat(res[0].x);
         const r=res[0].road_address, j=res[0].address;
-        const shown=(r&&r.address_name)||(j&&j.address_name)||q;
+        const shown=(r&&r.address_name)||(j&&j.address_name)||queries[i];
         const region=regionFromKakaoAddr(j)||regionFromKakaoAddr(r)||(me&&me.region);
         applySearchedLocation(la,ln,shown,region,msg);
+      });
+    };
+
+    // 주소 DB에 없으면 읍·면·건물명 검색으로 한 번 더 찾는다.
+    const places=new kakao.maps.services.Places();
+    const tryKeyword=i=>{
+      if(i>=queries.length){
+        msg.textContent='주소를 찾지 못했습니다. 예: 전라남도 장흥군 장흥읍 장흥로 15';
+        msg.style.color='#C70026';
         return;
       }
-
-      // 2차: 읍·면·건물명·불완전한 주소도 찾도록 키워드 검색
-      const places=new kakao.maps.services.Places();
-      places.keywordSearch(q,(data,status)=>{
-        if(status===kakao.maps.services.Status.OK && data && data[0]){
-          const p=data[0];
-          const la=parseFloat(p.y), ln=parseFloat(p.x);
-          const shown=p.road_address_name||p.address_name||p.place_name||q;
-          // 키워드 검색 결과엔 시/구 정보가 없으므로, 실제 좌표로 역지오코딩해서
-          // 지역을 다시 판정한다 (그냥 me.region으로 넘기면 집배원 소속 지역으로
-          // 잘못 잡혀서, 예를 들어 광주에서 신고해도 장흥군으로 접수될 수 있음).
-          geo.coord2Address(ln,la,(cres,cst)=>{
-            let region=(me&&me.region);
-            if(cst===kakao.maps.services.Status.OK && cres[0]){
-              const cr=cres[0].road_address, cj=cres[0].address;
-              region=regionFromKakaoAddr(cj)||regionFromKakaoAddr(cr)||region;
-            }
-            applySearchedLocation(la,ln,shown,region,msg);
-          });
-        } else {
-          msg.textContent='주소를 찾지 못했습니다. 도로명과 건물번호를 확인해 주세요.';
-          msg.style.color='#C70026';
-        }
+      places.keywordSearch(queries[i],(data,status)=>{
+        if(status!==kakao.maps.services.Status.OK || !data || !data[0]) return tryKeyword(i+1);
+        const p=data[0], la=parseFloat(p.y), ln=parseFloat(p.x);
+        const shown=p.road_address_name||p.address_name||p.place_name||queries[i];
+        geo.coord2Address(ln,la,(cres,cst)=>{
+          let region=(me&&me.region);
+          if(cst===kakao.maps.services.Status.OK && cres[0]){
+            const cr=cres[0].road_address, cj=cres[0].address;
+            region=regionFromKakaoAddr(cj)||regionFromKakaoAddr(cr)||region;
+          }
+          applySearchedLocation(la,ln,shown,region,msg);
+        });
       });
-    });
+    };
+    tryAddress(0);
   });
 }
 function resetMapEl(){
