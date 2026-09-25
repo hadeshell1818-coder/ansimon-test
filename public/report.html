@@ -482,12 +482,14 @@ function showManualLocationPicker(){
     <div class="save-sub">분야는 AI가 자동으로 분류해요</div>`;
 }
 async function submitWithManualLocation(){
-  if(!cur.lat){ toast('먼저 위치를 선택해 주세요'); return; }
+  const address=($('addr').value||cur.addr||'').trim();
+  const hasCoordinates=Number.isFinite(cur.lat)&&Number.isFinite(cur.lng);
+  if(!address&&!hasCoordinates){ toast('주소 또는 지도 위치를 선택해 주세요'); return; }
   const btn=$('saveBtn'); btn.disabled=true; btn.textContent='접수 중…';
-  cur.addr=$('addr').value||cur.addr;
+  cur.addr=address;
   try{
     await api('/api/reports',{method:'POST',body:JSON.stringify({
-      region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
+      region:cur.region||me.region, addr:cur.addr||'', lat:hasCoordinates?cur.lat:null, lng:hasCoordinates?cur.lng:null,
       memo:cur.memo||'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
     doneScreen();
   }catch(e){ btn.disabled=false; btn.textContent='위치 확정하고 접수 ›'; toast('전송 실패 · 다시 시도해 주세요'); }
@@ -628,7 +630,7 @@ async function searchAddr(){
         msg.textContent='주소 선택 완료 · 지도 위치 확인 중…';
         const failure=()=>{
           if(!current())return;
-          msg.textContent='주소는 선택됐지만 지도 위치를 확인하지 못했습니다. 지도에서 위치를 지정해 주세요.';
+          msg.textContent='주소 선택 완료 · 지도 좌표 없이 접수할 수 있습니다.';
         };
         const timer=setTimeout(failure,12000);
         ensureKakao(()=>{
