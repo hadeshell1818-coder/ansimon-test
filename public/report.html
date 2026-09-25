@@ -169,6 +169,21 @@
   .sf-al{border-left:4px solid var(--line);padding:8px 10px;margin-bottom:8px;background:#F7F9FA;border-radius:0 10px 10px 0;}
   .sf-al .m{font-size:11px;color:var(--ink-2);font-weight:700;margin-bottom:3px;}
   .sf-al .t{font-size:14px;font-weight:700;line-height:1.45;}
+
+  /* 모바일 첫 화면: 적은 색상, 넓은 터치 영역, 단계 최소화 */
+  .wrap{padding:16px 16px 28px;}
+  .home-welcome{font-size:15px;color:#17212B;margin:2px 0 20px;line-height:1.5;}
+  .home-welcome b{font-weight:800;}.home-welcome span{display:block;font-size:12px;color:#687582;margin-top:3px;}
+  .home-section{margin-bottom:18px;}.home-section-title{font-size:14px;font-weight:800;margin:0 0 10px;color:#1E2933;}
+  .home-quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .quick-action{min-height:108px;border:1px solid #E3C5C9;background:#FFF9F9;color:#991B2B;border-radius:14px;padding:13px 7px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-family:inherit;}
+  .quick-action b{font-size:15px}.quick-action small{font-size:11px;color:#815D64}.quick-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#B91C32;color:#fff;font-size:20px;font-weight:800;}
+  .home-action{width:100%;min-height:76px;display:flex;align-items:center;text-align:left;gap:13px;background:#fff;border:1px solid #E1E6EB;border-radius:13px;margin-bottom:9px;padding:13px 15px;font-family:inherit;color:#1E2933;}
+  .home-action-icon{display:grid;place-items:center;width:37px;height:37px;border-radius:10px;background:#F0F3F6;color:#334155;font-size:23px;flex:none;}
+  .home-action span:nth-child(2){flex:1}.home-action b,.home-action small{display:block}.home-action b{font-size:15px}.home-action small{font-size:11.5px;color:#6B7785;margin-top:4px}.home-chevron{font-size:23px;color:#A2ACB7;}
+  .home-section .sf-box{padding:14px;margin:0;}.shift-label{font-size:12px;font-weight:800;color:#465260}.shift-label small{font-weight:500;color:#7C8794;margin-left:5px}.home-section .sf-shift{border:0;padding:0;margin:10px 0 0;}.home-section .sf-shift .row3{gap:6px;}.home-section .sf-shift button.opt{font-size:12px;padding:12px 3px;}.home-section .sf-note{margin-top:9px;}.shift-device-note{font-size:11px;color:#6D7782;margin-top:8px;}
+  .history-link{width:100%;border:1px solid #E1E6EB;border-radius:12px;background:#fff;padding:14px;text-align:left;font-size:13px;font-weight:700;color:#425466;font-family:inherit;}.history-link span{float:right;font-size:17px}.home-emergency-note{font-size:10.5px;color:#7B858F;text-align:center;line-height:1.5;margin-top:14px;}
+  .quick-action:active,.home-action:active,.history-link:active{transform:scale(.99)}
 </style>
 </head>
 <body>
@@ -281,11 +296,33 @@ function showApp(){
   sfInit();
 }
 
-/* ===== 홈 + 내 신고 내역 ===== */
-async function home(){
+/* ===== 간결한 홈 · 신고내역은 별도 화면 ===== */
+function home(){
   cur={};
+  $('cw').innerHTML=`
+    ${installBanner()}
+    <div class="home-welcome"><b>${sfEsc(me.name)}</b> · ${sfEsc(me.org||'')}<span>현장에서 바로 신고하고 안전을 확인하세요.</span></div>
+    <section class="home-section urgent-section" aria-label="긴급 위험 알림">
+      <div class="home-section-title">긴급 위험 알림</div>
+      <div class="home-quick">
+        <button class="quick-action" onclick="sfCall()"><span class="quick-icon">☎</span><b>관제실 전화</b><small>바로 전화 연결</small></button>
+        <button class="quick-action" onclick="sfVoiceScreen()"><span class="quick-icon">!</span><b>위험 알리기</b><small>음성으로 상황 전달</small></button>
+      </div>
+    </section>
+    <section class="home-section" aria-label="일반 신고">
+      <button class="home-action" onclick="startQuickReport()"><span class="home-action-icon">▣</span><span><b>안심신고</b><small>사진으로 신고 · AI 자동분류</small></span><span class="home-chevron">›</span></button>
+      <button class="home-action" onclick="pickCat('welfare')"><span class="home-action-icon">♡</span><span><b>복지위기 알림</b><small>도움이 필요한 이웃 알리기</small></span><span class="home-chevron">›</span></button>
+    </section>
+    <section class="home-section" aria-label="업무종료 점검">
+      <div class="home-section-title">업무종료 점검</div>
+      <div id="sfBox" class="sf-box">${SF&&SF.role==='carrier'?sfShiftHomeHtml():'<div class="sf-note">점검 정보를 불러오는 중입니다.</div>'}</div>
+    </section>
+    <button class="history-link" onclick="showReportHistory()">내 신고내역 · 처리현황 <span>›</span></button>
+    <div class="home-emergency-note">생명·신체에 급박한 위험이 있다면 119 또는 112에 먼저 신고하세요.</div>`;
+}
+async function showReportHistory(){
   let mine=[];
-  try{ mine=(await api('/api/reports')).reports; }catch(e){}
+  try{ mine=(await api('/api/reports')).reports||[]; }catch(e){ toast('신고내역을 불러오지 못했습니다'); }
   const hist = mine.length? mine.slice(0,8).map(r=>{
       const unclassified = r.type===null;
       const closed = ['cancelled','done','noaction'].includes(r.status); // 이미 종결된 건은 분류상태 문구 대신 종결상태를 우선 표시
@@ -306,19 +343,8 @@ async function home(){
         <span class="row-arrow">›</span></div>`;
     }).join('')
     : `<div class="mine-empty">아직 접수한 신고가 없습니다.</div>`;
-  $('cw').innerHTML=`
-    ${installBanner()}
-    <div class="prof"><div class="av">📮</div>
-      <div><div class="nm">${me.name}</div><div class="og">${me.org}${me.zone?' · '+me.zone:''}</div></div></div>
-    ${sfBoxHtml()}
-    <div class="lead">사진만 찍으면 위치까지 자동으로 접수돼요</div>
-    <div class="h">무엇을 발견하셨나요?</div>
-    <div class="cats">
-      <button class="cat safe" onclick="startQuickReport()"><span class="ci">📷</span><span class="ctwrap"><span class="ct">안심 신고</span><span class="cs">도로위험·시설물위험·쓰레기·폐기물</span></span></button>
-      <button class="cat welfare" onclick="pickCat('welfare')"><span class="ci">🏠</span><span class="ctwrap"><span class="ct">복지 위기</span><span class="cs">돌봄필요·안부확인(직접 입력)</span></span></button>
-    </div>
-    <div class="mine-h">내 신고 내역 · 처리현황 <span style="font-weight:600;color:var(--ink-2);font-size:10.5px">(눌러서 상세보기 · 수정·취소)</span></div>
-    <div class="mine">${hist}</div>`;
+  $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="home()">‹ 홈</button></div>
+    <div class="h" style="font-size:19px">내 신고내역 · 처리현황</div><div class="mine">${hist}</div>`;
 }
 function installBanner(){
   const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
@@ -1026,8 +1052,21 @@ function sfOpenAlerts(){
 }
 
 /* ---------- 홈 화면 안전 카드 ---------- */
+function sfShiftHomeHtml(){
+  const st=SF.shift?.status||null, cur=sfShiftPick||st;
+  const statusText={ok:'이상 없음',pain:'경미한 통증',injury:'부상 있음'};
+  return `<div class="shift-label">건강 상태 <small>기존 보고 방식</small></div>
+    <div class="sf-shift"><div class="row3">
+      <button class="opt ok ${cur==='ok'?'on':''}" onclick="sfShift('ok')">이상 없음</button>
+      <button class="opt pain ${cur==='pain'?'on':''}" onclick="sfShift('pain')">경미한 통증</button>
+      <button class="opt injury ${cur==='injury'?'on':''}" onclick="sfShift('injury')">부상 있음</button>
+    </div></div>
+    ${sfShiftPick&&sfShiftPick!=='ok'?`<input class="f-in" id="sfShiftMemo" style="margin-top:9px" placeholder="증상을 간단히 적어주세요" maxlength="100"><button class="save" style="margin-top:8px;padding:12px" onclick="sfShiftSend()">보고하기</button>`:''}
+    <div class="sf-note">${st?'오늘 보고: '+statusText[st]+' · '+sfTime(SF.shift.at):'업무 종료 후 상태를 선택하세요.'}</div>
+    <div class="shift-device-note">장비 상태 점검은 별도 저장 기능 연결 후 추가됩니다.</div>`;
+}
 function sfBoxHtml(){ return (SF&&SF.role==='carrier')?`<div class="sf-box" id="sfBox">${sfBoxInner()}</div>`:'<div id="sfBox"></div>'; }
-function sfRenderBox(){ const el=$('sfBox'); if(!el) return; el.className='sf-box'; el.innerHTML=sfBoxInner(); }
+function sfRenderBox(){ const el=$('sfBox'); if(!el) return; el.className='sf-box'; el.innerHTML=sfShiftHomeHtml(); }
 function sfBoxInner(){
   const st=SF.shift?.status||null, cur=sfShiftPick||st;
   const mine=(SF.myHazards||[]).slice(0,3).map(h=>`<div>🎙 ${sfTime(h.createdAt)} ${sfEsc((h.transcript||'음성 신고').slice(0,22))}<b style="color:${SF_HZ[h.status][1]}">${SF_HZ[h.status][0]}</b></div>`).join('');
