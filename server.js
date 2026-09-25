@@ -1752,10 +1752,19 @@ function broadcastRisk() {
 }
 
 /* ---------- 조회 가공 ---------- */
+function riskBand(risk) {
+  if (risk == null) return null;
+  if (risk <= 3) return { key: 'very-low', label: '매우 낮음' };
+  if (risk <= 6) return { key: 'low', label: '낮음' };
+  if (risk <= 8) return { key: 'normal', label: '보통' };
+  if (risk <= 12) return { key: 'slightly-high', label: '약간 높음' };
+  if (risk <= 15) return { key: 'high', label: '높음' };
+  return { key: 'very-high', label: '매우 높음' };
+}
 function riskCalc(freq, sev) {
-  if (freq == null || sev == null) return { risk: null, allow: null };
+  if (freq == null || sev == null) return { risk: null, allow: null, band: null };
   const risk = freq * sev;
-  return { risk, allow: risk < RISK_THRESHOLD };
+  return { risk, allow: risk < RISK_THRESHOLD, band: riskBand(risk) };
 }
 function itemForMgr(it) {
   const c = riskCalc(it.frequency, it.severity);
@@ -1766,7 +1775,7 @@ function itemForMgr(it) {
     photoUrl: it.photoFile ? signedRiskUrl(it.id, "photo") : null,
     beforePhotoUrl: it.beforePhotoFile ? signedRiskUrl(it.id, "before") : null,
     afterPhotoUrl: it.afterPhotoFile ? signedRiskUrl(it.id, "after") : null,
-    riskValue: c.risk, allow: c.allow,
+    riskValue: c.risk, riskBand: c.band, allow: c.allow,
     photoFile: undefined, beforePhotoFile: undefined, afterPhotoFile: undefined,
   };
 }
@@ -1804,7 +1813,7 @@ function intakeRiskPhoto(u, b, viaTransfer) {
     note: String(b.note || b.transcript || '').slice(0, 300),
     photoFile, proc: b.proc || null, hazard: null, aiMode: 'pending', aiDraft: null,
     // 평가값(담당자 확정)
-    factor: null, currentControl: null, frequency: null, severity: null,
+    factor: null, currentControl: null, fieldReview: null, evidenceIds: [], frequency: null, severity: null,
     reduction: null, afterRisk: null, dueDate: null, dept: null, owner: null,
     beforePhotoFile: photoFile, afterPhotoFile: null, doneAt: null, transferNote: b.transferNote || null,
   };
@@ -1880,7 +1889,8 @@ app.patch('/api/risk/items/:id', (req, res) => {
   const str = (k, max = 300) => { if (typeof b[k] === 'string') it[k] = b[k].slice(0, max); };
   if (b.proc && procById(b.proc)) it.proc = b.proc;
   if (b.hazard && HAZARD_TYPES[b.hazard]) it.hazard = b.hazard;
-  str('factor'); str('currentControl'); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
+  str('factor'); str('currentControl'); str('fieldReview', 500); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
+  if (Array.isArray(b.evidenceIds)) it.evidenceIds = b.evidenceIds.filter(x => typeof x === 'string').slice(0, 20);
   const num = (k) => { if (b[k] === null) it[k] = null; else if (b[k] != null) { const n = +b[k]; if (n >= 1 && n <= 5) it[k] = n; } };
   num('frequency'); num('severity'); num('afterRisk');
   if (it.status === 'assessing' && it.frequency && it.severity) it.status = 'assessed';
@@ -1979,6 +1989,11 @@ function ensureRiskDemo() {
 }
 
 loadRisk();
+
+require('./safety-knowledge.cjs').mountKnowledge(app, req => {
+  const user = userFromReq(req);
+  return isSafetyMgr(user) ? user : null;
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.redirect('/dashboard.html'));

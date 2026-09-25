@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>위험성평가 · 장흥우체국 안전보건</title>
+<title>산업안전보건 관리 · 장흥우체국</title>
+<link rel="stylesheet" href="/safety-workspace.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
 <style>
   :root{
@@ -116,15 +117,15 @@
 <div id="app" class="hidden">
   <div class="top">
     <span class="badge">우체국</span>
-    <div class="sys">산업안전 위험성평가<small id="who">—</small></div>
+    <div class="sys">산업안전보건 관리<small id="who">—</small></div>
     <div class="sp"></div>
     <button class="tbtn" onclick="logout()">로그아웃</button>
   </div>
-  <div class="panel" id="on-knowledge" style="margin:12px 20px 0">안전지식 저장소 연결 상태: 로그인 후 확인</div>
-<div class="tabs">
-    <button class="tab on" id="tab-inbox" onclick="setTab('inbox')">판별 대기함 <span class="n hidden" id="inboxN"></span></button>
+  <div id="on-knowledge" role="status">안전지식 저장소: 확인 중</div>
+<div class="tabs" aria-label="안전관리 업무">
+    <button class="tab on" id="tab-inbox" onclick="setTab('inbox')">내부위험 접수 <span class="n hidden" id="inboxN"></span></button>
     <button class="tab" id="tab-table" onclick="setTab('table')">위험성평가표</button>
-    <button class="tab" id="tab-report" onclick="setTab('report')">청 보고</button>
+    <button class="tab" id="tab-library" onclick="setTab('library')">근거자료실</button>
   </div>
   <div class="wrap" id="content"></div>
 </div>
@@ -133,6 +134,7 @@
 <div class="lb" id="lb" onclick="this.classList.remove('on')"><img id="lbImg" src="" alt=""></div>
 <div class="toast" id="toast"></div>
 
+<script src="/safety-workspace.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -178,28 +180,30 @@ function enter(){
     ws.onmessage=e=>{ try{ const t=JSON.parse(e.data).type; if(t==='risk'||t==='safety') load(); }catch(_){} };
     ws.onclose=()=>{ if(token) setTimeout(open,3000); }; };
   open(); poll=setInterval(load,60000); load();
+  refreshKnowledge();
 }
 function setTab(t){ tab=t; document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id==='tab-'+t)); render(); }
 
 async function load(){
   try{ R=await api('/api/risk/state'); }catch(e){ return; }
   $('inboxN').textContent=R.inbox.length; $('inboxN').classList.toggle('hidden',!R.inbox.length);
-  render();
+  if(['inbox','table','report','actions'].includes(tab)) render();
 }
 const procName=id=>R.processes.find(p=>p.id===id)?.name||'-';
 function render(){
   if(!R) return;
   if(tab==='inbox') renderInbox();
   else if(tab==='table') renderTable();
-  else renderReport();
+  else if(tab==='report') renderReport();
+  else renderSafetyWorkspace(tab);
 }
 
 /* ---------- 판별 대기함 ---------- */
 function renderInbox(){
   const list=R.inbox;
   $('content').innerHTML=`<div class="panel">
-    <div class="ph">판별 대기함</div>
-    <div class="psub">현장에서 올라온 구조위험 사진입니다. 내근직원 신고는 바로, 집배원 신고는 확인 후 위험성평가로 올리세요. AI가 위험유형·유해위험요인·강도 초안과 누적 데이터 기반 빈도를 제안합니다.</div>
+    <div class="ph">내부위험 접수</div>
+    <div class="psub">담당자 검토 대기 · 사진 및 신고 원문</div>
     <div id="inboxList">${list.length?list.map(inboxCard).join(''):'<div class="empty">대기 중인 신고가 없습니다.</div>'}</div>
   </div>`;
 }
@@ -234,7 +238,8 @@ async function triage(id,decision){
   if(decision!=='promote' && !confirm(decision==='external'?'외부 사안으로 회부할까요?':'오신고로 폐기할까요?')) return;
   try{ await api('/api/risk/items/'+id+'/triage',{method:'POST',body:JSON.stringify({decision})});
     toast(decision==='promote'?'위험성평가표에 등록했습니다':'처리했습니다');
-    if(decision==='promote') setTab('table'); else load();
+    await load();
+    if(decision==='promote') { setTab('table'); editRow(id); }
   }catch(e){ toast(e.message); }
 }
 async function toUrgent(id){
@@ -249,7 +254,7 @@ function renderTable(){
   const rows=R.registered.filter(it=>it.status==='assessing'||it.status==='assessed'||it.status==='done');
   $('content').innerHTML=`<div class="panel">
     <div class="ph">위험성평가표 — 공정: 소포 외 <span class="psub" style="display:inline">(위험성 = 가능성 × 중대성, ${R.threshold}점 이상 허용불가)</span></div>
-    <div class="psub">AI 초안 점수는 파란 칸입니다. 담당자가 확정하면 위험성·허용여부가 자동 계산됩니다. 빈도 근거는 밑줄을 누르면 보입니다.</div>
+    <div class="psub">위험성 = 가능성(빈도) × 중대성(강도) · 담당자가 입력한 두 점수를 산술 계산합니다 · 9점 이상은 허용불가 기준</div>
     <div style="overflow-x:auto">
     <table class="ratable">
       <thead><tr>
@@ -269,12 +274,12 @@ function rowHtml(it){
   return `<tr>
     <td>${esc(procName(it.proc))}</td>
     <td class="l">${esc(it.workContent||'-')}</td>
-    <td class="l factor">${esc(it.factor||it.aiDraft?.factor||'-')}</td>
-    <td class="l ctrl">${photo?`<img src="${photo}" onclick="lightbox(this.src)"><br>`:''}${esc(it.currentControl||'-')}</td>
-    <td><input class="score ${freqAI?'ai':''}" id="f-${it.id}" value="${it.frequency??it.aiDraft?.frequency??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')">
+    <td class="l factor">${photo?`<img src="${esc(photo)}" onclick="lightbox(this.src)" alt="신고 원본 사진"><br>`:''}${esc(it.factor||it.aiDraft?.factor||'-')}</td>
+    <td class="l ctrl">${esc(it.currentControl||'-')}</td>
+    <td><input class="score" id="f-${it.id}" value="${it.frequency??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')">
       ${it.aiDraft?.frequencyReason?`<div class="aihint" onclick="alert('${esc(it.aiDraft.frequencyReason).replace(/'/g,"\\'")}')">근거</div>`:''}</td>
-    <td><input class="score ${sevAI?'ai':''}" id="s-${it.id}" value="${it.severity??it.aiDraft?.severity??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')"></td>
-    <td class="rv">${rv??'-'}</td>
+    <td><input class="score" id="s-${it.id}" value="${it.severity??''}" inputmode="numeric" maxlength="1" onchange="saveScore('${it.id}')"></td>
+    <td class="rv">${rv??'-'}${it.riskBand?`<small class="risk-band ${it.riskBand.key}">${esc(it.riskBand.label)}</small>`:''}</td>
     <td>${allow==null?'-':`<span class="allow ${allow?'ok':'no'}">${allow?'허용':'허용불가'}</span>`}</td>
     <td class="l" style="min-width:150px">${it.reduction?esc(it.reduction):(it.aiDraft?.controls?`<span style="color:var(--ai);font-size:11.5px">AI 추천: ${it.aiDraft.controls.map(esc).join(' / ')}</span>`:'-')}</td>
     <td>${it.afterRisk??'-'}</td>
@@ -288,21 +293,34 @@ async function saveScore(id){
   const body={}; if(f) body.frequency=+f; if(s) body.severity=+s;
   try{ await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)}); load(); }catch(e){ toast(e.message); }
 }
+function riskPreviewText(freq, sev){
+  const f=Number(freq), s=Number(sev);
+  if(!Number.isInteger(f)||f<1||f>5||!Number.isInteger(s)||s<1||s>5) return '가능성·중대성 점수를 모두 입력하세요.';
+  const risk=f*s;
+  const band=risk<=3?'매우 낮음':risk<=6?'낮음':risk<=8?'보통':risk<=12?'약간 높음':risk<=15?'높음':'매우 높음';
+  return `${f} × ${s} = ${risk}점 · ${band} · ${risk>=9?'허용불가':'허용 가능'}`;
+}
+function updateRiskPreview(){ const el=$('risk-preview'); if(el) el.textContent='현재 산출 위험성: '+riskPreviewText($('e-f')?.value,$('e-s')?.value); }
 function editRow(id){
   const it=R.registered.find(x=>x.id===id); const d=it.aiDraft||{};
   const opt=(arr,cur,val,lab)=>arr.map(x=>`<option value="${x[val]}" ${cur===x[val]?'selected':''}>${x[lab]}</option>`).join('');
   const hzArr=Object.entries(R.hazardTypes).map(([k,v])=>({k,label:v.label}));
+  beginEvidenceEdit(it);
   $('modalCard').innerHTML=`<h3>위험성평가 상세 · ${it.id}</h3>
+    ${(it.photoUrl||it.beforePhotoUrl)?`<img class="evidence-photo" src="${esc(it.photoUrl||it.beforePhotoUrl)}" alt="신고 원본 사진" onclick="lightbox(this.src)">`:''}
+    <p>${esc(it.note||'')}</p>
     <div class="fld"><label>공정</label><select id="e-proc">${R.processes.map(p=>`<option value="${p.id}" ${it.proc===p.id?'selected':''}>${p.name}</option>`).join('')}</select></div>
     <div class="fld"><label>작업내용</label><input id="e-work" value="${esc(it.workContent||'')}" placeholder="예: 롤파렛 취급"></div>
     <div class="fld"><label>위험유형</label><select id="e-hz">${hzArr.map(x=>`<option value="${x.k}" ${it.hazard===x.k?'selected':''}>${x.label}</option>`).join('')}</select></div>
     <div class="fld"><label>유해위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div>
     <div class="fld"><label>현재 안전보건조치</label><textarea id="e-ctrl">${esc(it.currentControl||'')}</textarea></div>
     <div style="display:flex;gap:10px">
-      <div class="fld" style="flex:1"><label>가능성(빈도) 1~5</label><input id="e-f" value="${it.frequency??d.frequency??''}" inputmode="numeric"></div>
-      <div class="fld" style="flex:1"><label>중대성(강도) 1~5</label><input id="e-s" value="${it.severity??d.severity??''}" inputmode="numeric"></div>
+      <div class="fld" style="flex:1"><label>가능성(빈도) 1~5</label><input id="e-f" value="${it.frequency??''}" inputmode="numeric" oninput="updateRiskPreview()"></div>
+      <div class="fld" style="flex:1"><label>중대성(강도) 1~5</label><input id="e-s" value="${it.severity??''}" inputmode="numeric" oninput="updateRiskPreview()"></div>
     </div>
-    ${d.frequencyReason?`<div class="ai-box" style="margin-bottom:12px"><span class="tag">AI 빈도 근거</span>${esc(d.frequencyReason)}</div>`:''}
+    <div id="risk-preview" class="risk-preview">현재 산출 위험성: ${riskPreviewText(it.frequency, it.severity)}</div>
+    <div class="fld"><label>현장 확인·평가 근거</label><textarea id="e-field">${esc(it.fieldReview||'')}</textarea></div>
+    ${evidenceEditorHtml(it)}
     <div class="fld"><label>위험성 감소대책</label><textarea id="e-red" placeholder="${d.controls?esc(d.controls.join(' / ')):''}">${esc(it.reduction||'')}</textarea>
       ${d.controls?`<div class="aihint" onclick="document.getElementById('e-red').value='${esc(d.controls.join('\\n')).replace(/'/g,"\\'")}'">AI 추천 대책 넣기</div>`:''}</div>
     <div style="display:flex;gap:10px">
@@ -321,8 +339,8 @@ function editRow(id){
 async function saveRow(id){
   const g=x=>document.getElementById(x).value.trim();
   const body={proc:g('e-proc'),hazard:g('e-hz'),workContent:g('e-work'),factor:g('e-factor'),currentControl:g('e-ctrl'),
-    reduction:g('e-red'),dueDate:g('e-due'),dept:g('e-dept'),owner:g('e-owner')};
-  const f=g('e-f'), s=g('e-s'); if(f)body.frequency=+f; if(s)body.severity=+s;
+    reduction:g('e-red'),dueDate:g('e-due'),dept:g('e-dept'),owner:g('e-owner'),fieldReview:g('e-field'),evidenceIds:selectedEvidence.map(x=>x.id)};
+  const f=g('e-f'), s=g('e-s'); body.frequency=f?+f:null; body.severity=s?+s:null;
   try{ await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)}); toast('저장했습니다'); closeModal(); load(); }
   catch(e){ toast(e.message); }
 }
@@ -397,9 +415,5 @@ function renderRepBody(){
 boot();
 </script>
 
-<script>
-(function(){async function refreshKnowledge(){if(!window.me||me.kind!=='safety_mgr')return;try{const d=await api('/api/on/knowledge/status');document.getElementById('on-knowledge').innerHTML='<b>📚 안전지식 저장소</b> · '+(d.connected?'연결됨':'미연결')+'<p>'+d.message+'</p><small>공개 사고사례·법령·우체국 승인 자료 검색은 향후 저장소 연결 후 사용합니다. 현재 AI 초안은 검증된 외부 근거가 아니며 담당자 현장 확인이 필요합니다.</small>'; }catch(e){document.getElementById('on-knowledge').textContent=e.message;}}
-const old=window.enter;window.enter=function(...args){const r=old.apply(this,args);refreshKnowledge();return r;};})();
-</script>
 </body>
 </html>
