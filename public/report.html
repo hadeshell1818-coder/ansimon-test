@@ -148,7 +148,7 @@
   @keyframes recpulse{0%,100%{box-shadow:0 0 0 0 rgba(200,16,46,.45)}50%{box-shadow:0 0 0 18px rgba(200,16,46,0)}}
   .rec-time{font-size:22px;font-weight:800;margin-top:12px;font-variant-numeric:tabular-nums;}
   .rec-live{min-height:22px;font-size:14px;color:var(--ink-2);margin:8px 4px;}
-  .sf-overlay{position:fixed;inset:0;z-index:3000;background:var(--urgent);color:#fff;display:none;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 22px) 22px calc(env(safe-area-inset-bottom,0px) + 22px);}
+  .sf-overlay{position:fixed;inset:0;height:100dvh;z-index:3000;background:var(--urgent);color:#fff;display:none;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 22px) 22px calc(env(safe-area-inset-bottom,0px) + 22px);overflow:hidden;}
   .sf-overlay.caution{background:#835500;}.sf-overlay.notice{background:#0E5E66;}
   .sf-overlay.on{display:flex;}
   .sf-overlay .ohead{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;}
@@ -156,9 +156,9 @@
   @keyframes bellshake{0%,100%{transform:rotate(0)}20%{transform:rotate(14deg)}40%{transform:rotate(-12deg)}60%{transform:rotate(8deg)}}
   @media (prefers-reduced-motion:reduce){.sf-overlay .ohead svg,.rec-btn.on{animation:none}}
   .sf-overlay .ometa{font-size:12.5px;opacity:.85;margin-top:6px;}
-  .sf-overlay .otext{flex:1;display:flex;align-items:center;font-size:26px;line-height:1.45;font-weight:800;word-break:keep-all;}
+  .sf-overlay .otext{flex:1;min-height:0;overflow-y:auto;display:flex;align-items:center;font-size:26px;line-height:1.45;font-weight:800;word-break:keep-all;}
   .sf-overlay .ocount{font-size:12px;font-weight:700;opacity:.85;margin-bottom:8px;}
-  .sf-overlay button{width:100%;border:none;background:#fff;color:var(--urgent);font-size:19px;font-weight:800;padding:20px;border-radius:16px;}
+  .sf-overlay button{width:100%;flex:0 0 auto;border:none;background:#fff;color:var(--urgent);font-size:19px;font-weight:800;padding:20px;border-radius:16px;}
   .sf-overlay.caution button{color:#835500;}.sf-overlay.notice button{color:#0E5E66;}
   .sf-overlay .ohint{text-align:center;font-size:12.5px;margin-top:10px;opacity:.9;}
   .sf-banner{position:fixed;left:10px;right:10px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:2500;background:#1F2A36;color:#fff;border-radius:14px;padding:13px 14px;display:none;gap:10px;align-items:flex-start;box-shadow:0 10px 30px rgba(0,0,0,.3);max-width:440px;margin:0 auto;}
@@ -1061,7 +1061,7 @@ function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');
  *  - 안전 알림 수신: 새 알림 한 건 표시, 긴급은 음성 안내, 확인 후 자동 닫기
  * 구역 명부에 없는 계정(예: 영업과 직원)은 이 기능이 보이지 않는다.
  * ===================================================================== */
-let SF=null, sfWs=null, sfPoll=null, sfReconnect=null, sfConnect=null, sfLoading=null, sfActx=null, sfShiftPick=null, sfActiveAlert=null;
+let SF=null, sfWs=null, sfPoll=null, sfReconnect=null, sfConnect=null, sfLoading=null, sfActx=null, sfShiftPick=null, sfActiveAlert=null, sfRequestedAlertId=null;
 const SF_LV={urgent:['긴급','var(--urgent)'],caution:['주의','var(--caution)'],notice:['전달말씀','var(--notice)']};
 const SF_HZ={pending:['관제실 확인 중','#7C8794'],dispatched:['알림 전파됨','#0B8A5B'],closed:['종결','#9AA4AE']};
 const SF_BELL='<svg class="bell" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"/></svg>';
@@ -1161,8 +1161,14 @@ async function sfLoad(){
 async function sfResume(){
   if(!token) return;
   await sfLoad();
+  if(SF?.role==='carrier' && sfRequestedAlertId) sfHandleAlerts();
   if(SF?.role==='carrier' && (!sfWs || sfWs.readyState===WebSocket.CLOSED)) sfConnect?.();
 }
+if('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message',event=>{
+  if(event.data?.type!=='safety-notification-open' || !event.data.alertId) return;
+  sfRequestedAlertId=event.data.alertId;
+  if(document.visibilityState==='visible') sfResume();
+});
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') sfResume(); });
 window.addEventListener('focus',sfResume);
 window.addEventListener('pageshow',sfResume);
@@ -1171,18 +1177,19 @@ const sfAlertKey=a=>`${a.id}:${a.version||0}`;
 
 function sfHandleAlerts(){
   if(document.visibilityState!=='visible') return;
-  const seen=sfSeen(), alertId=new URLSearchParams(location.search).get('alert');
+  const seen=sfSeen(), alertId=sfRequestedAlertId||new URLSearchParams(location.search).get('alert');
   const clicked=alertId&&SF.alerts.find(a=>a.id===alertId);
   const fresh=SF.alerts.filter(a=>a.version && !a.acked && !seen.has(sfAlertKey(a)))
     .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt));
   const active=SF.alerts.find(a=>!a.acked && a.id===sfActiveAlert?.id && a.version===sfActiveAlert?.version);
   const selected=alertId ? (clicked&&!clicked.acked?clicked:null) : (fresh[0]||active);
   if(selected){
+    const alreadyOpen=sfActiveAlert?.id===selected.id && sfActiveAlert?.version===selected.version;
     sfShowOverlay(selected);
-    if(alertId || fresh.includes(selected)) sfRing(selected.level,selected.text);
+    if(!alreadyOpen && (alertId || fresh.includes(selected))) sfRing(selected.level,selected.text);
   }else{ sfActiveAlert=null; $('sfOverlay').classList.remove('on'); }
   sfMarkSeen(fresh.map(sfAlertKey));
-  if(alertId){const url=new URL(location.href);url.searchParams.delete('alert');history.replaceState(null,'',url.pathname+url.search+url.hash);}
+  if(alertId){sfRequestedAlertId=null;const url=new URL(location.href);url.searchParams.delete('alert');history.replaceState(null,'',url.pathname+url.search+url.hash);}
 }
 function sfShowOverlay(a){
   sfActiveAlert={id:a.id,version:a.version};

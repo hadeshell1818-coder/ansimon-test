@@ -26,22 +26,24 @@ self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = new URL(event.notification.data?.url || '/report.html', self.location.origin).href;
   event.waitUntil((async () => {
+    const notify = client => {
+      const url = new URL(target);
+      client.postMessage?.({ type: 'safety-notification-open', alertId: url.searchParams.get('alert'), noticeId: url.searchParams.get('notice') });
+    };
     try {
-      const opened = await clients.openWindow(target);
-      if (opened) {
-        await opened.focus();
+      const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const app = windows.find(client => {
+        const url = new URL(client.url);
+        return url.origin === self.location.origin && url.pathname === '/report.html';
+      });
+      if (app) {
+        const opened = app.url === target ? app : await app.navigate(target);
+        await (opened || app).focus();
+        notify(opened || app);
         return;
       }
-    } catch (_) { /* Fall back to an existing app window. */ }
-
-    const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const app = windows.find(client => {
-      const url = new URL(client.url);
-      return url.origin === self.location.origin && url.pathname === '/report.html';
-    });
-    if (app) {
-      await app.focus();
-      if (app.url !== target) await app.navigate(target);
-    }
+    } catch (_) { /* Try opening a new app window. */ }
+    const opened = await clients.openWindow(target);
+    if (opened) { await opened.focus(); notify(opened); }
   })());
 });
