@@ -186,6 +186,20 @@
   .delivery .home-tile{border-color:#f5d9cb}.delivery .tile-icon{background:#ffede4;color:#b9563d}
   .reporting .home-tile{border-color:#d9eafa}.reporting .tile-icon{background:#e8f3ff;color:#3679c3}
   .returning .home-tile{border-color:#d4eee1}.returning .tile-icon{background:#e3f5eb;color:#268469}
+  /* 홈 화면: 선명한 구역 색상, 업무종료 보고는 간결하게 */
+  .home-section.delivery{--section-accent:#d94a36;--section-ink:#8c2c20;background:#ffdfd5;border-color:#f4ad9e;box-shadow:0 5px 15px rgba(191,66,47,.12);}
+  .home-section.reporting{--section-accent:#186ac0;--section-ink:#164e91;background:#d8eaff;border-color:#96c4f4;box-shadow:0 5px 15px rgba(27,105,184,.11);}
+  .home-section.returning{--section-accent:#188568;--section-ink:#17644f;background:#d7f2e7;border-color:#8dd4b8;box-shadow:none;padding:11px 13px;margin-bottom:11px;border-radius:15px;}
+  .delivery .home-tile{background:#fff7f3;border-color:#eaa38e;color:#852c1f;}
+  .reporting .home-tile{background:#f7fbff;border-color:#8ebce9;color:#164e91;}
+  .returning .home-tile{background:#f6fffa;border-color:#8dd4b8;color:#17644f;}
+  .delivery .tile-icon{background:#fbd0c2;color:#a73424;}
+  .reporting .tile-icon{background:#cbe2ff;color:#1457a0;}
+  .returning .tile-icon{background:#c5ead9;color:#17644f;}
+  .returning .home-section-title{font-size:13px;margin-bottom:8px;}
+  .returning .home-grid{gap:8px;}
+  .returning .home-tile{min-height:53px;padding:8px 6px;gap:6px;flex-direction:row;font-size:13px;border-radius:10px;box-shadow:none;}
+  .returning .tile-icon{width:26px;height:26px;border-radius:8px;font-size:16px;flex:0 0 26px;}
   .home-tile:active{transform:scale(.97);box-shadow:0 1px 4px rgba(36,55,75,.06);background:#fafcff;}
   .home-tile:focus-visible,.history-link:focus-visible{outline:3px solid #3679c3;outline-offset:3px;}
   .history-link{width:100%;border:1px solid #dce5ee;border-radius:13px;background:#fff;padding:14px 15px;text-align:left;font-size:13px;font-weight:750;color:#4b627b;font-family:inherit;box-shadow:0 2px 9px rgba(35,55,80,.04);}.history-link span{float:right;font-size:17px;color:#3b82c4}
@@ -326,8 +340,8 @@ function home(){
         <button class="home-tile" onclick="sfVoiceScreen()"><span class="tile-icon">🎙</span>음성신고</button>
       </div>
     </section>
-    <section class="home-section reporting" aria-label="신고하기">
-      <div class="home-section-title">신고하기</div>
+    <section class="home-section reporting" aria-label="안심·복지 신고">
+      <div class="home-section-title">안심·복지 신고</div>
       <div class="home-grid">
         <button class="home-tile" onclick="startQuickReport()"><span class="tile-icon">▣</span>안심신고</button>
         <button class="home-tile" onclick="pickCat('welfare')"><span class="tile-icon">♡</span>복지신고</button>
