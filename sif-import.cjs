@@ -1,4 +1,5 @@
 const XLSX = require('xlsx');
+const { classify } = require('./safety-taxonomy.cjs');
 
 const SIF_SOURCE_URL = 'https://www.data.go.kr/data/15140383/fileData.do';
 const SIF_TITLE = '산업재해 고위험요인(SIF) 아카이브';
@@ -84,6 +85,9 @@ function parseSifWorkbook(buffer, fileName = '') {
     }
   }
   if (!rows.length) throw new Error('제조업 등 또는 건설업 SIF 시트를 찾지 못했습니다. 원본 엑셀을 확인하세요.');
+  rows.forEach(row => {
+    row.raw_row._search = { version: 'postal-v1', method: 'keyword-rules', ...classify(row) };
+  });
   return { rows, sheets, source_url: SIF_SOURCE_URL, title: SIF_TITLE, publisher: SIF_PUBLISHER };
 }
 

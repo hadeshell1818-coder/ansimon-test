@@ -15,7 +15,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error(`자료실 연결 실패 (${response.status}). 프로젝트 설정과 SQL 적용 여부를 확인하세요.`);
-    return response.status === 204 ? null : response.json();
+    return response.status === 204 || options.headers?.Prefer?.includes('return=minimal') ? null : response.json();
   }
   async function call(query, options = {}) { return callResource('safety_documents', query, options); }
   function eq(value) { return encodeURIComponent(String(value)); }
@@ -58,7 +58,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       if (!configured) return { connected: false, results: [], message: 'Supabase 미연결 · 관련 근거를 검색할 수 없습니다.' };
       if (!q) return { connected: true, results: [], message: '검색어를 입력하세요.' };
       const documents = await call(`?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status&or=(title.ilike.*${encodeURIComponent(q)}*,publisher.ilike.*${encodeURIComponent(q)}*)&limit=30`);
-      const sections = await call(`?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(q)}*&limit=50`);
+      const sections = await callResource('safety_document_sections', `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(q)}*&limit=50`);
       const cases = await callResource('safety_import_rows', `?select=id,document_id,source_sheet,source_row,domain,industry_large,industry_medium,industry_small,work_category,work_name,unit_work,incident_type,incident_summary,hazard_object,high_risk_situation,causal_factors,reduction_measures,review_status&or=(incident_summary.ilike.*${encodeURIComponent(q)}*,hazard_object.ilike.*${encodeURIComponent(q)}*,high_risk_situation.ilike.*${encodeURIComponent(q)}*,causal_factors.ilike.*${encodeURIComponent(q)}*,reduction_measures.ilike.*${encodeURIComponent(q)}*,industry_large.ilike.*${encodeURIComponent(q)}*,industry_medium.ilike.*${encodeURIComponent(q)}*,industry_small.ilike.*${encodeURIComponent(q)}*)&limit=40`);
       const byId = new Map(documents.map(item => [item.id, item]));
       sections.forEach(section => { if (!byId.has(section.document_id)) byId.set(section.document_id, { id: section.document_id, title: '본문 근거', review_status: 'pending' }); });
@@ -95,7 +95,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       for (let index = 0; index < rows.length; index += chunkSize) {
         await callResource('safety_import_rows', '?on_conflict=source_url,source_sheet,source_row', {
           method: 'POST',
-          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
           body: JSON.stringify(rows.slice(index, index + chunkSize)),
         });
       }
