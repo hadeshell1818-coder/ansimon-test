@@ -17,6 +17,7 @@ const { WebSocketServer } = require('ws');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const webpush = require('web-push');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -36,6 +37,15 @@ const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const UP_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UP_DIR)) fs.mkdirSync(UP_DIR, { recursive: true });
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const PUSH_ENABLED = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@ansimon.local', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.warn('⚠️ VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 미설정 — 백그라운드 긴급알림이 비활성화됩니다.');
+}
 
 /* ===================== 복지 개인정보 암호화 ===================== */
 const WELFARE_KEY_SOURCE = process.env.WELFARE_DATA_KEY || process.env.PHOTO_SIGNING_KEY || '';
@@ -962,7 +972,7 @@ const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` :
 const isSafetyCtl = u => !!u && u.kind === 'safety' && u.org === SAFETY_OFFICE;
 const safetyCarrier = u => (u && u.kind === 'carrier') ? rosterById(u.id) : null;
 
-let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], zones: null, roster: null };
+let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], pushSubscriptions: {}, zones: null, roster: null };
 function saveSafety() {
   try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); }
 }
@@ -1213,6 +1223,7 @@ app.post('/api/safety/hazards/:id/dispatch', (req, res) => {
   a.fromHazard = h.id;
   h.status = 'dispatched'; h.alertId = a.id; h.handledBy = u.name; h.handledAt = a.createdAt;
   saveSafety(); broadcastSafety();
+  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
   res.json({ ok: true, alert: a });
 });
 
@@ -1240,6 +1251,26 @@ function createAlert(u, b) {
   SAFE.alerts.unshift(a);
   return a;
 }
+async function sendUrgentPush(a) {
+  if (!PUSH_ENABLED || a.level !== 'urgent') return;
+  ensureSafetyCollections();
+  const payload = JSON.stringify({
+    type: 'urgent', alertId: a.id, title: '긴급 안전 알림', body: a.text,
+    url: `/report.html?urgent=${encodeURIComponent(a.id)}`,
+  });
+  let changed = false;
+  await Promise.all(a.targets.flatMap(carrierId => (SAFE.pushSubscriptions[carrierId] || []).map(async subscription => {
+    try {
+      await webpush.sendNotification(subscription, payload, { TTL: 300, urgency: 'high', topic: a.id.slice(0, 32) });
+    } catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) {
+        SAFE.pushSubscriptions[carrierId] = (SAFE.pushSubscriptions[carrierId] || []).filter(s => s.endpoint !== subscription.endpoint);
+        changed = true;
+      } else console.error('urgent push fail', carrierId, e.statusCode || e.message);
+    }
+  })));
+  if (changed) saveSafety();
+}
 app.post('/api/safety/alerts', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
   const a = createAlert(u, req.body || {});
@@ -1248,7 +1279,28 @@ app.post('/api/safety/alerts', (req, res) => {
   const call = callId && SAFE.calls.find(c => c.id === callId);
   if (call) { call.alertId = a.id; a.fromCall = call.id; }
   saveSafety(); broadcastSafety();
+  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
   res.json({ ok: true, alert: a });
+});
+
+app.get('/api/push/config', (req, res) => {
+  const me = safetyCarrier(userFromReq(req));
+  if (!me) return res.status(403).json({ error: 'forbidden' });
+  res.json({ enabled: PUSH_ENABLED, publicKey: PUSH_ENABLED ? VAPID_PUBLIC_KEY : null });
+});
+app.post('/api/push/subscribe', (req, res) => {
+  const me = safetyCarrier(userFromReq(req));
+  if (!me) return res.status(403).json({ error: 'forbidden' });
+  if (!PUSH_ENABLED) return res.status(503).json({ error: '백그라운드 알림이 설정되지 않았습니다.' });
+  const subscription = req.body;
+  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    return res.status(400).json({ error: '올바르지 않은 알림 구독입니다.' });
+  }
+  ensureSafetyCollections();
+  const list = SAFE.pushSubscriptions[me.id] || [];
+  SAFE.pushSubscriptions[me.id] = [subscription, ...list.filter(s => s.endpoint !== subscription.endpoint)].slice(0, 5);
+  saveSafety();
+  res.json({ ok: true });
 });
 
 /* 수신확인은 긴급 알림만. 주의·전달말씀은 확인 버튼 자체가 없다. */
@@ -1336,6 +1388,7 @@ app.get('/api/safety/files/:hid/:kind', (req, res) => {
 /* ===== 안심ON v2: 귀국보고(건강+장비), 공지, 구역/집배원 기준정보 ===== */
 function ensureSafetyCollections(){
   SAFE.returns = SAFE.returns || {}; SAFE.absences = SAFE.absences || {}; SAFE.notices = SAFE.notices || [];
+  SAFE.pushSubscriptions = SAFE.pushSubscriptions || {};
   SAFE.zones = ZONES; SAFE.roster = ROSTER;
 }
 function returnRows(d){
@@ -1667,6 +1720,7 @@ app.post('/api/risk/items/:id/to-urgent', (req, res) => {
   if (a.error) return res.status(400).json(a);
   a.fromRisk = it.id; it.urgentAlertId = a.id;
   saveSafety(); saveRisk(); broadcastSafety(); broadcastRisk();
+  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
   res.json({ ok: true, alert: a });
 });
 

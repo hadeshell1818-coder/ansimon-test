@@ -328,6 +328,7 @@ function showApp(){
   $('topName').innerHTML=`AI 안심ON<small>우체국 직원 생활안전·환경·복지 통합 신고 플랫폼</small>`;
   home();
   sfInit();
+  sfPushInit(false);
 }
 
 /* ===== 간결한 홈 · 신고내역은 별도 화면 ===== */
@@ -335,6 +336,7 @@ function home(){
   cur={};
   $('cw').innerHTML=`
     ${installBanner()}
+    ${sfPushPromptHtml()}
     <div class="home-welcome"><b>${sfEsc(me.name)}</b> · ${sfEsc(me.org||'')}<span>필요한 기능을 바로 선택하세요.</span></div>
     <section class="home-section delivery" aria-label="배달위험 알림">
       <div class="home-section-title">배달위험 알림</div>
@@ -1004,10 +1006,39 @@ function sfBeep(times){
 function sfRing(level,text){
   const pat = level==='urgent' ? [1000,250,1000,250,1000,250,1500] : level==='caution' ? [400,150,400] : [250];
   try{ navigator.vibrate && navigator.vibrate(pat); }catch(e){}
-  sfBeep(level==='urgent'?4:level==='caution'?2:1);
+  const beep=()=>sfBeep(level==='urgent'?4:level==='caution'?2:1);
+  if(sfActx?.state==='suspended') sfActx.resume().then(beep).catch(()=>{}); else beep();
   if(level==='urgent' && text && 'speechSynthesis' in window){
-    try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance('긴급 안전 알림. '+text); u.lang='ko-KR'; u.rate=1; speechSynthesis.speak(u); }catch(e){}
+    try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance('긴급 안전 알림. '+text); u.lang='ko-KR'; u.rate=1; u.volume=1; speechSynthesis.speak(u); }catch(e){}
   }
+}
+
+function sfPushPromptHtml(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window) || Notification.permission==='granted') return '';
+  return `<button class="history-link" id="sfPushBtn" onclick="sfPushInit(true)">긴급 알림 켜기 <span>›</span></button>`;
+}
+function sfPushKey(value){
+  const pad='='.repeat((4-value.length%4)%4), raw=atob((value+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function sfPushInit(askPermission){
+  if(!token || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
+  try{
+    const cfg=await api('/api/push/config'); if(!cfg.enabled) return false;
+    const reg=await navigator.serviceWorker.register('/sw.js');
+    let permission=Notification.permission;
+    if(askPermission && permission==='default') permission=await Notification.requestPermission();
+    if(permission!=='granted'){
+      if(askPermission) toast(permission==='denied'?'휴대폰 설정에서 안심ON 알림을 허용해 주세요':'긴급 알림 권한이 필요합니다');
+      return false;
+    }
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:sfPushKey(cfg.publicKey)});
+    await api('/api/push/subscribe',{method:'POST',body:JSON.stringify(sub)});
+    $('sfPushBtn')?.remove();
+    if(askPermission) toast('긴급 알림이 켜졌습니다');
+    return true;
+  }catch(e){ if(askPermission) toast(e.message||'긴급 알림을 켜지 못했습니다'); return false; }
 }
 
 async function sfInit(){
@@ -1064,6 +1095,7 @@ function sfHandleAlerts(){
   const urg=sfPendingUrgent();
   if(urg.length) sfShowOverlay(urg);
   else $('sfOverlay').classList.remove('on');
+  if(document.visibilityState!=='visible') return;
   const newUrgent=fresh.find(a=>a.level==='urgent'&&!a.acked);
   if(newUrgent) sfRing('urgent',newUrgent.text);
   else { const n=fresh.filter(a=>a.level!=='urgent').sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))[0];
