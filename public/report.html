@@ -1091,7 +1091,7 @@ function sfRing(level,text){
 
 function sfPushPromptHtml(){
   if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window) || Notification.permission==='granted') return '';
-  return `<button class="history-link" id="sfPushBtn" onclick="sfPushInit(true)">긴급 알림 켜기 <span>›</span></button>`;
+  return `<button class="history-link" id="sfPushBtn" onclick="sfPushInit(true)">관제실 알림 켜기 <span>›</span></button>`;
 }
 function sfPushKey(value){
   const pad='='.repeat((4-value.length%4)%4), raw=atob((value+pad).replace(/-/g,'+').replace(/_/g,'/'));
@@ -1105,14 +1105,14 @@ async function sfPushInit(askPermission){
     let permission=Notification.permission;
     if(askPermission && permission==='default') permission=await Notification.requestPermission();
     if(permission!=='granted'){
-      if(askPermission) toast(permission==='denied'?'휴대폰 설정에서 안심ON 알림을 허용해 주세요':'긴급 알림 권한이 필요합니다');
+      if(askPermission) toast(permission==='denied'?'휴대폰 설정에서 안심ON 알림을 허용해 주세요':'알림 권한이 필요합니다');
       return false;
     }
     let sub=await reg.pushManager.getSubscription();
     if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:sfPushKey(cfg.publicKey)});
     await api('/api/push/subscribe',{method:'POST',body:JSON.stringify(sub)});
     $('sfPushBtn')?.remove();
-    if(askPermission) toast('긴급 알림이 켜졌습니다');
+    if(askPermission) toast('관제실 알림이 켜졌습니다');
     return true;
   }catch(e){ if(askPermission) toast(e.message||'긴급 알림을 켜지 못했습니다'); return false; }
 }
@@ -1152,6 +1152,12 @@ async function sfLoad(){
     try{ SF=await api('/api/safety/state'); }catch(e){ return; }
     if(SF.role!=='carrier') return;
     sfHandleAlerts(); sfRenderTicker(); sfRenderBox();
+    const alertId=new URLSearchParams(location.search).get('alert');
+    if(alertId && SF.alerts.some(a=>a.id===alertId)){
+      sfOpenAlerts(alertId);
+      const url=new URL(location.href); url.searchParams.delete('alert');
+      history.replaceState(null,'',url.pathname+url.search+url.hash);
+    }
   })().finally(()=>{ sfLoading=null; });
   return sfLoading;
 }
@@ -1211,10 +1217,11 @@ function sfRenderTicker(){
   t.innerHTML=`${SF_BELL}<div class="track"><div class="run" style="--dur:${Math.max(12,Math.round(len/4))}s">${items}</div></div>`;
   t.classList.remove('hidden');
 }
-function sfOpenAlerts(){
-  const list=SF?.alerts||[];
+function sfOpenAlerts(focusId){
+  const list=[...(SF?.alerts||[])];
+  if(typeof focusId==='string') list.sort((a,b)=>(b.id===focusId)-(a.id===focusId));
   $('sfSheet').innerHTML=`<div class="h" style="font-size:17px">오늘의 안전 알림</div>`+
-    (list.length?list.map(a=>`<div class="sf-al" style="border-left-color:${SF_LV[a.level][1]}"><div class="m">${SF_LV[a.level][0]} · ${sfTime(a.createdAt)} · ${sfEsc(a.sender)}${a.level==='urgent'?(a.acked?' · 확인함':' · 미확인'):''}</div><div class="t">${sfEsc(a.text)}</div></div>`).join('')
+    (list.length?list.map(a=>`<div class="sf-al" style="border-left-color:${SF_LV[a.level][1]};${a.id===focusId?'background:#EAF2FF;':''}"><div class="m">${SF_LV[a.level][0]} · ${sfTime(a.createdAt)} · ${sfEsc(a.sender)}${a.level==='urgent'?(a.acked?' · 확인함':' · 미확인'):''}</div><div class="t">${sfEsc(a.text)}</div></div>`).join('')
       :`<div class="mine-empty">오늘 받은 알림이 없습니다.</div>`)+
     `<button class="save" style="margin-top:10px" onclick="$('sfModal').classList.remove('on')">닫기</button>`;
   $('sfModal').classList.add('on');
@@ -1392,7 +1399,26 @@ async function onRefresh(){
  catch(e){msg.textContent=e.message||'전송 실패 · 다시 시도해 주세요';btn.disabled=false;}};
  }catch(e){el.textContent='귀국보고를 불러오지 못했습니다: '+e.message;}
 }
-async function noticesON(){if(!me)return;let host=document.getElementById('on-notices');if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}if(!host)return;try{const d=await api('/api/on/notices');host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+ (d.notices.length?d.notices.map(n=>`<div style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});}catch(e){host.textContent='공지사항 조회 실패: '+e.message;}}
+async function noticesON(){
+ if(!me)return;
+ let host=document.getElementById('on-notices');
+ if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}
+ if(!host)return;
+ try{
+  const d=await api('/api/on/notices');
+  host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+
+    (d.notices.length?d.notices.map(n=>`<div data-notice="${escON(n.id)}" style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';
+  host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});
+  const noticeId=new URLSearchParams(location.search).get('notice');
+  const selected=[...host.querySelectorAll('[data-notice]')].find(el=>el.dataset.notice===noticeId);
+  if(selected){
+   selected.style.background='#EAF2FF'; selected.style.padding='12px'; selected.style.borderRadius='8px';
+   selected.scrollIntoView({block:'center'});
+   const url=new URL(location.href); url.searchParams.delete('notice');
+   history.replaceState(null,'',url.pathname+url.search+url.hash);
+  }
+ }catch(e){host.textContent='공지사항 조회 실패: '+e.message;}
+}
 const old=window.home;window.home=async function(...args){const r=await old.apply(this,args);await onRefresh();await noticesON();return r;};
 })();
 </script>

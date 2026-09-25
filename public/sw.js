@@ -1,15 +1,15 @@
 self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (_) {}
-  event.waitUntil(self.registration.showNotification(data.title || '긴급 안전 알림', {
-    body: data.body || '소통실에서 긴급 안전 알림을 보냈습니다.',
+  event.waitUntil(self.registration.showNotification(data.title || '안심ON 새 알림', {
+    body: data.body || '관제실에서 새 알림을 보냈습니다.',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: data.alertId || 'ansimon-urgent',
+    tag: data.alertId || data.noticeId || 'ansimon-message',
     renotify: true,
-    requireInteraction: true,
+    requireInteraction: data.type === 'urgent',
     silent: false,
-    vibrate: [1000, 250, 1000, 250, 1000, 250, 1500],
+    vibrate: data.type === 'urgent' ? [1000, 250, 1000, 250, 1000, 250, 1500] : [250, 120, 250],
     data: { url: data.url || '/report.html' },
   }));
 });

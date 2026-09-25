@@ -44,7 +44,7 @@ const PUSH_ENABLED = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (PUSH_ENABLED) {
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@ansimon.local', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 } else {
-  console.warn('⚠️ VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 미설정 — 백그라운드 긴급알림이 비활성화됩니다.');
+  console.warn('⚠️ VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 미설정 — 백그라운드 안전 알림·공지 푸시가 비활성화됩니다.');
 }
 
 /* ===================== 복지 개인정보 암호화 ===================== */
@@ -1281,7 +1281,7 @@ app.post('/api/safety/hazards/:id/dispatch', (req, res) => {
   a.fromHazard = h.id;
   h.status = 'dispatched'; h.alertId = a.id; h.handledBy = u.name; h.handledAt = a.createdAt;
   saveSafety(); broadcastSafety();
-  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
+  sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok: true, alert: a });
 });
 
@@ -1309,25 +1309,27 @@ function createAlert(u, b) {
   SAFE.alerts.unshift(a);
   return a;
 }
-async function sendUrgentPush(a) {
-  if (!PUSH_ENABLED || a.level !== 'urgent') return;
+async function sendPush(targets, payload, topic, urgency = 'normal') {
+  if (!PUSH_ENABLED) return;
   ensureSafetyCollections();
-  const payload = JSON.stringify({
-    type: 'urgent', alertId: a.id, title: '긴급 안전 알림', body: a.text,
-    url: `/report.html?urgent=${encodeURIComponent(a.id)}`,
-  });
   let changed = false;
-  await Promise.all(a.targets.flatMap(carrierId => (SAFE.pushSubscriptions[carrierId] || []).map(async subscription => {
+  await Promise.all([...new Set(targets)].flatMap(carrierId => (SAFE.pushSubscriptions[carrierId] || []).map(async subscription => {
     try {
-      await webpush.sendNotification(subscription, payload, { TTL: 300, urgency: 'high', topic: a.id.slice(0, 32) });
+      await webpush.sendNotification(subscription, JSON.stringify(payload), { TTL: urgency === 'high' ? 300 : 86400, urgency, topic: topic.slice(0, 32) });
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) {
         SAFE.pushSubscriptions[carrierId] = (SAFE.pushSubscriptions[carrierId] || []).filter(s => s.endpoint !== subscription.endpoint);
         changed = true;
-      } else console.error('urgent push fail', carrierId, e.statusCode || e.message);
+      } else console.error('safety push fail', carrierId, e.statusCode || e.message);
     }
   })));
   if (changed) saveSafety();
+}
+function sendSafetyPush(a) {
+  return sendPush(a.targets, {
+    type: a.level, alertId: a.id, title: `${LEVELS[a.level]} 안전 알림`, body: a.text,
+    url: `/report.html?alert=${encodeURIComponent(a.id)}`,
+  }, a.id, a.level === 'urgent' ? 'high' : 'normal');
 }
 app.post('/api/safety/alerts', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
@@ -1337,7 +1339,7 @@ app.post('/api/safety/alerts', (req, res) => {
   const call = callId && SAFE.calls.find(c => c.id === callId);
   if (call) { call.alertId = a.id; a.fromCall = call.id; }
   saveSafety(); broadcastSafety();
-  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
+  sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok: true, alert: a });
 });
 
@@ -1513,7 +1515,12 @@ app.get('/api/on/notices',(req,res)=>{
 app.post('/api/on/notices',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},title=String(b.title||'').trim().slice(0,80),body=String(b.body||'').trim().slice(0,500);
   const targets=Array.isArray(b.targets)?b.targets.filter(id=>rosterById(id)):[]; if(!title||!body||!targets.length)return res.status(400).json({error:'제목·내용·대상을 확인하세요.'});
-  ensureSafetyCollections(); SAFE.notices.unshift({id:nextSafeId('N'),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString()}); saveSafety(); broadcastSafety(); res.json({ok:true});
+  ensureSafetyCollections();
+  const notice={id:nextSafeId('N'),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString()};
+  SAFE.notices.unshift(notice); saveSafety(); broadcastSafety();
+  sendPush(targets, {type:'notice',noticeId:notice.id,title:`공지사항 · ${title}`,body,
+    url:`/report.html?notice=${encodeURIComponent(notice.id)}`}, notice.id).catch(e=>console.error('notice push',e.message));
+  res.json({ok:true});
 });
 app.post('/api/on/notices/:id/ack',(req,res)=>{
   const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'forbidden'}); const n=SAFE.notices.find(x=>x.id===req.params.id); if(!n||!n.targets.includes(me.id))return res.status(404).json({error:'not found'});
@@ -1778,7 +1785,7 @@ app.post('/api/risk/items/:id/to-urgent', (req, res) => {
   if (a.error) return res.status(400).json(a);
   a.fromRisk = it.id; it.urgentAlertId = a.id;
   saveSafety(); saveRisk(); broadcastSafety(); broadcastRisk();
-  sendUrgentPush(a).catch(e => console.error('urgent push', e.message));
+  sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok: true, alert: a });
 });
 
