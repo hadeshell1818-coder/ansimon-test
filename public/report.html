@@ -170,20 +170,34 @@
   .sf-al .m{font-size:11px;color:var(--ink-2);font-weight:700;margin-bottom:3px;}
   .sf-al .t{font-size:14px;font-weight:700;line-height:1.45;}
 
-  /* 모바일 첫 화면: 적은 색상, 넓은 터치 영역, 단계 최소화 */
-  .wrap{padding:16px 16px 28px;}
-  .home-welcome{font-size:15px;color:#17212B;margin:2px 0 20px;line-height:1.5;}
-  .home-welcome b{font-weight:800;}.home-welcome span{display:block;font-size:12px;color:#687582;margin-top:3px;}
-  .home-section{margin-bottom:18px;}.home-section-title{font-size:14px;font-weight:800;margin:0 0 10px;color:#1E2933;}
-  .home-quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .quick-action{min-height:108px;border:1px solid #E3C5C9;background:#FFF9F9;color:#991B2B;border-radius:14px;padding:13px 7px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-family:inherit;}
-  .quick-action b{font-size:15px}.quick-action small{font-size:11px;color:#815D64}.quick-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#B91C32;color:#fff;font-size:20px;font-weight:800;}
-  .home-action{width:100%;min-height:76px;display:flex;align-items:center;text-align:left;gap:13px;background:#fff;border:1px solid #E1E6EB;border-radius:13px;margin-bottom:9px;padding:13px 15px;font-family:inherit;color:#1E2933;}
-  .home-action-icon{display:grid;place-items:center;width:37px;height:37px;border-radius:10px;background:#F0F3F6;color:#334155;font-size:23px;flex:none;}
-  .home-action span:nth-child(2){flex:1}.home-action b,.home-action small{display:block}.home-action b{font-size:15px}.home-action small{font-size:11.5px;color:#6B7785;margin-top:4px}.home-chevron{font-size:23px;color:#A2ACB7;}
-  .home-section .sf-box{padding:14px;margin:0;}.shift-label{font-size:12px;font-weight:800;color:#465260}.shift-label small{font-weight:500;color:#7C8794;margin-left:5px}.home-section .sf-shift{border:0;padding:0;margin:10px 0 0;}.home-section .sf-shift .row3{gap:6px;}.home-section .sf-shift button.opt{font-size:12px;padding:12px 3px;}.home-section .sf-note{margin-top:9px;}.shift-device-note{font-size:11px;color:#6D7782;margin-top:8px;}
-  .history-link{width:100%;border:1px solid #E1E6EB;border-radius:12px;background:#fff;padding:14px;text-align:left;font-size:13px;font-weight:700;color:#425466;font-family:inherit;}.history-link span{float:right;font-size:17px}.home-emergency-note{font-size:10.5px;color:#7B858F;text-align:center;line-height:1.5;margin-top:14px;}
-  .quick-action:active,.home-action:active,.history-link:active{transform:scale(.99)}
+  /* 안심ON: 세 영역, 각 두 버튼 — 손그림 기반 담백한 홈 */
+  .wrap{padding:14px 16px 26px;}
+  .home-welcome{font-size:13px;color:#566579;margin:3px 0 16px;line-height:1.45;}
+  .home-welcome b{color:#263746}.home-welcome span{display:block;font-size:11.5px;margin-top:3px}
+  .home-section{border:1px solid #e4e9ec;border-radius:18px;padding:15px;margin-bottom:13px;background:#f8fafb;}
+  .home-section-title{font-size:15px;font-weight:800;color:#263746;margin:0 0 12px;}
+  .home-section.delivery{background:#fff6f2;border-color:#f3e3da;}
+  .home-section.reporting{background:#f3f8fc;border-color:#e0eaf3;}
+  .home-section.returning{background:#f2f9f5;border-color:#dcece3;}
+  .home-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+  .home-tile{min-height:92px;border:1px solid #e0e5e8;border-radius:13px;background:#fff;color:#293845;font:inherit;font-size:15px;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:10px 4px;cursor:pointer;}
+  .home-tile .tile-icon{font-size:23px;line-height:1.1;color:#647b85;}
+  .delivery .home-tile{border-color:#ecdcd5}.delivery .tile-icon{color:#a95c48}
+  .reporting .home-tile{border-color:#dce7ee}.reporting .tile-icon{color:#477b9b}
+  .returning .home-tile{border-color:#d9e8dd}.returning .tile-icon{color:#50866b}
+  .home-tile:active,.history-link:active{transform:scale(.985);background:#f8fafb;}
+  .history-link{width:100%;border:1px solid #e4e9ec;border-radius:12px;background:#fff;padding:13px 15px;text-align:left;font-size:13px;font-weight:700;color:#526374;font-family:inherit;}.history-link span{float:right;font-size:17px}
+  .home-emergency-note{font-size:10.5px;color:#7b858f;text-align:center;line-height:1.5;margin-top:12px}
+  .return-overlay{position:fixed;inset:0;z-index:2100;background:#f6f8f9;overflow:auto;padding:16px 16px 36px;}
+  .return-overlay .return-head{max-width:480px;margin:0 auto 12px;display:flex;align-items:center;gap:12px;font-size:17px;font-weight:800}
+  .return-overlay .return-back{border:1px solid #dbe3e6;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;font-size:13px}
+  .return-overlay #on-return{max-width:480px;margin:auto;}
+  .return-overlay #on-return .card{border:1px solid #dcece3!important;border-radius:16px;background:#fff;}
+  .return-overlay #on-return label{display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:13px}
+  .return-overlay #on-return input[type=radio],.return-overlay #on-return input[type=checkbox]{accent-color:#358366;width:18px;height:18px}
+  .return-overlay #on-return .return-field{background:#f7faf8;border-radius:12px;padding:12px;margin-top:12px}
+  .return-overlay #on-return .return-field p{margin:0 0 10px}
+  .return-overlay #on-return .return-field .f-in{margin-top:9px}
 </style>
 </head>
 <body>
@@ -301,24 +315,30 @@ function home(){
   cur={};
   $('cw').innerHTML=`
     ${installBanner()}
-    <div class="home-welcome"><b>${sfEsc(me.name)}</b> · ${sfEsc(me.org||'')}<span>현장에서 바로 신고하고 안전을 확인하세요.</span></div>
-    <section class="home-section urgent-section" aria-label="긴급 위험 알림">
-      <div class="home-section-title">긴급 위험 알림</div>
-      <div class="home-quick">
-        <button class="quick-action" onclick="sfCall()"><span class="quick-icon">☎</span><b>관제실 전화</b><small>바로 전화 연결</small></button>
-        <button class="quick-action" onclick="sfVoiceScreen()"><span class="quick-icon">!</span><b>위험 알리기</b><small>음성으로 상황 전달</small></button>
+    <div class="home-welcome"><b>${sfEsc(me.name)}</b> · ${sfEsc(me.org||'')}<span>필요한 기능을 바로 선택하세요.</span></div>
+    <section class="home-section delivery" aria-label="배달위험 알림">
+      <div class="home-section-title">배달위험 알림</div>
+      <div class="home-grid">
+        <button class="home-tile" onclick="sfCall()"><span class="tile-icon">☎</span>관제실 전화</button>
+        <button class="home-tile" onclick="sfVoiceScreen()"><span class="tile-icon">🎙</span>음성신고</button>
       </div>
     </section>
-    <section class="home-section" aria-label="일반 신고">
-      <button class="home-action" onclick="startQuickReport()"><span class="home-action-icon">▣</span><span><b>안심신고</b><small>사진으로 신고 · AI 자동분류</small></span><span class="home-chevron">›</span></button>
-      <button class="home-action" onclick="pickCat('welfare')"><span class="home-action-icon">♡</span><span><b>복지위기 알림</b><small>도움이 필요한 이웃 알리기</small></span><span class="home-chevron">›</span></button>
+    <section class="home-section reporting" aria-label="신고하기">
+      <div class="home-section-title">신고하기</div>
+      <div class="home-grid">
+        <button class="home-tile" onclick="startQuickReport()"><span class="tile-icon">▣</span>안심신고</button>
+        <button class="home-tile" onclick="pickCat('welfare')"><span class="tile-icon">♡</span>복지신고</button>
+      </div>
     </section>
-    <section class="home-section" aria-label="업무종료 점검">
-      <div class="home-section-title">업무종료 점검</div>
-      <div id="sfBox" class="sf-box">${SF&&SF.role==='carrier'?sfShiftHomeHtml():'<div class="sf-note">점검 정보를 불러오는 중입니다.</div>'}</div>
+    <section class="home-section returning" aria-label="업무종료 보고">
+      <div class="home-section-title">업무종료 보고</div>
+      <div class="home-grid">
+        <button class="home-tile" onclick="openReturnReport('body')"><span class="tile-icon">♡</span>건강 이상</button>
+        <button class="home-tile" onclick="openReturnReport('equipment')"><span class="tile-icon">⚙</span>장비 이상</button>
+      </div>
     </section>
     <button class="history-link" onclick="showReportHistory()">내 신고내역 · 처리현황 <span>›</span></button>
-    <div class="home-emergency-note">생명·신체에 급박한 위험이 있다면 119 또는 112에 먼저 신고하세요.</div>`;
+    <div class="home-emergency-note">급박한 생명·신체 위험은 119 또는 112에 먼저 신고하세요.</div>`;
 }
 async function showReportHistory(){
   let mine=[];
@@ -1066,7 +1086,7 @@ function sfShiftHomeHtml(){
     <div class="shift-device-note">장비 상태 점검은 별도 저장 기능 연결 후 추가됩니다.</div>`;
 }
 function sfBoxHtml(){ return (SF&&SF.role==='carrier')?`<div class="sf-box" id="sfBox">${sfBoxInner()}</div>`:'<div id="sfBox"></div>'; }
-function sfRenderBox(){ const el=$('sfBox'); if(!el) return; el.className='sf-box'; el.innerHTML=sfShiftHomeHtml(); }
+function sfRenderBox(){ /* 업무종료 보고는 귀국보고 전용 화면에서 신체·장비를 함께 저장합니다. */ }
 function sfBoxInner(){
   const st=SF.shift?.status||null, cur=sfShiftPick||st;
   const mine=(SF.myHazards||[]).slice(0,3).map(h=>`<div>🎙 ${sfTime(h.createdAt)} ${sfEsc((h.transcript||'음성 신고').slice(0,22))}<b style="color:${SF_HZ[h.status][1]}">${SF_HZ[h.status][0]}</b></div>`).join('');
@@ -1074,7 +1094,7 @@ function sfBoxInner(){
   return `<div class="sf-h">🦺 집배원 안전 · ${sfEsc(SF.me.zoneName)}</div>
     <div class="sf-main">
       <button class="sf-btn sf-call" onclick="sfCall()"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.2 15.2 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1Z"/></svg>관제실 전화<small>사고·급한 상황</small></button>
-      <button class="sf-btn sf-voice" onclick="sfVoiceScreen()"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15Zm6-3.5a6 6 0 0 1-12 0H4.5a7.5 7.5 0 0 0 6.75 7.46V22h1.5v-3.04a7.5 7.5 0 0 0 6.75-7.46H18Z"/></svg>위험 알리기<small>말 한마디로 신고</small></button>
+      <button class="sf-btn sf-voice" onclick="sfVoiceScreen()"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 0 0-7 0v6A3.5 3.5 0 0 0 12 15Zm6-3.5a6 6 0 0 1-12 0H4.5a7.5 7.5 0 0 0 6.75 7.46V22h1.5v-3.04a7.5 7.5 0 0 0 6.75-7.46H18Z"/></svg>음성신고<small>말 한마디로 신고</small></button>
     </div>
     ${mine?`<div class="sf-mine">${mine}</div>`:''}
     <div class="sf-shift">
@@ -1181,28 +1201,48 @@ boot();
 </script>
 
 <script>
-/* AGENTS M-06: 귀국보고는 기존 업무종료 이상유무(신체만)와 별개인 신체+장비 통합 보고 */
+/* M-06: 건강·장비 이상 두 버튼은 동일한 귀국보고 기록으로 연결됩니다. */
 (function(){
 const escON=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function onRefresh(){if(!window.me||!document.getElementById('app')||document.getElementById('app').classList.contains('hidden'))return;
- const host=document.getElementById('cw');if(!host)return;
- let el=document.getElementById('on-return');if(!el){el=document.createElement('section');el.id='on-return';host.prepend(el);}
+let returnActive=false;
+window.openReturnReport=async function(focus){
+  returnActive=true;
+  let layer=document.getElementById('on-return-layer');
+  if(!layer){layer=document.createElement('div');layer.id='on-return-layer';layer.className='return-overlay';document.body.appendChild(layer);}
+  layer.innerHTML='<div class="return-head"><button class="return-back" onclick="closeReturnReport()">‹ 뒤로</button>업무종료 보고</div><section id="on-return" aria-live="polite">불러오는 중…</section>';
+  await onRefresh();
+  const field=document.getElementById(focus==='equipment'?'return-equip-field':'return-body-field');
+  if(field)field.scrollIntoView({block:'center',behavior:'smooth'});
+};
+window.closeReturnReport=function(){returnActive=false;document.getElementById('on-return-layer')?.remove();};
+async function onRefresh(){
+ if(!returnActive||!window.me)return;
+ const el=document.getElementById('on-return');if(!el)return;
  try{const d=await api('/api/on/return/me');const r=d.report;
- el.innerHTML=`<div class="card" style="padding:15px;border:2px solid #0b8a5b"><h3>🏠 귀국보고 <small style="font-size:12px">${escON(d.date)}</small></h3>
- <p style="font-size:12px">배달 후 귀국한 경우 보고해 주세요. 신체와 장비를 각각 확인합니다.</p>
- ${r?`<p style="color:#087349">✓ 오늘 귀국보고 완료 · ${escON(new Date(r.at).toLocaleTimeString('ko-KR'))} (아래에서 정정 가능)</p>`:''}
- <label><input type="checkbox" id="on-returned" ${r?'checked':''}> 배달을 마치고 귀국했습니다</label>
- <p><b>신체 이상</b> <label><input type="radio" name="on-body" value="no" ${!r?.bodyIssue?'checked':''}> 없음</label> <label><input type="radio" name="on-body" value="yes" ${r?.bodyIssue?'checked':''}> 있음</label></p>
- <input class="f-in" id="on-body-detail" maxlength="300" placeholder="이상 부위와 상태" value="${escON(r?.bodyDetail||'')}" style="display:${r?.bodyIssue?'block':'none'};margin-bottom:10px">
- <p><b>장비 이상</b> <label><input type="radio" name="on-equip" value="no" ${!r?.equipmentIssue?'checked':''}> 없음</label> <label><input type="radio" name="on-equip" value="yes" ${r?.equipmentIssue?'checked':''}> 있음</label></p>
- <input class="f-in" id="on-equip-detail" maxlength="300" placeholder="장비 종류와 이상 내용" value="${escON(r?.equipmentDetail||'')}" style="display:${r?.equipmentIssue?'block':'none'};margin-bottom:10px">
- <button class="save" id="on-send" style="margin-top:12px">${r?'귀국보고 정정':'귀국보고 전송'}</button><div id="on-result" role="status" style="font-size:12px;margin-top:7px"></div></div>`;
- el.querySelectorAll('input[type=radio]').forEach(x=>x.addEventListener('change',()=>{el.querySelector('#on-body-detail').style.display=el.querySelector('input[name=on-body]:checked').value==='yes'?'block':'none';el.querySelector('#on-equip-detail').style.display=el.querySelector('input[name=on-equip]:checked').value==='yes'?'block':'none';}));
- el.querySelector('#on-send').onclick=async()=>{const btn=el.querySelector('#on-send');btn.disabled=true;try{
- const bodyIssue=el.querySelector('input[name=on-body]:checked').value==='yes',equipmentIssue=el.querySelector('input[name=on-equip]:checked').value==='yes';
- await api('/api/on/return',{method:'POST',body:JSON.stringify({returned:el.querySelector('#on-returned').checked,bodyIssue,equipmentIssue,bodyDetail:el.querySelector('#on-body-detail').value,equipmentDetail:el.querySelector('#on-equip-detail').value})});await onRefresh();
- }catch(e){el.querySelector('#on-result').textContent=e.message;btn.disabled=false;}};
- }catch(e){el.textContent='귀국보고를 불러오지 못했습니다: '+e.message;}}
+ el.innerHTML=`<div class="card" style="padding:16px"><h3 style="margin:0 0 8px">업무종료 보고 <small style="font-size:12px;color:#6a7a76">${escON(d.date)}</small></h3>
+ <p style="font-size:12px;color:#65746c">배달을 마치고 귀국한 뒤 건강과 장비 상태를 확인해 주세요.</p>
+ ${r?`<p style="font-size:12px;color:#28754d">✓ 오늘 보고 완료 · ${escON(new Date(r.at).toLocaleTimeString('ko-KR'))} (정정 가능)</p>`:''}
+ <label style="margin:10px 0 2px"><input type="checkbox" id="on-returned" ${r?'checked':''}> 배달을 마치고 귀국했습니다</label>
+ <div class="return-field" id="return-body-field"><p><b>건강 상태</b></p>
+ <label><input type="radio" name="on-body" value="no" ${r&&!r.bodyIssue?'checked':''}> 이상 없음</label>
+ <label><input type="radio" name="on-body" value="yes" ${r?.bodyIssue?'checked':''}> 이상 있음</label>
+ <input class="f-in" id="on-body-detail" maxlength="300" placeholder="증상을 간단히 적어주세요" value="${escON(r?.bodyDetail||'')}" style="display:${r?.bodyIssue?'block':'none'}"></div>
+ <div class="return-field" id="return-equip-field"><p><b>장비 상태</b></p>
+ <label><input type="radio" name="on-equip" value="no" ${r&&!r.equipmentIssue?'checked':''}> 이상 없음</label>
+ <label><input type="radio" name="on-equip" value="yes" ${r?.equipmentIssue?'checked':''}> 이상 있음</label>
+ <input class="f-in" id="on-equip-detail" maxlength="300" placeholder="장비 종류와 이상 내용을 간단히 적어주세요" value="${escON(r?.equipmentDetail||'')}" style="display:${r?.equipmentIssue?'block':'none'}"></div>
+ <button class="save" id="on-send" style="margin-top:16px;background:#317f60">${r?'보고 정정':'보고 제출'}</button><div id="on-result" role="status" style="font-size:12px;color:#ae3743;margin-top:8px"></div></div>`;
+ el.querySelectorAll('input[type=radio]').forEach(x=>x.addEventListener('change',()=>{el.querySelector('#on-body-detail').style.display=el.querySelector('input[name=on-body]:checked')?.value==='yes'?'block':'none';el.querySelector('#on-equip-detail').style.display=el.querySelector('input[name=on-equip]:checked')?.value==='yes'?'block':'none';}));
+ el.querySelector('#on-send').onclick=async()=>{const btn=el.querySelector('#on-send');const msg=el.querySelector('#on-result');
+ const body=el.querySelector('input[name=on-body]:checked'),equip=el.querySelector('input[name=on-equip]:checked');
+ if(!el.querySelector('#on-returned').checked){msg.textContent='귀국 확인을 선택해 주세요.';return;}
+ if(!body||!equip){msg.textContent='건강·장비 상태를 각각 선택해 주세요.';return;}
+ const bodyIssue=body.value==='yes',equipmentIssue=equip.value==='yes';
+ if((bodyIssue&&!el.querySelector('#on-body-detail').value.trim())||(equipmentIssue&&!el.querySelector('#on-equip-detail').value.trim())){msg.textContent='이상이 있는 항목에 간단한 설명을 적어주세요.';return;}
+ btn.disabled=true;try{await api('/api/on/return',{method:'POST',body:JSON.stringify({returned:true,bodyIssue,equipmentIssue,bodyDetail:el.querySelector('#on-body-detail').value,equipmentDetail:el.querySelector('#on-equip-detail').value})});toast('업무종료 보고가 접수되었습니다');closeReturnReport();}
+ catch(e){msg.textContent=e.message||'전송 실패 · 다시 시도해 주세요';btn.disabled=false;}};
+ }catch(e){el.textContent='업무종료 보고를 불러오지 못했습니다: '+e.message;}
+}
 async function noticesON(){if(!window.me)return;let host=document.getElementById('on-notices');if(!host){host=document.createElement('section');host.id='on-notices';document.getElementById('cw')?.prepend(host);}if(!host)return;try{const d=await api('/api/on/notices');host.innerHTML='<div class="card" style="padding:14px"><h3>📌 공지사항</h3>'+ (d.notices.length?d.notices.map(n=>`<div style="border-top:1px solid #ddd;padding:10px 0"><b>${escON(n.title)}</b><p>${escON(n.body)}</p>${n.acked?'✓ 확인함':`<button class="photo-btn" data-ack="${escON(n.id)}">공지 확인</button>`}</div>`).join(''):'새 공지사항이 없습니다.')+'</div>';host.querySelectorAll('[data-ack]').forEach(b=>b.onclick=async()=>{try{await api('/api/on/notices/'+encodeURIComponent(b.dataset.ack)+'/ack',{method:'POST'});await noticesON();}catch(e){alert(e.message);}});}catch(e){host.textContent='공지사항 조회 실패: '+e.message;}}
 const old=window.home;window.home=async function(...args){const r=await old.apply(this,args);await onRefresh();await noticesON();return r;};
 })();
