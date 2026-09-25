@@ -10,6 +10,7 @@ const safetyCategories = {
 let knowledgeState = null;
 let libraryQuery = '';
 let evidenceResults = [];
+let evidenceCases = [];
 let selectedEvidence = [];
 async function refreshKnowledge() {
   if (!me || me.kind !== 'safety_mgr') return;
@@ -44,6 +45,7 @@ function renderSafetyWorkspace(selected) {
 function beginEvidenceEdit(item) {
   selectedEvidence = (item.evidenceIds || []).map(id => ({ id, title: `연결된 근거 ${id}` }));
   evidenceResults = [];
+  evidenceCases = [];
 }
 function evidenceEditorHtml(item) {
   return `<div class="evidence-box"><b>관련 법령·사례 검토</b>
@@ -58,20 +60,23 @@ async function searchEvidence() {
   try {
     const result = await api('/api/safety-knowledge/search?q=' + encodeURIComponent(query));
     evidenceResults = result.results || [];
+    evidenceCases = result.cases || [];
     renderEvidenceResults();
-    if (!evidenceResults.length) $('evidence-results').innerHTML = '<small>등록·승인된 검색 결과가 없습니다. 자료실에 출처와 허용된 본문을 먼저 등록하세요.</small>';
+    if (!evidenceResults.length && !evidenceCases.length) $('evidence-results').innerHTML = '<small>등록·검토대기 검색 결과가 없습니다. 자료실에 출처와 원문을 먼저 등록하세요.</small>';
   } catch (error) {
     if ($('evidence-results')) $('evidence-results').innerHTML = `<small class="workspace-error">${esc(error.message)}</small>`;
   }
 }
 function renderEvidenceResults() {
   const selectedIds = new Set(selectedEvidence.map(item => item.id));
-  $('evidence-results').innerHTML = evidenceResults.map(doc => {
+  const documents = evidenceResults.map(doc => {
     const sections = doc.sections || [];
     const choices = sections.length ? sections : [{ id: doc.id, locator: '문서', body: '' }];
     return `<div><b>${esc(doc.title || '자료')}</b> · ${esc(doc.publisher || '')} · ${esc(doc.review_status || '검토 대기')}
       ${choices.map(section => { const id = section.id || doc.id; return `<label class="evidence-item"><input type="checkbox" ${selectedIds.has(id) ? 'checked' : ''} onchange="toggleEvidence(this, '${esc(id)}', '${esc(doc.title || '자료')}')"><span>${esc(section.locator || '본문')}<small>${esc(String(section.body || '').slice(0, 180))}</small></span></label>`; }).join('')}</div>`;
   }).join('');
+  const cases = evidenceCases.length ? `<div class="case-results"><b>SIF 검토대기 사례 ${evidenceCases.length}건</b>${evidenceCases.map(item => `<article class="case-result"><strong>${esc(item.hazard_object || item.high_risk_situation || '유해위험요인')}</strong><small>${esc(item.domain === 'construction' ? [item.work_category, item.work_name, item.unit_work].filter(Boolean).join(' · ') : [item.industry_large, item.industry_medium, item.industry_small].filter(Boolean).join(' · '))}</small><p>${esc(item.incident_summary || item.causal_factors || '')}</p><small>유발요인: ${esc(item.causal_factors || '-')}<br>감소대책 예시: ${esc(item.reduction_measures || '-')}<br>출처: ${esc(item.source_sheet)} ${esc(item.source_row)}행 · 담당자 검토 전</small></article>`).join('')}</div>` : '';
+  $('evidence-results').innerHTML = documents + cases;
 }
 function toggleEvidence(control, id, title) {
   if (control.checked) selectedEvidence.push({ id, title });
@@ -105,6 +110,12 @@ function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
     <div class="row-btns"><button class="btn" id="seed-sources" onclick="seedSources()" ${connected ? '' : 'disabled'}>기본 출처 목록 등록</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
+      <div><h3>SIF 고위험요인 아카이브 가져오기</h3><p>한국산업안전보건공단 공개 엑셀의 제조업 등·건설업 원자료를 업종, 공종, 기인물, 유발요인, 감소대책으로 나누어 검토대기 상태로 저장합니다.</p></div>
+      <label>원본 XLSX<input id="sif-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required ${connected ? '' : 'disabled'}></label>
+      <button class="btn primary" type="submit" ${connected ? '' : 'disabled'}>Supabase에 자료 올리기</button>
+      <p id="sif-result" role="status"></p>
+    </form>
     <form class="workspace-form" id="source-form" onsubmit="saveSource(event)">
       <label>자료명<input name="title" required maxlength="200" ${connected ? '' : 'disabled'}></label>
       <label>제공기관<input name="publisher" required maxlength="120" ${connected ? '' : 'disabled'}></label>
@@ -116,6 +127,28 @@ function renderLibrary() {
     <label for="source-search">자료 검색</label><br><input class="workspace-search" id="source-search" value="${esc(libraryQuery)}" placeholder="롤파렛트, 끼임, 법령" oninput="libraryQuery=this.value;renderSourceRows()">
     <div class="workspace-scroll"><table class="workspace-table"><thead><tr><th>자료·제공기관</th><th>등록·검토 상태</th><th>이용조건</th></tr></thead><tbody id="source-rows"></tbody></table></div>`;
   renderSourceRows();
+}
+async function importSif(event) {
+  event.preventDefault();
+  const form = event.target;
+  const file = $('sif-file')?.files?.[0];
+  const button = form.querySelector('button');
+  if (!file) return;
+  button.disabled = true;
+  $('sif-result').textContent = '엑셀을 읽고 있습니다. 자료 수에 따라 잠시 걸릴 수 있습니다.';
+  try {
+    const fileBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('엑셀 파일을 읽지 못했습니다.'));
+      reader.readAsDataURL(file);
+    });
+    const result = await api('/api/safety-knowledge/import-sif', { method: 'POST', body: JSON.stringify({ fileName: file.name, fileBase64 }) });
+    $('sif-result').textContent = `${result.imported.toLocaleString()}건 저장 완료 · 제조업 등·건설업 원자료는 모두 검토대기 상태입니다.`;
+    toast(`SIF ${result.imported.toLocaleString()}건 저장 완료`);
+    await refreshKnowledge();
+  } catch (error) { $('sif-result').textContent = error.message; }
+  finally { button.disabled = false; }
 }
 async function reloadLibrary() { await refreshKnowledge(); if (tab === 'library') renderLibrary(); }
 async function seedSources() {
