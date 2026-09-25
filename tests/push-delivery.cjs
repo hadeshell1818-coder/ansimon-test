@@ -15,12 +15,15 @@ const context = vm.createContext({
   } },
   app: { post(path, handler) { routes[path] = handler; } },
   userFromReq: req => req.user, isSafetyCtl: () => true,
+  safetyCarrier: user => user?.id === 'jip' ? { id: 'jip' } : null,
   rosterById: id => id === 'jip', nextSafeId: () => `N${++sequence}`,
   console,
 });
 
 vm.runInContext(source.slice(source.indexOf('async function sendPush('), source.indexOf("app.post('/api/safety/alerts'")), context);
 vm.runInContext(source.slice(source.indexOf("app.post('/api/on/notices'"), source.indexOf("app.post('/api/on/notices/:id/ack'")), context);
+vm.runInContext(source.slice(source.indexOf("app.post('/api/safety/alerts/:id/ack'"), source.indexOf("app.post('/api/safety/calls'")), context);
+vm.runInContext(source.slice(source.indexOf("app.post('/api/on/notices/:id/ack'"), source.indexOf("app.get('/api/safety/history'")), context);
 
 (async () => {
   for (const level of ['urgent', 'caution', 'notice']) {
@@ -42,5 +45,27 @@ vm.runInContext(source.slice(source.indexOf("app.post('/api/on/notices'"), sourc
   assert.equal(calls.length, 4);
   assert.equal(calls[3].payload.title, '공지사항 · 근무 안내');
   assert.equal(calls[3].payload.url, '/report.html?notice=N1');
-  console.log('PASS: urgent, caution, notice and announcement push delivery');
+  assert.equal(SAFE.notices[0].repeatUntilAck, true);
+
+  const now = Date.now();
+  SAFE.alerts = [{ id: 'A-repeat', level: 'caution', text: '주의 재알림', targets: ['jip', 'done'],
+    acks: { done: new Date().toISOString() }, repeatUntilAck: true, lastPushAt: now - 120000 }];
+  SAFE.notices[0].lastPushAt = now - 120000;
+  await context.resendUnacknowledged(now);
+  assert.equal(calls.length, 6);
+  assert.deepEqual(calls.slice(4).map(call => call.endpoint), [
+    'https://push.example/jip', 'https://push.example/jip',
+  ]);
+  assert.deepEqual(calls.slice(4).map(call => call.options.TTL), [120, 120]);
+  await context.resendUnacknowledged(now + 1000);
+  assert.equal(calls.length, 6);
+  routes['/api/safety/alerts/:id/ack']({ user: { id: 'jip' }, params: { id: 'A-repeat' } }, response);
+  routes['/api/on/notices/:id/ack']({ user: { id: 'jip' }, params: { id: 'N1' } }, response);
+  assert.ok(SAFE.alerts[0].acks.jip);
+  assert.ok(SAFE.notices[0].acks.jip);
+  await context.resendUnacknowledged(now + 120000);
+  assert.equal(calls.length, 6);
+  assert.equal(SAFE.alerts[0].repeatUntilAck, false);
+  assert.equal(SAFE.notices[0].repeatUntilAck, false);
+  console.log('PASS: initial push, two-minute repeat, recipient filtering, confirmation stop');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1244,7 +1244,8 @@ app.get('/api/safety/state', (req, res) => {
   const day = (SAFE.shifts[today] || {})[me.id];
   res.json({
     role: 'carrier', today, callNumber: SAFETY_CALL_NUMBER, me: { id: me.id, name: me.name, zone: me.zone, zoneName: zoneById(me.zone)?.name },
-    alerts: SAFE.alerts.filter(a => isToday(a.createdAt) && a.targets.includes(me.id))
+    alerts: SAFE.alerts.filter(a => a.targets.includes(me.id) &&
+      (isToday(a.createdAt) || (a.repeatUntilAck && !(a.acks || {})[me.id])))
       .map(a => ({ id: a.id, level: a.level, text: a.text, createdAt: a.createdAt, sender: a.sender, acked: !!(a.acks || {})[me.id] })),
     myHazards: SAFE.hazards.filter(h => h.carrierId === me.id && isToday(h.createdAt))
       .map(h => ({ id: h.id, createdAt: h.createdAt, transcript: h.transcript, status: h.status })),
@@ -1306,17 +1307,18 @@ function createAlert(u, b) {
   const a = {
     id: nextSafeId('A'), level, text, zones, targets: alertTargets(zones),
     createdAt: new Date().toISOString(), sender: `${u.org} ${u.name}`, acks: {},
+    repeatUntilAck: true, lastPushAt: Date.now(),
   };
   SAFE.alerts.unshift(a);
   return a;
 }
-async function sendPush(targets, payload, topic, urgency = 'normal') {
+async function sendPush(targets, payload, topic, urgency = 'normal', repeat = false) {
   if (!PUSH_ENABLED) return;
   ensureSafetyCollections();
   let changed = false;
   await Promise.all([...new Set(targets)].flatMap(carrierId => (SAFE.pushSubscriptions[carrierId] || []).map(async subscription => {
     try {
-      await webpush.sendNotification(subscription, JSON.stringify(payload), { TTL: urgency === 'high' ? 300 : 86400, urgency, topic: topic.slice(0, 32) });
+      await webpush.sendNotification(subscription, JSON.stringify(payload), { TTL: repeat ? 120 : (urgency === 'high' ? 300 : 86400), urgency, topic: topic.slice(0, 32) });
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) {
         SAFE.pushSubscriptions[carrierId] = (SAFE.pushSubscriptions[carrierId] || []).filter(s => s.endpoint !== subscription.endpoint);
@@ -1326,11 +1328,33 @@ async function sendPush(targets, payload, topic, urgency = 'normal') {
   })));
   if (changed) saveSafety();
 }
-function sendSafetyPush(a) {
-  return sendPush(a.targets, {
+function sendSafetyPush(a, targets = a.targets, repeat = false) {
+  return sendPush(targets, {
     type: a.level, alertId: a.id, title: `${LEVELS[a.level]} 안전 알림`, body: a.text,
     url: `/report.html?alert=${encodeURIComponent(a.id)}`,
-  }, a.id, a.level === 'urgent' ? 'high' : 'normal');
+  }, a.id, a.level === 'urgent' ? 'high' : 'normal', repeat);
+}
+function sendNoticePush(notice, targets = notice.targets, repeat = false) {
+  return sendPush(targets, {type:'notice',noticeId:notice.id,
+    title:`공지사항 · ${notice.title}`,body:notice.body,
+    url:`/report.html?notice=${encodeURIComponent(notice.id)}`}, notice.id, 'normal', repeat);
+}
+const PUSH_REPEAT_MS = 2 * 60 * 1000;
+async function resendUnacknowledged(now = Date.now()) {
+  if (!PUSH_ENABLED) return;
+  const jobs = [];
+  let changed = false;
+  for (const item of [...SAFE.alerts, ...(SAFE.notices || [])]) {
+    if (!item.repeatUntilAck) continue;
+    const pending = item.targets.filter(id => !(item.acks || {})[id]);
+    if (!pending.length) { item.repeatUntilAck = false; changed = true; continue; }
+    if (now - item.lastPushAt < PUSH_REPEAT_MS) continue;
+    item.lastPushAt = now;
+    changed = true;
+    jobs.push(item.level ? sendSafetyPush(item, pending, true) : sendNoticePush(item, pending, true));
+  }
+  if (changed) saveSafety();
+  await Promise.all(jobs);
 }
 app.post('/api/safety/alerts', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
@@ -1364,14 +1388,16 @@ app.post('/api/push/subscribe', (req, res) => {
   res.json({ ok: true });
 });
 
-/* 수신확인은 긴급 알림만. 주의·전달말씀은 확인 버튼 자체가 없다. */
 app.post('/api/safety/alerts/:id/ack', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const a = SAFE.alerts.find(x => x.id === req.params.id);
   if (!a || !a.targets.includes(me.id)) return res.status(404).json({ error: 'not found' });
-  if (a.level !== 'urgent') return res.status(400).json({ error: '긴급 알림만 수신확인합니다.' });
   a.acks = a.acks || {};
-  if (!a.acks[me.id]) { a.acks[me.id] = new Date().toISOString(); saveSafety(); broadcastSafety(); }
+  if (!a.acks[me.id]) {
+    a.acks[me.id] = new Date().toISOString();
+    if (a.targets.every(id => a.acks[id])) a.repeatUntilAck = false;
+    saveSafety(); broadcastSafety();
+  }
   res.json({ ok: true });
 });
 
@@ -1517,15 +1543,21 @@ app.post('/api/on/notices',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},title=String(b.title||'').trim().slice(0,80),body=String(b.body||'').trim().slice(0,500);
   const targets=Array.isArray(b.targets)?b.targets.filter(id=>rosterById(id)):[]; if(!title||!body||!targets.length)return res.status(400).json({error:'제목·내용·대상을 확인하세요.'});
   ensureSafetyCollections();
-  const notice={id:nextSafeId('N'),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString()};
+  const notice={id:nextSafeId('N'),title,body,targets,acks:{},sender:u.name,createdAt:new Date().toISOString(),
+    repeatUntilAck:true,lastPushAt:Date.now()};
   SAFE.notices.unshift(notice); saveSafety(); broadcastSafety();
-  sendPush(targets, {type:'notice',noticeId:notice.id,title:`공지사항 · ${title}`,body,
-    url:`/report.html?notice=${encodeURIComponent(notice.id)}`}, notice.id).catch(e=>console.error('notice push',e.message));
+  sendNoticePush(notice).catch(e=>console.error('notice push',e.message));
   res.json({ok:true});
 });
 app.post('/api/on/notices/:id/ack',(req,res)=>{
   const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'forbidden'}); const n=SAFE.notices.find(x=>x.id===req.params.id); if(!n||!n.targets.includes(me.id))return res.status(404).json({error:'not found'});
-  n.acks=n.acks||{}; n.acks[me.id]=n.acks[me.id]||new Date().toISOString(); saveSafety(); broadcastSafety(); res.json({ok:true});
+  n.acks=n.acks||{};
+  if(!n.acks[me.id]){
+    n.acks[me.id]=new Date().toISOString();
+    if(n.targets.every(id=>n.acks[id])) n.repeatUntilAck=false;
+    saveSafety(); broadcastSafety();
+  }
+  res.json({ok:true});
 });
 app.get('/api/safety/history',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
@@ -1560,6 +1592,7 @@ app.patch('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);i
 app.delete('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});ROSTER=ROSTER.filter(r=>r.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
 
 loadSafety();
+setInterval(() => resendUnacknowledged().catch(e => console.error('push reminder', e)), 15000).unref();
 
 /* =========================================================================
  * 위험성평가 모드 — 안전보건담당자 (총괄국)

@@ -1059,7 +1059,7 @@ function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');
  *  - 안전 알림 수신: 긴급=화면 고정+긴 진동+경고음+음성, 확인 필수 / 주의·전달말씀=진동+상단 흐르는 글자
  * 구역 명부에 없는 계정(예: 영업과 직원)은 이 기능이 보이지 않는다.
  * ===================================================================== */
-let SF=null, sfWs=null, sfPoll=null, sfRemind=null, sfReconnect=null, sfConnect=null, sfLoading=null, sfActx=null, sfShiftPick=null;
+let SF=null, sfWs=null, sfPoll=null, sfReconnect=null, sfConnect=null, sfLoading=null, sfActx=null, sfShiftPick=null;
 const SF_LV={urgent:['긴급','var(--urgent)'],caution:['주의','var(--caution)'],notice:['전달말씀','var(--notice)']};
 const SF_HZ={pending:['관제실 확인 중','#7C8794'],dispatched:['알림 전파됨','#0B8A5B'],closed:['종결','#9AA4AE']};
 const SF_BELL='<svg class="bell" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"/></svg>';
@@ -1139,13 +1139,10 @@ async function sfInit(){
   sfPoll=setInterval(()=>{                     // 모바일 절전 후 복귀해도 빠르게 따라잡는다
     if(document.visibilityState==='visible') sfResume();
   },15000);
-  sfRemind=setInterval(()=>{                    // 미확인 긴급 알림은 90초마다 재알림
-    const p=sfPendingUrgent(); if(p.length) sfRing('urgent',p[0].text);
-  },90000);
 }
 function sfStop(){
   if(sfWs){ sfWs.onclose=null; try{sfWs.close();}catch(e){} sfWs=null; }
-  clearInterval(sfPoll); clearInterval(sfRemind); clearTimeout(sfReconnect);
+  clearInterval(sfPoll); clearTimeout(sfReconnect);
   sfConnect=null; sfLoading=null; SF=null;
   $('sfOverlay').classList.remove('on'); $('sfTicker').classList.add('hidden');
 }
@@ -1223,10 +1220,21 @@ function sfRenderTicker(){
 function sfOpenAlerts(focusId){
   const list=[...(SF?.alerts||[])];
   if(typeof focusId==='string') list.sort((a,b)=>(b.id===focusId)-(a.id===focusId));
-  $('sfSheet').innerHTML=`<div class="h" style="font-size:17px">오늘의 안전 알림</div>`+
-    (list.length?list.map(a=>`<div class="sf-al" style="border-left-color:${SF_LV[a.level][1]};${a.id===focusId?'background:#EAF2FF;':''}"><div class="m">${SF_LV[a.level][0]} · ${sfTime(a.createdAt)} · ${sfEsc(a.sender)}${a.level==='urgent'?(a.acked?' · 확인함':' · 미확인'):''}</div><div class="t">${sfEsc(a.text)}</div></div>`).join('')
-      :`<div class="mine-empty">오늘 받은 알림이 없습니다.</div>`)+
+  $('sfSheet').innerHTML=`<div class="h" style="font-size:17px">안전 알림</div>`+
+    (list.length?list.map(a=>`<div class="sf-al" style="border-left-color:${SF_LV[a.level][1]};${a.id===focusId?'background:#EAF2FF;':''}"><div class="m">${SF_LV[a.level][0]} · ${sfTime(a.createdAt)} · ${sfEsc(a.sender)} · ${a.acked?'확인함':'미확인'}</div><div class="t">${sfEsc(a.text)}</div>${a.acked?'':`<button class="back" data-alert-ack="${a.id}" style="margin-top:10px">확인했습니다</button>`}</div>`).join('')
+      :`<div class="mine-empty">받은 알림이 없습니다.</div>`)+
     `<button class="save" style="margin-top:10px" onclick="$('sfModal').classList.remove('on')">닫기</button>`;
+  $('sfSheet').querySelectorAll('[data-alert-ack]').forEach(button=>button.onclick=async()=>{
+    button.disabled=true;
+    try{
+      await api('/api/safety/alerts/'+encodeURIComponent(button.dataset.alertAck)+'/ack',{method:'POST',body:'{}'});
+      const alert=SF.alerts.find(a=>a.id===button.dataset.alertAck);
+      if(alert) alert.acked=true;
+      const pending=sfPendingUrgent();
+      if(pending.length) sfShowOverlay(pending); else $('sfOverlay').classList.remove('on');
+      sfRenderTicker(); sfOpenAlerts(focusId);
+    }catch(e){button.disabled=false;toast('확인 처리에 실패했습니다');}
+  });
   $('sfModal').classList.add('on');
 }
 
