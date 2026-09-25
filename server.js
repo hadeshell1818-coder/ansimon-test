@@ -1232,6 +1232,7 @@ app.get('/api/safety/state', (req, res) => {
   if (isSafetyCtl(u)) {
     return res.json({
       role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, levels: LEVELS,
+      push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
       calls: SAFE.calls.filter(c => isToday(c.at)).map(c => ({ ...c, carrier: carrierLabel(rosterById(c.carrierId)) })),
       alerts: SAFE.alerts.filter(a => isToday(a.createdAt)),

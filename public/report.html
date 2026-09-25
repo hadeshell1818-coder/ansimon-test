@@ -266,6 +266,7 @@
 let token=localStorage.getItem('cv_token')||sessionStorage.getItem('cv_token')||null;
 if(token){ localStorage.setItem('cv_token',token); sessionStorage.removeItem('cv_token'); }
 let me=null, KAKAO_KEY='', kakaoReady=false;
+let sfPushReady=false;
 let cur={};
 const $=id=>document.getElementById(id);
 const CATS={
@@ -1090,7 +1091,7 @@ function sfRing(level,text){
 }
 
 function sfPushPromptHtml(){
-  if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window) || Notification.permission==='granted') return '';
+  if(sfPushReady || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return '';
   return `<button class="history-link" id="sfPushBtn" onclick="sfPushInit(true)">관제실 알림 켜기 <span>›</span></button>`;
 }
 function sfPushKey(value){
@@ -1100,7 +1101,8 @@ function sfPushKey(value){
 async function sfPushInit(askPermission){
   if(!token || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
   try{
-    const cfg=await api('/api/push/config'); if(!cfg.enabled) return false;
+    const cfg=await api('/api/push/config');
+    if(!cfg.enabled){if(askPermission) toast('서버에 푸시 키가 설정되지 않았습니다'); return false;}
     const reg=await navigator.serviceWorker.register('/sw.js');
     let permission=Notification.permission;
     if(askPermission && permission==='default') permission=await Notification.requestPermission();
@@ -1111,6 +1113,7 @@ async function sfPushInit(askPermission){
     let sub=await reg.pushManager.getSubscription();
     if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:sfPushKey(cfg.publicKey)});
     await api('/api/push/subscribe',{method:'POST',body:JSON.stringify(sub)});
+    sfPushReady=true;
     $('sfPushBtn')?.remove();
     if(askPermission) toast('관제실 알림이 켜졌습니다');
     return true;
