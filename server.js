@@ -709,9 +709,10 @@ app.post('/api/reports', reportLimiter, (req, res) => {
   let photoUrl = null;
   if (b.photoBase64) { try { photoUrl = savePhoto(id, b.photoBase64); } catch (e) { console.error(e); } }
   const carrierUrgent = !!b.carrierUrgent;
-  const needsClassification = !b.type;
+  const isInternalWorkRisk = b.requestedInternal === true;
+  const needsClassification = !b.type && !isInternalWorkRisk;
   const r = {
-    id, type: b.type || null, item: b.item || null, subtype: null, region: b.region || u.region || '장흥군',
+    id, type: b.type || (isInternalWorkRisk ? 'safe' : null), item: b.item || (isInternalWorkRisk ? '우체국 내부 업무위험' : null), subtype: null, region: b.region || u.region || '장흥군',
     addr: b.addr || '', lat: b.lat ?? null, lng: b.lng ?? null,
     buildingName: String(b.buildingName || '').slice(0,100),
     requestedInternal: b.requestedInternal === true, routing: 'review',
@@ -719,7 +720,7 @@ app.post('/api/reports', reportLimiter, (req, res) => {
     photo: !!photoUrl, photoUrl, welfare: b.welfare || null,
     photoPrivacy: photoUrl ? (b.photoPrivacy || 'client-mask-unknown') : null,
     carrierUrgent, urgent: carrierUrgent, urgentNote: carrierUrgent ? '집배원이 현장에서 긴급으로 지정' : null,
-    aiMode: needsClassification ? null : 'na',
+    aiMode: needsClassification ? null : (isInternalWorkRisk ? 'not-required' : 'na'),
     createdAt: new Date().toISOString(),
     carrier: u.zone ? `${u.name}(${u.zone})` : `${u.name}·${u.org}`, carrierId: u.id,
     reporterOrg: u.org || null,
