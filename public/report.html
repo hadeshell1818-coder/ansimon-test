@@ -494,10 +494,10 @@ function showManualLocationPicker(){
       </div>
       <div id="cmap"></div>
        <input class="addr-in" id="addr" style="margin-top:11px;display:none" placeholder="확정된 도로명주소 (수정 가능)" oninput="cur.addr=this.value">
-       ${cur.requestedInternal?'<textarea class="memo" id="manualInternalNote" maxlength="1000" style="margin-top:11px" placeholder="내부위험 상세 설명 (선택)\n예: 계단 타일이 들떠 있고 반복해서 오르내립니다."></textarea>':''}
       <div class="coord" id="coord"></div>
       <div class="pin-hint" id="pinHint">📌 위 버튼 중 하나로 위치를 먼저 선택해 주세요</div>
     </div></div>
+    ${cur.requestedInternal?'<div class="card"><div class="pad" style="padding-top:12px"><label for="manualInternalNote" style="display:block;font-size:12px;font-weight:800;margin-bottom:6px">내부위험 상세 설명 <span style="color:var(--ink-2);font-weight:600">(선택)</span></label><textarea class="memo" id="manualInternalNote" maxlength="1000" placeholder="위험한 위치·상황·반복 빈도·우려되는 점을 적어주세요. 비워도 접수됩니다.\n예: 계단 타일이 들떠 있고 매일 여러 번 오르내립니다."></textarea></div></div>':''}
     <button class="save" id="saveBtn" onclick="submitWithManualLocation()">위치 확정하고 접수 ›</button>
     <div class="save-sub">분야는 AI가 자동으로 분류해요</div>`;
 }
@@ -517,6 +517,11 @@ async function submitWithManualLocation(){
 }
 async function quickSubmit(lat,lng){
   cur.lat=lat; cur.lng=lng;
+  // Internal reports should reach their optional explanation immediately; reverse geocoding can stall on mobile networks.
+  if(cur.requestedInternal){
+    cur.region=cur.region||me.region;
+    return showInternalExplanation();
+  }
   // 주소는 가능하면 채우되(카카오/OSM), 실패해도 좌표만으로 제출 진행
   try{
     if(KAKAO_KEY&&kakaoReady&&kakao.maps.services){
@@ -542,8 +547,6 @@ async function quickSubmit(lat,lng){
     }
   }catch(e){ /* 주소 실패해도 좌표는 있으니 계속 진행 */ }
 
-  if(cur.requestedInternal) return showInternalExplanation();
-
   try{
     const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
@@ -557,7 +560,7 @@ function showInternalExplanation(){
   $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="startQuickReport()">‹ 다시 신고</button></div>
     <div class="h" style="font-size:18px">내부위험 상세 설명 <span style="font-size:12px;color:var(--ink-2);font-weight:600">(선택)</span></div>
     <div style="font-size:12.5px;color:var(--ink-2);margin:-5px 0 12px">사진만으로 부족한 위치·상황·반복 빈도·당장 우려되는 점을 적어주세요. 비워도 접수됩니다.</div>
-    <div class="card"><div class="pad" style="padding-top:13px"><img src="${cur.photoBase64}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><div class="coord" style="margin-top:8px">📍 ${esc(cur.addr||'자동 확인된 위치')}</div></div></div>
+    <div class="card"><div class="pad" style="padding-top:13px"><img src="${cur.photoBase64}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><div class="coord" style="margin-top:8px">📍 ${esc(cur.addr||'GPS 위치 확인 완료 · 주소는 접수 후 보완 가능')}</div></div></div>
     <textarea class="memo" id="autoInternalNote" maxlength="1000" placeholder="예: 계단 3번째 단 타일이 들떠 있고 직원들이 매일 오르내립니다.">${esc(cur.internalNote||'')}</textarea>
     <div style="font-size:10.5px;color:var(--ink-2);margin:5px 2px 12px">설명은 안전관리담당자의 위험성평가에 참고됩니다.</div>
     <button class="save" onclick="submitAutoLocation()">위치 확인 후 접수 ›</button>`;
