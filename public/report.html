@@ -454,12 +454,18 @@ async function onQuickPhoto(e,fromCamera){
   $('cw').innerHTML=`<div style="text-align:center;padding:42px 12px"><div class="spin"></div><div style="font-weight:800;margin-top:15px">사진 업로드 중…</div></div>`;
   try{
     cur.photoBase64=await fileToBase64(f);
-    cur.photoPrivacy='none';
-    if(fromCamera && cur.requestedInternal) showInternalExplanation();
-    else fromCamera ? showAutoLocating() : showManualLocationPicker();
-    if(fromCamera && cur.requestedInternal) captureInternalLocation();
   }catch(err){
-    console.error(err); toast('사진 처리 오류 · 다시 선택해 주세요'); startQuickReport();
+    console.error('photo conversion failed',err); toast('사진을 읽지 못했습니다 · 다시 선택해 주세요'); startQuickReport(); return;
+  }
+  cur.photoPrivacy='none';
+  try{
+    if(fromCamera && cur.requestedInternal){ showInternalExplanation(); captureInternalLocation(); }
+    else if(fromCamera) showAutoLocating();
+    else showManualLocationPicker();
+  }catch(err){
+    console.error('report screen setup failed',err);
+    toast('신고 화면을 여는 중 오류가 났습니다. 사진은 처리됐습니다.');
+    showManualLocationPicker();
   }
 }
 function showAutoLocating(){
@@ -480,12 +486,17 @@ function showAutoLocating(){
 function captureInternalLocation(){
   const status=$('internalLocationStatus');
   if(!navigator.geolocation){ if(status)status.textContent='위치 권한을 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
-  navigator.geolocation.getCurrentPosition(position=>{
-    cur.lat=position.coords.latitude; cur.lng=position.coords.longitude;
-    if(status)status.textContent='📍 현재 위치 확인 완료';
-  },()=>{
-    if(status)status.textContent='위치를 확인하지 못했습니다. 설명을 입력하거나 위치 없이 접수할 수 있습니다.';
-  },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+  try{
+    navigator.geolocation.getCurrentPosition(position=>{
+      cur.lat=position.coords.latitude; cur.lng=position.coords.longitude;
+      if(status)status.textContent='📍 현재 위치 확인 완료';
+    },()=>{
+      if(status)status.textContent='위치를 확인하지 못했습니다. 설명을 입력하거나 위치 없이 접수할 수 있습니다.';
+    },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+  }catch(error){
+    console.warn('internal report geolocation unavailable',error);
+    if(status)status.textContent='위치 권한을 사용할 수 없습니다. 위치 없이 계속 접수할 수 있습니다.';
+  }
 }
 /* 갤러리 선택 시: 촬영 당시 위치를 알 수 없으므로 지도/주소로 직접 지정 (기존 위치선택 UI 재사용) */
 function showManualLocationPicker(){
