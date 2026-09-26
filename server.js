@@ -491,7 +491,7 @@ else {
 
 /* ===================== 역할별 조회 필터 ===================== */
 function visibleReports(user) {
-  if (user.kind === 'control') return reports;
+  if (user.kind === 'control') return reports.filter(r => reportRoute(r) !== 'internal');
   if (user.kind === 'dept') return reports.filter(r => (!r.routing || r.routing === 'external') && r.region === user.region && r.type === user.type);
   if (user.kind === 'carrier') return reports.filter(r => r.carrierId === user.id);
   return [];

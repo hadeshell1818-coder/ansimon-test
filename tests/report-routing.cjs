@@ -24,7 +24,9 @@ assert.equal(context.reportRoute({...base,buildingName:'',requestedInternal:true
 const report={...base};context.reports.push(report);
 context.routeReport(report);
 const dept={kind:'dept',region:'장흥군',type:'safe'};
+const control={kind:'control'};
 assert.equal(context.visibleReports(dept).length,0);
+assert.equal(context.visibleReports(control).length,1);
 const handler=routes['POST /api/reports/:id/routing'];
 function respond(){return {code:200,status(n){this.code=n;return this;},json(data){this.data=data;return this;}};}
 let response=respond();
@@ -34,6 +36,7 @@ response=respond();
 handler({user:{id:'jip'},params:{id:'R1'},body:{choice:'internal'}},response);
 assert.equal(response.code,200);
 assert.equal(report.routing,'internal');
+assert.equal(context.visibleReports(control).length,0);
 assert.equal(context.RISK.items.length,1);
 assert.equal(context.RISK.items[0].fromReport,'R1');
 assert.equal(context.RISK.items[0].photoFile,'photo.jpg');
@@ -42,6 +45,7 @@ assert.equal(context.RISK.items.length,1);
 assert.equal(context.visibleReports(dept).length,0);
 report.routeChoice='external';context.routeReport(report);
 assert.equal(context.visibleReports(dept).length,1);
+assert.equal(context.visibleReports(control).length,1);
 assert.equal(context.RISK.items[0].routingInactive,true);
 report.type='env';report.routeChoice='internal';context.routeReport(report);
 assert.equal(report.routing,'external');
