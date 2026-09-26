@@ -429,7 +429,7 @@ function pickCat(cat){ cur.cat=cat; if(cat==='welfare') return welfareForm();
 /* ===== 안전·환경 상세 ===== */
 let map=null,marker=null,useKakao=false,kGeo=null;
 function startQuickReport(){
-  cur={cat:null,item:null,type:null,lat:null,lng:null,addr:'',photoBase64:null,memo:'',carrierUrgent:false,editId:null};
+  cur={cat:null,item:null,type:null,lat:null,lng:null,addr:'',photoBase64:null,memo:'',internalNote:'',carrierUrgent:false,editId:null};
   ensureKakao(); // 카카오 미리 로드 시작(주소 변환용)
   $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="home()">‹ 뒤로</button></div>
     <div class="h" style="font-size:18px">사진을 찍으면 위치까지<br>자동으로 접수됩니다</div>
@@ -491,7 +491,8 @@ function showManualLocationPicker(){
         <div class="addr-msg" id="addrMsg"></div>
       </div>
       <div id="cmap"></div>
-      <input class="addr-in" id="addr" style="margin-top:11px;display:none" placeholder="확정된 도로명주소 (수정 가능)" oninput="cur.addr=this.value">
+       <input class="addr-in" id="addr" style="margin-top:11px;display:none" placeholder="확정된 도로명주소 (수정 가능)" oninput="cur.addr=this.value">
+       ${cur.requestedInternal?'<textarea class="memo" id="manualInternalNote" maxlength="1000" style="margin-top:11px" placeholder="내부위험 상세 설명 (선택)\n예: 계단 타일이 들떠 있고 반복해서 오르내립니다."></textarea>':''}
       <div class="coord" id="coord"></div>
       <div class="pin-hint" id="pinHint">📌 위 버튼 중 하나로 위치를 먼저 선택해 주세요</div>
     </div></div>
@@ -508,7 +509,7 @@ async function submitWithManualLocation(){
     const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:hasCoordinates?cur.lat:null, lng:hasCoordinates?cur.lng:null,
       buildingName:cur.buildingName||'', requestedInternal:!!cur.requestedInternal,
-      memo:cur.memo||'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
+      memo:cur.memo||($('manualInternalNote')?.value||'').trim(), internalNote:cur.requestedInternal?($('manualInternalNote')?.value||'').trim():'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
     await reportRoutingScreen(result.report.id);
   }catch(e){ btn.disabled=false; btn.textContent='위치 확정하고 접수 ›'; toast('전송 실패 · 다시 시도해 주세요'); }
 }
@@ -537,11 +538,33 @@ async function quickSubmit(lat,lng){
     }
   }catch(e){ /* 주소 실패해도 좌표는 있으니 계속 진행 */ }
 
+  if(cur.requestedInternal) return showInternalExplanation();
+
   try{
     const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
       buildingName:cur.buildingName||'', requestedInternal:!!cur.requestedInternal,
-      memo:cur.memo||'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
+      memo:cur.memo||'', internalNote:'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
+    await reportRoutingScreen(result.report.id);
+  }catch(e){ toast('전송 실패 · 다시 시도해 주세요'); home(); }
+}
+
+function showInternalExplanation(){
+  $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="startQuickReport()">‹ 다시 신고</button></div>
+    <div class="h" style="font-size:18px">내부위험 상세 설명 <span style="font-size:12px;color:var(--ink-2);font-weight:600">(선택)</span></div>
+    <div style="font-size:12.5px;color:var(--ink-2);margin:-5px 0 12px">사진만으로 부족한 위치·상황·반복 빈도·당장 우려되는 점을 적어주세요. 비워도 접수됩니다.</div>
+    <div class="card"><div class="pad" style="padding-top:13px"><img src="${cur.photoBase64}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><div class="coord" style="margin-top:8px">📍 ${esc(cur.addr||'자동 확인된 위치')}</div></div></div>
+    <textarea class="memo" id="autoInternalNote" maxlength="1000" placeholder="예: 계단 3번째 단 타일이 들떠 있고 직원들이 매일 오르내립니다.">${esc(cur.internalNote||'')}</textarea>
+    <div style="font-size:10.5px;color:var(--ink-2);margin:5px 2px 12px">설명은 안전관리담당자의 위험성평가에 참고됩니다.</div>
+    <button class="save" onclick="submitAutoLocation()">위치 확인 후 접수 ›</button>`;
+}
+async function submitAutoLocation(){
+  cur.internalNote=($('autoInternalNote')?.value||'').trim();
+  try{
+    const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
+      region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
+      buildingName:cur.buildingName||'', requestedInternal:true,
+      memo:cur.memo||cur.internalNote||'', internalNote:cur.internalNote, photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
     await reportRoutingScreen(result.report.id);
   }catch(e){ toast('전송 실패 · 다시 시도해 주세요'); home(); }
 }

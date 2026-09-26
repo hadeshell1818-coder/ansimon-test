@@ -520,13 +520,13 @@ function routeReport(r) {
     if (existing) { existing.routingInactive = true; saveRisk(); broadcastRisk(); }
     return;
   }
-  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; saveRisk(); broadcastRisk(); return; }
+  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.internalNote||r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; saveRisk(); broadcastRisk(); return; }
   const photoFile = r.photoUrl ? path.basename(r.photoUrl.split('?')[0]) : null;
   const item = {
     id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier',
     reporter:r.carrier, reporterOrg:r.reporterOrg, createdAt:new Date().toISOString(),
     addr:r.addr, lat:r.lat, lng:r.lng,
-    note:[r.addr, r.item, r.memo].filter(Boolean).join(' · '),
+    note:[r.addr, r.item, r.internalNote||r.memo].filter(Boolean).join(' · '),
     photoFile, beforePhotoFile:photoFile, afterPhotoFile:null,
     proc:null, hazard:null, aiMode:'review', aiDraft:null,
     factor:null, currentControl:null, frequency:null, severity:null,
@@ -715,7 +715,7 @@ app.post('/api/reports', reportLimiter, (req, res) => {
     addr: b.addr || '', lat: b.lat ?? null, lng: b.lng ?? null,
     buildingName: String(b.buildingName || '').slice(0,100),
     requestedInternal: b.requestedInternal === true, routing: 'review',
-    status: 'received', reason: '', memo: b.memo || '',
+    status: 'received', reason: '', memo: String(b.memo || b.internalNote || '').slice(0, 1000), internalNote: String(b.internalNote || '').slice(0, 1000),
     photo: !!photoUrl, photoUrl, welfare: b.welfare || null,
     photoPrivacy: photoUrl ? (b.photoPrivacy || 'client-mask-unknown') : null,
     carrierUrgent, urgent: carrierUrgent, urgentNote: carrierUrgent ? '집배원이 현장에서 긴급으로 지정' : null,
