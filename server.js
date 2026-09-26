@@ -1876,30 +1876,12 @@ app.post('/api/safety/hazards/:id/to-risk', (req, res) => {
   res.json({ ok: true, id: it.id });
 });
 
-/* 안전보건담당자 → 소통팀장 긴급전파 요청(역이관): 사진 사안이 지금 위험할 때 */
-app.post('/api/risk/items/:id/to-urgent', (req, res) => {
-  const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
-  const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const a = createAlert({ org: SAFETY_OFFICE, name: '안전보건담당자' }, { level: b.level || 'caution', text: b.text || it.note || '현장 위험 주의', zones: b.zones || 'all' });
-  if (a.error) return res.status(400).json(a);
-  a.fromRisk = it.id; it.urgentAlertId = a.id;
-  saveSafety(); saveRisk(); broadcastSafety(); broadcastRisk();
-  sendSafetyPush(a).catch(e => console.error('safety push', e.message));
-  res.json({ ok: true, alert: a });
-});
-
-/* 판별: 대기함 → 위험성평가 대기열 승격 / 외부신고 회부 / 오신고 폐기 */
+/* 내부위험 접수는 안전관리담당자가 평가하거나 오신고로 정리한다. */
 app.post('/api/risk/items/:id/triage', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const dec = (req.body || {}).decision;
   if (dec === 'promote') it.status = 'assessing';
-  else if (dec === 'external') {
-    it.status = 'discarded'; it.discardReason = '외부(지자체) 사안으로 회부';
-    const original=reports.find(r=>r.id===it.fromReport);
-    if(original){ original.requestedInternal=false; original.routeChoice='external'; routeReport(original); save(); broadcast(); }
-  }
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();

@@ -15,7 +15,8 @@
 .workspace-scroll{overflow-x:auto;}
 .workspace-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0 24px;}
 .workspace-form label{display:grid;gap:6px;font-weight:600;}
-.workspace-form input,.workspace-form select,.workspace-search{width:100%;padding:10px;border:1px solid #BAC4CE;border-radius:5px;font:inherit;background:#fff;min-width:0;}
+.workspace-form input,.workspace-form select,.workspace-form textarea,.workspace-search{width:100%;padding:10px;border:1px solid #BAC4CE;border-radius:5px;font:inherit;background:#fff;min-width:0;}
+.workspace-form textarea{resize:vertical;}
 .workspace-form .wide{grid-column:1/-1;}
 .workspace-search{max-width:440px;margin-bottom:16px;}
 .workspace-note{padding:12px 0;color:#48525C;line-height:1.7;}

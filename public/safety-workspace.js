@@ -12,6 +12,7 @@ let libraryQuery = '';
 let evidenceResults = [];
 let evidenceCases = [];
 let selectedEvidence = [];
+let librarySearchTimer = null;
 async function refreshKnowledge() {
   if (!me || me.kind !== 'safety_mgr') return;
   try {
@@ -101,7 +102,7 @@ function renderSourceRows() {
   const status = { pending: '검토 대기', approved: '검토 완료', retired: '사용 중단' };
   $('source-rows').innerHTML = rows.map(item => {
     const url = safeSourceUrl(item.source_url);
-    return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small></td>
+    return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small>${item.storage_path?`<button class="btn" style="margin-top:6px" onclick="openKnowledgeFile('${esc(item.id)}')">원본 파일 열기</button>`:''}</td>
       <td>${item.stored ? 'Supabase 등록' : '출처 후보 · 미적재'}<small>${status[item.review_status] || '검토 대기'}</small></td>
       <td>${esc(item.rights_note)}<small>${item.case_count ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록` : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
@@ -123,8 +124,19 @@ function renderLibrary() {
       <label>분야<select name="category">${Object.entries(safetyCategories).map(([id,s]) => `<option value="${id}">${s.title}</option>`).join('')}<option value="general">공통</option></select></label>
       <label>자료 종류<select name="kind"><option value="guideline">안전지침</option><option value="law">법령</option><option value="incident">사고사례</option><option value="checklist">점검표</option><option value="manual">작업 매뉴얼</option></select></label>
       <div class="wide"><button class="btn primary" type="submit" ${connected ? '' : 'disabled'}>출처 등록</button></div>
+    </form>
+    <form class="workspace-form" id="document-upload-form" onsubmit="uploadKnowledgeDocument(event)">
+      <h3 class="wide">PDF·한글 자료 등록</h3>
+      <label>자료명<input name="title" required maxlength="200" ${connected ? '' : 'disabled'}></label>
+      <label>제공기관<input name="publisher" required maxlength="120" ${connected ? '' : 'disabled'}></label>
+      <label>분야<select name="category" ${connected ? '' : 'disabled'}>${Object.entries(safetyCategories).map(([id,s]) => `<option value="${id}">${s.title}</option>`).join('')}<option value="general">공통</option></select></label>
+      <label>자료 종류<select name="kind" ${connected ? '' : 'disabled'}><option value="guideline">안전지침</option><option value="law">법령</option><option value="incident">사고사례</option><option value="checklist">점검표</option><option value="manual">작업 매뉴얼</option></select></label>
+      <label class="wide">원본 파일<input name="file" type="file" accept=".pdf,.hwp,.hwpx,application/pdf,application/x-hwp" required ${connected ? '' : 'disabled'}></label>
+      <label class="wide">검색할 본문 텍스트<textarea name="bodyText" rows="5" placeholder="문서에서 검색할 내용을 붙여넣으세요. 파일은 보관되며, 본문 텍스트를 입력한 경우에만 해당 내용 검색이 가능합니다." ${connected ? '' : 'disabled'}></textarea></label>
+      <div class="wide"><button class="btn primary" type="submit" ${connected ? '' : 'disabled'}>자료와 본문 저장</button><small>PDF·HWP·HWPX 원본, 최대 6MB. 업로드 자료는 검토 대기 상태로 등록됩니다.</small></div>
     </form><p id="library-result" role="status"></p>
-    <label for="source-search">자료 검색</label><br><input class="workspace-search" id="source-search" value="${esc(libraryQuery)}" placeholder="롤파렛트, 끼임, 법령" oninput="libraryQuery=this.value;renderSourceRows()">
+    <label for="source-search">자료·본문 검색</label><br><input class="workspace-search" id="source-search" value="${esc(libraryQuery)}" placeholder="본문에서 찾을 표현 입력" oninput="libraryQuery=this.value;renderSourceRows();searchLibrary()">
+    <div id="library-search-results" class="evidence-list" aria-live="polite"></div>
     <div class="workspace-scroll"><table class="workspace-table"><thead><tr><th>자료·제공기관</th><th>등록·검토 상태</th><th>이용조건</th></tr></thead><tbody id="source-rows"></tbody></table></div>`;
   renderSourceRows();
 }
@@ -149,6 +161,50 @@ async function importSif(event) {
     await refreshKnowledge();
   } catch (error) { $('sif-result').textContent = error.message; }
   finally { button.disabled = false; }
+}
+async function uploadKnowledgeDocument(event) {
+  event.preventDefault();
+  const form = event.target, data = new FormData(form), file = data.get('file');
+  const button = form.querySelector('button');
+  if (!file || !file.size) return;
+  button.disabled = true;
+  if ($('library-result')) $('library-result').textContent = '파일을 Supabase에 저장하고 있습니다.';
+  try {
+    const fileBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'));
+      reader.readAsDataURL(file);
+    });
+    await api('/api/safety-knowledge/upload', { method: 'POST', body: JSON.stringify({
+      title: data.get('title'), publisher: data.get('publisher'), category: data.get('category'), kind: data.get('kind'),
+      fileName: file.name, mimeType: file.type, fileBase64, bodyText: data.get('bodyText'),
+    }) });
+    form.reset();
+    if ($('library-result')) $('library-result').textContent = '원본 파일과 입력한 본문을 저장했습니다. 검토 대기 상태입니다.';
+    await reloadLibrary();
+  } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+async function openKnowledgeFile(id) {
+  const tab = window.open('', '_blank');
+  try { const result = await api(`/api/safety-knowledge/${encodeURIComponent(id)}/file`); if (tab) tab.location = result.url; else window.location.href = result.url; }
+  catch (error) { tab?.close(); toast(error.message); }
+}
+function searchLibrary() {
+  clearTimeout(librarySearchTimer);
+  librarySearchTimer = setTimeout(async () => {
+    const host = $('library-search-results'), query = libraryQuery.trim();
+    if (!host) return;
+    if (!query) { host.innerHTML = ''; return; }
+    host.innerHTML = '<small>문서 본문과 등록 사례를 검색 중입니다.</small>';
+    try {
+      const data = await api(`/api/safety-knowledge/search?q=${encodeURIComponent(query)}`);
+      const docs = (data.results || []).map(doc => `<article class="case-result"><b>${esc(doc.title || '자료')}</b> · ${esc(doc.publisher || '')}<small>${esc(doc.review_status || '검토 대기')}${doc.storage_path?` · <button class="btn" onclick="openKnowledgeFile('${esc(doc.id)}')">파일 열기</button>`:''}</small>${(doc.sections || []).map(section => `<p><b>${esc(section.locator || '본문')}</b><br>${esc(section.body || '')}</p>`).join('')}</article>`).join('');
+      const cases = (data.cases || []).map(item => `<article class="case-result"><b>${esc(item.hazard_object || item.high_risk_situation || 'SIF 사례')}</b><small>${esc([item.industry_large,item.industry_medium,item.work_category,item.work_name].filter(Boolean).join(' · '))} · ${esc(item.review_status || '검토 대기')}</small><p>${esc(item.incident_summary || '')}</p><small>유발요인: ${esc(item.causal_factors || '-')}<br>감소대책: ${esc(item.reduction_measures || '-')}</small></article>`).join('');
+      host.innerHTML = docs + cases || '<small>본문이나 사례에서 일치하는 내용을 찾지 못했습니다.</small>';
+    } catch (error) { host.innerHTML = `<small class="workspace-error">${esc(error.message)}</small>`; }
+  }, 350);
 }
 async function reloadLibrary() { await refreshKnowledge(); if (tab === 'library') renderLibrary(); }
 async function seedSources() {
