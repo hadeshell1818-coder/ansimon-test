@@ -1660,6 +1660,30 @@ const HAZARD_TYPES = {
 const SEV_TEXT = { 1: '경미(1일~1주 미만 휴업)', 2: '소(1~4주 휴업)', 3: '중(4~12주 휴업)', 4: '대(12~24주 휴업)', 5: '최대(사망·24주 이상)' };
 const FREQ_TEXT = { 1: '거의 없음', 2: '낮음', 3: '보통', 4: '높음', 5: '매우 높음' };
 const RISK_THRESHOLD = 9; // 위험성 이 값 이상이면 허용불가(교재 예시: 9=허용불가, 6=허용)
+const RISK_CRITERIA = {
+  frequency: [
+    { score: 1, label: '최저', detail: '발생 가능성 거의 없음 · 노출이 드묾' },
+    { score: 2, label: '낮음', detail: '간헐적 노출 · 발생 가능성 낮음' },
+    { score: 3, label: '보통', detail: '반복 노출 · 발생 가능성이 보통' },
+    { score: 4, label: '높음', detail: '자주 노출 · 발생 가능성이 높음' },
+    { score: 5, label: '최대', detail: '매우 빈번한 노출 · 사고가 임박하거나 반복됨' },
+  ],
+  severity: [
+    { score: 1, label: '최소', detail: '휴업을 동반하지 않는 경미한 상해' },
+    { score: 2, label: '소', detail: '1~4주 휴업재해 수준' },
+    { score: 3, label: '중', detail: '4~12주 휴업재해 수준' },
+    { score: 4, label: '대', detail: '12~24주 휴업재해 수준' },
+    { score: 5, label: '최대', detail: '사망 또는 24주 이상 휴업재해 수준' },
+  ],
+  bands: [
+    { range: '16~25', label: '매우 높음', action: '즉시 작업중지 · 개선 후 재개' },
+    { range: '13~15', label: '높음', action: '개선대책을 즉시 수립·이행' },
+    { range: '9~12', label: '약간 높음', action: '개선대책을 세우고 허용 여부 재검토' },
+    { range: '8', label: '보통', action: '계획된 정비·보수 기간에 개선' },
+    { range: '4~6', label: '낮음', action: '표지·절차·교육 등 관리' },
+    { range: '1~3', label: '매우 낮음', action: '현 상태 유지 및 정기 확인' },
+  ],
+};
 
 let RISK = { seq: 1, items: [] };
 function saveRisk() { try { fs.writeFileSync(RISK_FILE, JSON.stringify(RISK)); } catch (e) { console.error('risk save fail', e); } }
@@ -1770,13 +1794,14 @@ function itemForMgr(it) {
   const c = riskCalc(it.frequency, it.severity);
   return {
     ...it,
-    procName: procById(it.proc)?.name || null,
+    procName: it.customProcess || procById(it.proc)?.name || null,
     hazardLabel: it.hazard ? HAZARD_TYPES[it.hazard]?.label : null,
     photoUrl: it.photoFile ? signedRiskUrl(it.id, "photo") : null,
     beforePhotoUrl: it.beforePhotoFile ? signedRiskUrl(it.id, "before") : null,
     afterPhotoUrl: it.afterPhotoFile ? signedRiskUrl(it.id, "after") : null,
+    additionalPhotoUrls: (it.additionalPhotoFiles || []).map((_, i) => signedRiskUrl(it.id, `additional-${i}`)),
     riskValue: c.risk, riskBand: c.band, allow: c.allow,
-    photoFile: undefined, beforePhotoFile: undefined, afterPhotoFile: undefined,
+    photoFile: undefined, beforePhotoFile: undefined, afterPhotoFile: undefined, additionalPhotoFiles: undefined,
   };
 }
 /* 이미지 서명 URL은 hazard(SAFE)와 별개 저장소이므로 risk 전용 파일 라우트를 따로 둔다 */
@@ -1792,7 +1817,7 @@ app.get('/api/risk/state', async (req, res) => {
   ensureRiskDemo();
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
-    sevText: SEV_TEXT, freqText: FREQ_TEXT, threshold: RISK_THRESHOLD,
+    sevText: SEV_TEXT, freqText: FREQ_TEXT, threshold: RISK_THRESHOLD, criteria: RISK_CRITERIA,
     inbox: RISK.items.filter(it => !it.routingInactive && it.status === 'inbox').map(itemForMgr),
     registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
   });
@@ -1814,8 +1839,8 @@ function intakeRiskPhoto(u, b, viaTransfer) {
     photoFile, proc: b.proc || null, hazard: null, aiMode: 'pending', aiDraft: null,
     // 평가값(담당자 확정)
     factor: null, currentControl: null, fieldReview: null, evidenceIds: [], frequency: null, severity: null,
-    reduction: null, afterRisk: null, dueDate: null, dept: null, owner: null,
-    beforePhotoFile: photoFile, afterPhotoFile: null, doneAt: null, transferNote: b.transferNote || null,
+    reduction: null, afterRisk: null, dueDate: null, dept: null, owner: null, workContent: b.workContent || null,
+    beforePhotoFile: photoFile, afterPhotoFile: null, additionalPhotoFiles: [], improvementSteps: '', resultNote: '', doneAt: null, transferNote: b.transferNote || null,
   };
   RISK.items.unshift(it); saveRisk(); broadcastRisk();
   if (photoFile) classifyHazardPhoto(it, b.photoBase64).catch(e => console.error('classify', e));
@@ -1887,7 +1912,8 @@ app.patch('/api/risk/items/:id', (req, res) => {
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
   const str = (k, max = 300) => { if (typeof b[k] === 'string') it[k] = b[k].slice(0, max); };
-  if (b.proc && procById(b.proc)) it.proc = b.proc;
+  if (b.proc && procById(b.proc)) { it.proc = b.proc; it.customProcess = null; }
+  if (typeof b.customProcess === 'string') it.customProcess = b.customProcess.slice(0, 120) || null;
   if (b.hazard && HAZARD_TYPES[b.hazard]) it.hazard = b.hazard;
   str('factor'); str('currentControl'); str('fieldReview', 500); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
   if (Array.isArray(b.evidenceIds)) it.evidenceIds = b.evidenceIds.filter(x => typeof x === 'string').slice(0, 20);
@@ -1907,6 +1933,14 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   if (b.afterPhotoBase64) { try { it.afterPhotoFile = path.basename(savePhoto('risk-after-' + it.id, b.afterPhotoBase64)); } catch (e) { return res.status(400).json({ error: e.message }); } }
   if (b.afterRisk != null) { const n = +b.afterRisk; if (n >= 1 && n <= 25) it.afterRisk = n; }
   if (typeof b.reduction === 'string') it.reduction = b.reduction.slice(0, 500);
+  if (typeof b.improvementSteps === 'string') it.improvementSteps = b.improvementSteps.slice(0, 3000);
+  if (typeof b.resultNote === 'string') it.resultNote = b.resultNote.slice(0, 1500);
+  if (Array.isArray(b.additionalPhotosBase64)) {
+    it.additionalPhotoFiles = it.additionalPhotoFiles || [];
+    for (const data of b.additionalPhotosBase64.slice(0, 6)) {
+      try { it.additionalPhotoFiles.push(path.basename(savePhoto('risk-additional-' + it.id, data))); } catch (e) { return res.status(400).json({ error: e.message }); }
+    }
+  }
   it.status = 'done'; it.doneAt = new Date().toISOString(); it.improvedBy = u.name;
   saveRisk(); broadcastRisk();
   res.json({ ok: true });
@@ -1946,7 +1980,8 @@ app.get('/api/risk/files/:id/:kind', (req, res) => {
     return res.status(403).json({ error: '링크가 만료되었거나 올바르지 않습니다.' });
   }
   const it = RISK.items.find(x => x.id === id);
-  const fn = it && (kind === 'after' ? it.afterPhotoFile : (kind === 'before' ? it.beforePhotoFile : it.photoFile));
+  let fn = it && (kind === 'after' ? it.afterPhotoFile : (kind === 'before' ? it.beforePhotoFile : it.photoFile));
+  if (it && kind.startsWith('additional-')) fn = (it.additionalPhotoFiles || [])[Number(kind.slice(11))];
   if (!fn) return res.status(404).json({ error: 'not found' });
   const full = path.join(UP_DIR, path.basename(fn));
   if (!fs.existsSync(full)) return res.status(404).json({ error: 'not found' });
