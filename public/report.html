@@ -455,7 +455,9 @@ async function onQuickPhoto(e,fromCamera){
   try{
     cur.photoBase64=await fileToBase64(f);
     cur.photoPrivacy='none';
-    fromCamera ? showAutoLocating() : showManualLocationPicker();
+    if(fromCamera && cur.requestedInternal) showInternalExplanation();
+    else fromCamera ? showAutoLocating() : showManualLocationPicker();
+    if(fromCamera && cur.requestedInternal) captureInternalLocation();
   }catch(err){
     console.error(err); toast('사진 처리 오류 · 다시 선택해 주세요'); startQuickReport();
   }
@@ -474,6 +476,16 @@ function showAutoLocating(){
     p=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(p.coords.latitude,p.coords.longitude); },
     ()=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(34.6816,126.9072); },
     {enableHighAccuracy:true,timeout:7000,maximumAge:60000});
+}
+function captureInternalLocation(){
+  const status=$('internalLocationStatus');
+  if(!navigator.geolocation){ if(status)status.textContent='위치 권한을 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
+  navigator.geolocation.getCurrentPosition(position=>{
+    cur.lat=position.coords.latitude; cur.lng=position.coords.longitude;
+    if(status)status.textContent='📍 현재 위치 확인 완료';
+  },()=>{
+    if(status)status.textContent='위치를 확인하지 못했습니다. 설명을 입력하거나 위치 없이 접수할 수 있습니다.';
+  },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
 }
 /* 갤러리 선택 시: 촬영 당시 위치를 알 수 없으므로 지도/주소로 직접 지정 (기존 위치선택 UI 재사용) */
 function showManualLocationPicker(){
@@ -497,7 +509,7 @@ function showManualLocationPicker(){
       <div class="coord" id="coord"></div>
       <div class="pin-hint" id="pinHint">📌 위 버튼 중 하나로 위치를 먼저 선택해 주세요</div>
     </div></div>
-    ${cur.requestedInternal?'<div class="card"><div class="pad" style="padding-top:12px"><label for="manualInternalNote" style="display:block;font-size:12px;font-weight:800;margin-bottom:6px">내부위험 상세 설명 <span style="color:var(--ink-2);font-weight:600">(선택)</span></label><textarea class="memo" id="manualInternalNote" maxlength="1000" placeholder="위험한 위치·상황·반복 빈도·우려되는 점을 적어주세요. 비워도 접수됩니다.\n예: 계단 타일이 들떠 있고 매일 여러 번 오르내립니다."></textarea></div></div>':''}
+    <div class="card"><div class="pad" style="padding-top:12px"><label for="manualDetails" style="display:block;font-size:12px;font-weight:800;margin-bottom:6px">상세 설명 <span style="color:var(--ink-2);font-weight:600">(선택)</span></label><textarea class="memo" id="manualDetails" maxlength="1000" placeholder="주소 아래에 상황을 덧붙일 수 있습니다. 비워도 접수됩니다."></textarea></div></div>
     <button class="save" id="saveBtn" onclick="submitWithManualLocation()">위치 확정하고 접수 ›</button>
     <div class="save-sub">분야는 AI가 자동으로 분류해요</div>`;
 }
@@ -511,7 +523,7 @@ async function submitWithManualLocation(){
     const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:hasCoordinates?cur.lat:null, lng:hasCoordinates?cur.lng:null,
       buildingName:cur.buildingName||'', requestedInternal:!!cur.requestedInternal,
-      memo:cur.memo||($('manualInternalNote')?.value||'').trim(), internalNote:cur.requestedInternal?($('manualInternalNote')?.value||'').trim():'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
+      memo:cur.memo||($('manualDetails')?.value||'').trim(), internalNote:cur.requestedInternal?($('manualDetails')?.value||'').trim():'', photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
     await reportRoutingScreen(result.report.id);
   }catch(e){ btn.disabled=false; btn.textContent='위치 확정하고 접수 ›'; toast('전송 실패 · 다시 시도해 주세요'); }
 }
@@ -559,21 +571,39 @@ async function quickSubmit(lat,lng){
 function showInternalExplanation(){
   $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="startQuickReport()">‹ 다시 신고</button></div>
     <div class="h" style="font-size:18px">내부위험 상세 설명 <span style="font-size:12px;color:var(--ink-2);font-weight:600">(선택)</span></div>
-    <div style="font-size:12.5px;color:var(--ink-2);margin:-5px 0 12px">사진만으로 부족한 위치·상황·반복 빈도·당장 우려되는 점을 적어주세요. 비워도 접수됩니다.</div>
-    <div class="card"><div class="pad" style="padding-top:13px"><img src="${cur.photoBase64}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><div class="coord" style="margin-top:8px">📍 ${esc(cur.addr||'GPS 위치 확인 완료 · 주소는 접수 후 보완 가능')}</div></div></div>
+    <div style="font-size:12.5px;color:var(--ink-2);margin:-5px 0 12px">간단한 설명을 덧붙일 수 있습니다. 작성은 선택이며, 1분 동안 조작이 없으면 자동 접수됩니다.</div>
+    <div class="card"><div class="pad" style="padding-top:13px"><img src="${cur.photoBase64}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><div class="coord" id="internalLocationStatus" style="margin-top:8px">📍 현재 위치 확인 중…</div></div></div>
     <textarea class="memo" id="autoInternalNote" maxlength="1000" placeholder="예: 계단 3번째 단 타일이 들떠 있고 직원들이 매일 오르내립니다.">${esc(cur.internalNote||'')}</textarea>
-    <div style="font-size:10.5px;color:var(--ink-2);margin:5px 2px 12px">설명은 안전관리담당자의 위험성평가에 참고됩니다.</div>
-    <button class="save" onclick="submitAutoLocation()">위치 확인 후 접수 ›</button>`;
+    <div style="font-size:10.5px;color:var(--ink-2);margin:5px 2px 12px">남은 시간: <b id="internalIdleCountdown">1:00</b></div>
+    <button class="save" id="internalSubmitButton" onclick="submitAutoLocation(false)">접수 ›</button>`;
+  startInternalIdleTimer();
 }
-async function submitAutoLocation(){
+let internalIdleTimer=null, internalIdleDeadline=0;
+function startInternalIdleTimer(){
+  clearInterval(internalIdleTimer);
+  const reset=()=>{internalIdleDeadline=Date.now()+60000;};
+  reset();
+  const field=$('autoInternalNote');
+  field?.addEventListener('input',reset);
+  const host=$('cw'); if(host)host.onpointerdown=reset;
+  internalIdleTimer=setInterval(()=>{
+    const left=Math.max(0,Math.ceil((internalIdleDeadline-Date.now())/1000));
+    const counter=$('internalIdleCountdown'); if(counter)counter.textContent=`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;
+    if(left===0) submitAutoLocation(true);
+  },500);
+}
+async function submitAutoLocation(auto=false){
+  if(cur.submitting)return;
+  cur.submitting=true; clearInterval(internalIdleTimer);
   cur.internalNote=($('autoInternalNote')?.value||'').trim();
+  const button=$('internalSubmitButton'); if(button){button.disabled=true;button.textContent=auto?'자동 접수 중…':'접수 중…';}
   try{
     const result=await api('/api/reports',{method:'POST',body:JSON.stringify({
       region:cur.region||me.region, addr:cur.addr||'', lat:cur.lat, lng:cur.lng,
       buildingName:cur.buildingName||'', requestedInternal:true,
       memo:cur.memo||cur.internalNote||'', internalNote:cur.internalNote, photoBase64:cur.photoBase64, photoPrivacy:cur.photoPrivacy||'none', carrierUrgent:!!cur.carrierUrgent })});
     await reportRoutingScreen(result.report.id);
-  }catch(e){ toast('전송 실패 · 다시 시도해 주세요'); home(); }
+  }catch(e){ cur.submitting=false; if(button){button.disabled=false;button.textContent='접수 ›';} toast('전송 실패 · 다시 시도해 주세요'); }
 }
 
 
