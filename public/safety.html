@@ -10,6 +10,8 @@
 .stat-button{font:inherit;color:inherit;cursor:pointer;border:0;width:100%}.stat-button:hover{outline:2px solid #b7c9dc}#evResult details{margin:8px 0}#evResult summary{cursor:pointer}#evResult details.detailbox{scroll-margin-top:80px}
 .sample-metric{font:inherit;text-align:left;border:0;cursor:pointer}.sample-metric:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .stats-filter{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.stats-filter label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800}.stats-filter input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}.stats-filter .demo-toggle{font-weight:700}.stats-section-title{font-size:17px;font-weight:900;margin:14px 0}.detailbox summary{cursor:pointer;font-size:14px;font-weight:850;line-height:1.5}.detailbox details{margin:8px 0}.recipient-counts{display:flex;gap:12px;flex-wrap:wrap}.recipient-counts details{min-width:120px;padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:8px}.recipient-counts summary{font-size:12px}.ledger-tabs{margin:16px 0}.pilot-demo-banner{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:12px 14px;margin:12px 0;background:#fff7e7;border:1px solid #edcf91;border-left:4px solid #d98218;border-radius:6px;font-size:13px}.pilot-demo-banner b{color:#7a4a09;white-space:nowrap}.pilot-demo-banner span{color:#526170}.demo-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#fff0cd;color:#7a4a09;font-size:11px;font-weight:800}.top{overflow-x:auto}.top .sp{min-width:12px}.navbtn{white-space:nowrap;flex:none}@media(max-width:760px){.top{height:auto;min-height:64px}.stats-filter{align-items:stretch}.stats-filter label{justify-content:space-between}.stats-filter input{max-width:65%}}
+</style><style>
+.ledger-person{background:#fff;border:1px solid var(--line);border-radius:8px;margin:10px 0;overflow:hidden}.ledger-person>summary{cursor:pointer;padding:12px 14px;background:#f1f4f6;font-weight:800;list-style-position:inside}.ledger-person[open]>summary{border-bottom:1px solid var(--line)}.ledger-person .sample-table-wrap{margin:0}.ledger-person .sample-table{min-width:980px}.ledger-person .sample-table td{vertical-align:middle}.ledger-input{width:100%;min-width:130px;border:1px solid var(--line);border-radius:5px;padding:7px;background:#fff}.ledger-input.note{min-width:190px;min-height:54px;resize:vertical}.ledger-save{white-space:nowrap}.ledger-status{font-weight:800;white-space:nowrap}.ledger-status.done{color:var(--green)}.ledger-status.pending{color:var(--amber)}.ledger-status.in_progress{color:var(--blue)}
 </style></head><body>
 <div id="login" class="login hidden"><h1>소통실 상황관제</h1><p>소통실 계정으로 로그인하세요.</p><input id="lid" placeholder="아이디"><input id="lpw" type="password" placeholder="비밀번호"><div id="lerr" class="danger" style="font-size:12px"></div><button class="btn primary" onclick="doLogin()">로그인</button></div>
 <div id="app" class="hidden"><header class="top"><div><div class="brand">안심ON · 소통실</div><div class="who" id="who"></div></div><div class="sp"></div><button id="navToday" class="navbtn active" onclick="showTab('today')">상황관제</button><button id="navStats" class="navbtn" onclick="showTab('stats')">통계·증빙</button><button id="navHealth" class="navbtn" onclick="showTab('health')">건강관리대장</button><button id="navEquipment" class="navbtn" onclick="showTab('equipment')">장비관리대장</button><button class="navbtn" onclick="openConfig()">집배원·집배구 추가수정</button><button class="btn" onclick="logout()">로그아웃</button></header>
@@ -267,6 +269,47 @@ function mergePilotEvidence(real,start,end){
   return {...real,summary,returns,daily,healthLedger:[...real.healthLedger,...healthLedger],equipmentLedger:[...real.equipmentLedger,...equipmentLedger],
     notices:[...real.notices,...demoNotices],hazards:[...real.hazards,...demoHazards],calls:[...real.calls,...demoCalls],alerts:[...real.alerts,...demoAlerts],pilotDemoIncluded:true};
 }
-function renderManagementLedger(){if(!evidenceData)return;const d=evidenceData,fmt=(items,label)=>items.map(x=>{const a=x.actions[0];return `<div class="detailbox"><b>${esc(x.date)} · ${esc(x.name)} · ${esc(x.zoneName)}</b>${x.demo?'<span class="demo-tag">시연</span>':''}<p>${esc(x.detail)} · 귀국보고 ${evidenceTime(x.reportAt)}</p><p>${a?`조치 ${esc(actionStatusLabel(a.status))} · ${esc(a.detail)} · ${esc(a.owner||'-')}${a.completedAt?' · 완료 '+evidenceTime(a.completedAt)+' · '+esc(a.completedDetail||''):' · 완료 대기'}`:'후속조치 미기록'}</p><button class="btn" onclick="focusReturnRecord('${esc(x.id)}','${esc(x.date)}')">귀국보고 상세·후속조치</button></div>`}).join('')||'<div class="empty">기록 없음</div>';if($('healthLedgerView'))$('healthLedgerView').innerHTML=fmt(d.healthLedger,'건강');if($('equipmentLedgerView'))$('equipmentLedgerView').innerHTML=fmt(d.equipmentLedger,'장비')}
+function renderManagementLedger(){
+  if(!evidenceData)return;
+  const d=evidenceData;
+  const table=(kind,label)=>{
+    const people=new Map();
+    d.returns.forEach(r=>{
+      const key=r.id;
+      if(!people.has(key))people.set(key,{id:key,name:r.name,zoneName:r.zoneName,demo:!!r.demo,rows:[]});
+      people.get(key).rows.push(r);
+    });
+    return [...people.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(person=>{
+      person.rows.sort((a,b)=>b.date.localeCompare(a.date));
+      const issueCount=person.rows.filter(r=>r.report&&(kind==='health'?r.report.bodyIssue:r.report.equipmentIssue)).length;
+      const rows=person.rows.map(r=>{
+        const report=r.report,issue=kind==='health'?report?.bodyIssue:report?.equipmentIssue;
+        const detail=kind==='health'?report?.bodyDetail:report?.equipmentDetail;
+        const action=report?.actions?.[kind]||(!report?.actions?report?.action:null);
+        const state=r.absence?'결원 · '+r.absence.reason:!report?'미보고':'귀국보고 완료';
+        const condition=!report?'미확인':issue?'이상 있음':'이상 없음';
+        const actionCell=!issue?'<span class="sub">해당 없음</span>':person.demo
+          ? `<span class="ledger-status ${esc(action?.status||'pending')}">${esc(actionStatusLabel(action?.status||'미기록'))}</span><br>${esc(action?.detail||'조치 미기록')}`
+          : `<select class="ledger-input" id="ls_${kind}_${esc(r.id)}_${esc(r.date)}"><option value="pending" ${!action||action.status==='pending'?'selected':''}>대기</option><option value="in_progress" ${action?.status==='in_progress'?'selected':''}>진행 중</option><option value="done" ${action?.status==='done'?'selected':''}>완료</option></select><textarea class="ledger-input note" id="la_${kind}_${esc(r.id)}_${esc(r.date)}" placeholder="조치·치료 계획">${esc(action?.detail||'')}</textarea>`;
+        const completionCell=!issue?'<span class="sub">-</span>':person.demo
+          ? `<span class="ledger-status ${action?.status==='done'?'done':'pending'}">${action?.status==='done'?'완료':'미완료'}</span>${action?.completedAt?`<br>${evidenceTime(action.completedAt)}`:''}<br>${esc(action?.completedDetail||'')}`
+          : `<textarea class="ledger-input note" id="lc_${kind}_${esc(r.id)}_${esc(r.date)}" placeholder="치료·정비 완료 결과">${esc(action?.completedDetail||'')}</textarea>`;
+        const save=issue&&!person.demo?`<button class="btn primary ledger-save" onclick="saveLedgerAction('${esc(r.id)}','${esc(r.date)}','${kind}')">저장</button>`:person.demo?'<span class="demo-tag">시연</span>':'-';
+        return `<tr><td>${esc(r.date)}</td><td>${esc(state)}</td><td><b>${esc(condition)}</b>${issue&&detail?`<br>${esc(detail)}`:''}</td><td>${issue?actionCell:'-'}</td><td>${issue?completionCell:'-'}</td><td>${save}</td></tr>`;
+      }).join('');
+      return `<details class="ledger-person"><summary>${esc(person.name)} · ${esc(person.zoneName)} · ${label} 이상 ${issueCount}일${person.demo?'<span class="demo-tag">시연</span>':''}</summary><div class="sample-table-wrap"><table class="sample-table"><thead><tr><th>날짜</th><th>귀국보고</th><th>${label} 상태·내용</th><th>후속조치 상태·계획</th><th>${kind==='health'?'치료':'정비'} 완료 결과</th><th>저장</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    }).join('')||'<div class="empty">해당 기간의 귀국보고가 없습니다.</div>';
+  };
+  if($('healthLedgerView'))$('healthLedgerView').innerHTML=table('health','건강');
+  if($('equipmentLedgerView'))$('equipmentLedgerView').innerHTML=table('equipment','장비');
+}
+async function saveLedgerAction(id,date,kind){
+  try{
+    const status=$(`ls_${kind}_${id}_${date}`).value,detail=$(`la_${kind}_${id}_${date}`).value,completedDetail=$(`lc_${kind}_${id}_${date}`).value;
+    await api('/api/on/returns/'+encodeURIComponent(id)+'/action',{method:'POST',body:JSON.stringify({date,kind,detail,status,completedDetail,owner:me.name})});
+    toast(kind==='health'?'건강 후속조치를 저장했습니다':'장비 후속조치를 저장했습니다');
+    await runEvidence();
+  }catch(e){toast(e.message)}
+}
 function focusReturnRecord(id,date){if(!evidenceData)return;const row=evidenceData.returns.find(r=>r.id===id&&r.date===date);if(!row)return;if(!row.demo)returnDetailRecord(row);else{const x=row.report,actions=Object.entries(x?.actions||{}).map(([k,a])=>`<div class="detailbox"><b>${k==='health'?'건강':'장비'} 후속조치 · ${esc(actionStatusLabel(a.status))}</b><br>${esc(a.detail)}<br>담당 ${esc(a.owner||'-')} · 의뢰 ${evidenceTime(a.requestedAt||a.at)}${a.completedAt?`<br>완료 ${evidenceTime(a.completedAt)} · ${esc(a.completedDetail||'')}`:''}</div>`).join('');modal(`<h2>시연 · ${esc(row.name)} 귀국보고</h2><div class="detailbox"><b>${esc(row.zoneName)} · ${esc(date)}</b><br>건강: ${x?.bodyIssue?'이상 · '+esc(x.bodyDetail):'이상 없음'}<br>장비: ${x?.equipmentIssue?'이상 · '+esc(x.equipmentDetail):'이상 없음'}<br>확인 ${evidenceTime(x?.at)}</div>${actions||'<div class="empty">연결된 후속조치 없음</div>'}<p class="pilot-demo-banner">시연 데이터는 화면 흐름 확인용이며 서버에 저장되거나 수정되지 않습니다.</p>`);}}
 </script></body></html>

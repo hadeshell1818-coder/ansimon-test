@@ -1,14 +1,14 @@
 // Fixed, display-only pilot fixtures. These are never sent to the server.
 const PILOT_DEMO = (() => {
   const people = [
-    { id: 'pilot-demo-01', name: '시연 김도윤', zoneName: '시연 1구' },
-    { id: 'pilot-demo-02', name: '시연 박서연', zoneName: '시연 1구' },
-    { id: 'pilot-demo-03', name: '시연 이준호', zoneName: '시연 2구' },
-    { id: 'pilot-demo-04', name: '시연 최은지', zoneName: '시연 2구' },
-    { id: 'pilot-demo-05', name: '시연 정민수', zoneName: '시연 3구' },
-    { id: 'pilot-demo-06', name: '시연 한지우', zoneName: '시연 3구' },
-    { id: 'pilot-demo-07', name: '시연 윤하늘', zoneName: '시연 4구' },
-    { id: 'pilot-demo-08', name: '시연 강태훈', zoneName: '시연 4구' },
+    { id: 'pilot-demo-01', name: '김도윤', zoneName: '시연 1구' },
+    { id: 'pilot-demo-02', name: '박서연', zoneName: '시연 1구' },
+    { id: 'pilot-demo-03', name: '이준호', zoneName: '시연 2구' },
+    { id: 'pilot-demo-04', name: '최은지', zoneName: '시연 2구' },
+    { id: 'pilot-demo-05', name: '정민수', zoneName: '시연 3구' },
+    { id: 'pilot-demo-06', name: '한지우', zoneName: '시연 3구' },
+    { id: 'pilot-demo-07', name: '윤하늘', zoneName: '시연 4구' },
+    { id: 'pilot-demo-08', name: '강태훈', zoneName: '시연 4구' },
   ];
   const at = (date, time) => `${date}T${time}:00+09:00`;
   const nextDate = date => new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
