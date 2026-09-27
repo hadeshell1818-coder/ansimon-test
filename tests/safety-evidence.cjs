@@ -37,6 +37,7 @@ const ctx = vm.createContext({
   kstDate: (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice(0, 10),
   saveSafety() {}, broadcastSafety() {}, hazardForCtl: h => h,
   nextSafeId: prefix => prefix + (++SAFE.seq),
+  callForCtl: c => ({ ...c, carrier: c.callerName }),
   createAlert: (_user, body) => {
     const alert = { id: 'A-call', targets: body.zones === 'all' ? ROSTER.map(r => r.id) : ['c1'],
       level: body.level, text: body.text };
@@ -121,7 +122,7 @@ const ui = vm.createContext({
   esc: value => String(value ?? '').replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char])),
   followupLabel: status => status, api: async () => evidence,
 });
-vm.runInContext(html.slice(html.indexOf('function openEvidence(){'), html.indexOf('</script>')), ui);
+vm.runInContext(html.slice(html.indexOf('function openEvidence(){'), html.lastIndexOf('</script>')), ui);
 ui.runEvidence().then(() => {
   assert.match(elements.evResult.innerHTML, /공지사항.*안전교육/s);
   assert.match(elements.evResult.innerHTML, /결빙 주의/);

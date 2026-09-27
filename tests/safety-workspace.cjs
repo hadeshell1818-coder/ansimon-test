@@ -60,11 +60,11 @@ async function main() {
     await page.locator('#seed-sources').click();
     await page.waitForFunction(() => document.querySelector('#seed-sources')?.disabled === false);
     assert.equal(documents.length, 7);
-    await page.locator('[name=title]').fill('테스트 자료');
-    await page.locator('[name=publisher]').fill('테스트 기관');
-    await page.locator('[name=source_url]').fill('https://example.com/test');
+    await page.locator('#source-form [name=title]').fill('테스트 자료');
+    await page.locator('#source-form [name=publisher]').fill('테스트 기관');
+    await page.locator('#source-form [name=source_url]').fill('https://example.com/test');
     await page.getByRole('button', { name: '출처 등록', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('[name=title]')?.value === '');
+    await page.waitForFunction(() => document.querySelector('#source-form [name=title]')?.value === '');
     assert.equal(documents.length, 8);
     assert.deepEqual(errors, []);
     console.log('PASS: 3 safety tabs, desktop/mobile, no page overflow, source search, offline controls, seed idempotency, source registration (mock API)');

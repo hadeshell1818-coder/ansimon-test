@@ -1035,8 +1035,8 @@ const isSafetyCtl = u => !!u && u.kind === 'safety' && u.org === SAFETY_OFFICE;
 const safetyCarrier = u => (u && u.kind === 'carrier') ? rosterById(u.id) : null;
 
 let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], pushSubscriptions: {}, rosterSnapshots: {}, zones: null, roster: null };
-function saveSafety() {
-  try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); }
+function saveSafety({ strict = false } = {}) {
+  try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); if (strict) throw e; }
 }
 function loadSafety() {
   if (!fs.existsSync(SAFETY_FILE)) return false;
@@ -1238,7 +1238,7 @@ app.get('/api/safety/state', (req, res) => {
       role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, levels: LEVELS,
       push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
-      calls: SAFE.calls.filter(c => isToday(c.at)).map(c => ({ ...c, carrier: callLabel(c) })),
+      calls: SAFE.calls.filter(c => isToday(c.at)).map(callForCtl),
       alerts: SAFE.alerts.filter(a => !a.deletedAt && isToday(a.createdAt)),
       shifts: shiftRows(today),
     });
@@ -1310,8 +1310,10 @@ function createAlert(u, b) {
   const zones = b.zones === 'all' ? 'all' : (Array.isArray(b.zones) ? b.zones.filter(id => zoneById(id)) : []);
   if (!level || !text) return { error: '알림 단계와 내용을 입력하세요.' };
   if (zones !== 'all' && !zones.length) return { error: '대상 구역을 하나 이상 선택하세요.' };
+  const targets = alertTargets(zones);
+  if (!targets.length) return { error: '선택한 집배구에 등록된 집배원이 없습니다.' };
   const a = {
-    id: nextSafeId('A'), level, text, zones, targets: alertTargets(zones),
+    id: nextSafeId('A'), level, text, zones, targets,
     createdAt: new Date().toISOString(), sender: `${u.org} ${u.name}`, acks: {},
     repeatUntilAck: true, lastPushAt: Date.now(), version: 1, followups: [],
   };
@@ -1370,7 +1372,10 @@ app.post('/api/safety/alerts', (req, res) => {
   if (call && !call.note) return res.status(400).json({ error: '통화 메모를 먼저 저장하세요.' });
   const a = createAlert(u, req.body || {});
   if (a.error) return res.status(400).json(a);
-  if (call) { call.alertId = a.id; a.fromCall = call.id; }
+  if (call) {
+    call.alertIds = [...new Set([...(call.alertIds || []), call.alertId, a.id].filter(Boolean))];
+    call.alertId = a.id; a.fromCall = call.id; a.callNote = call.note;
+  }
   saveSafety(); broadcastSafety();
   sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok: true, alert: a });
@@ -1468,6 +1473,78 @@ app.post('/api/safety/alerts/:id/ack', (req, res) => {
   res.json({ ok: true });
 });
 
+/* Call audio stays behind controller authentication; public responses omit file paths. */
+function callForCtl(c) {
+  return { ...c, carrier: callLabel(c), recordings: (c.recordings || []).map(({ audioFile, ...r }) => ({
+    ...r, audioUrl: `/api/safety/calls/${encodeURIComponent(c.id)}/recordings/${encodeURIComponent(r.id)}/audio`,
+  })) };
+}
+function createCallRecording(dataUrl, user) {
+  const audio = parseAudio(dataUrl);
+  if (!['webm', 'ogg', 'm4a', 'mp3', 'wav'].includes(audio.ext)) throw new Error('WEBM, OGG, M4A, MP3, WAV 파일을 선택하세요.');
+  const id = crypto.randomUUID();
+  return { id, audioFile: saveSafetyFile('call-' + id, audio.ext, audio.buf), mime: audio.mime,
+    ext: audio.ext, bytes: audio.buf.length, at: new Date().toISOString(), by: user.name,
+    transcript: '', transcriptionStatus: 'not_started' };
+}
+function removeUncommittedRecording(recording) {
+  if (recording) fs.rmSync(path.join(UP_DIR, path.basename(recording.audioFile)), { force: true });
+}
+const callTranscriptions = new Set();
+app.post('/api/safety/calls/:id/recordings', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const c = SAFE.calls.find(x => x.id === req.params.id);
+  if (!c) return res.status(404).json({ error: '통화 기록을 찾을 수 없습니다.' });
+  c.recordings = c.recordings || [];
+  const requestId = String(req.body?.requestId || '').slice(0, 80);
+  if (requestId && c.recordings.some(r => r.requestId === requestId)) return res.json({ ok: true, call: callForCtl(c) });
+  if (c.recordings.length >= 10) return res.status(400).json({ error: '통화 한 건에 녹음은 10개까지 저장할 수 있습니다.' });
+  let recording;
+  try { recording = createCallRecording(req.body?.audioBase64, u); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  recording.requestId = requestId;
+  c.recordings.push(recording);
+  try { saveSafety({ strict: true }); }
+  catch (e) {
+    c.recordings.pop(); removeUncommittedRecording(recording);
+    return res.status(500).json({ error: '녹음 저장에 실패했습니다. 다시 시도하세요.' });
+  }
+  broadcastSafety(); res.json({ ok: true, call: callForCtl(c) });
+});
+app.get('/api/safety/calls/:id/recordings/:rid/audio', (req, res) => {
+  if (!isSafetyCtl(userFromReq(req))) return res.status(403).json({ error: 'forbidden' });
+  const c = SAFE.calls.find(x => x.id === req.params.id);
+  const recording = c?.recordings?.find(r => r.id === req.params.rid);
+  if (!recording) return res.status(404).json({ error: '녹음을 찾을 수 없습니다.' });
+  const file = path.join(UP_DIR, path.basename(recording.audioFile));
+  if (!fs.existsSync(file)) return res.status(404).json({ error: '저장된 녹음 파일을 찾을 수 없습니다.' });
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.type(recording.mime).sendFile(file);
+});
+app.post('/api/safety/calls/:id/recordings/:rid/transcribe', async (req, res) => {
+  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const c = SAFE.calls.find(x => x.id === req.params.id);
+  const recording = c?.recordings?.find(r => r.id === req.params.rid);
+  if (!recording) return res.status(404).json({ error: '녹음을 찾을 수 없습니다.' });
+  if (recording.transcript) return res.json({ ok: true, call: callForCtl(c) });
+  if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: '음성 문자 변환용 OpenAI API 키가 설정되지 않았습니다. 녹음을 재생하고 메모를 직접 작성할 수 있습니다.' });
+  if (callTranscriptions.has(recording.id)) return res.status(409).json({ error: '문자 변환 중입니다. 잠시 후 다시 확인하세요.' });
+  callTranscriptions.add(recording.id);
+  const previous = { ...recording };
+  try {
+    const file = path.join(UP_DIR, path.basename(recording.audioFile));
+    const text = await openaiTranscribe(fs.readFileSync(file), recording.mime, recording.ext);
+    if (!text) return res.status(502).json({ error: '문자 변환에 실패했습니다. 녹음은 보관되어 있으니 재시도하거나 메모를 직접 작성하세요.' });
+    recording.transcript = text.slice(0, 12000); recording.transcriptionStatus = 'done';
+    recording.transcribedAt = new Date().toISOString(); recording.transcribedBy = u.name;
+    saveSafety({ strict: true }); broadcastSafety();
+    res.json({ ok: true, call: callForCtl(c) });
+  } catch (e) {
+    Object.keys(recording).forEach(key => delete recording[key]); Object.assign(recording, previous);
+    res.status(500).json({ error: '녹음 문자 변환 결과를 저장하지 못했습니다. 다시 시도하세요.' });
+  } finally { callTranscriptions.delete(recording.id); }
+});
+
 app.post('/api/safety/calls', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {};
@@ -1480,20 +1557,33 @@ app.post('/api/safety/calls', (req, res) => {
 app.post('/api/safety/calls/manual', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {}, carrierId = String(b.carrierId || '').trim();
+  const requestId = String(b.requestId || '').slice(0, 80);
+  const existing = requestId && SAFE.calls.find(c => c.requestId === requestId && c.recordedBy === u.name);
+  if (existing) return res.json({ ok: true, call: callForCtl(existing) });
   if (carrierId && !rosterById(carrierId)) return res.status(400).json({ error: '등록된 집배원을 선택하세요.' });
   const callerName = carrierId ? rosterById(carrierId).name : String(b.callerName || '').trim().slice(0, 80);
   if (!callerName) return res.status(400).json({ error: '발신자 이름을 입력하세요.' });
+  let recording;
+  try { if (b.audioBase64) recording = createCallRecording(b.audioBase64, u); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
   const c = { id: nextSafeId('C'), carrierId: carrierId || null, callerName,
     zoneName: carrierId ? zoneById(rosterById(carrierId).zone)?.name || rosterById(carrierId).zone : null,
     phone: String(b.phone || '').trim().slice(0, 30), at: new Date().toISOString(),
-    note: String(b.note || '').trim().slice(0, 300), source: 'manual_incoming', recordedBy: u.name, alertId: null };
-  SAFE.calls.unshift(c); saveSafety(); broadcastSafety(); res.json({ ok: true, call: c });
+    note: String(b.note || '').trim().slice(0, 3000), source: 'manual_incoming', recordedBy: u.name, alertId: null,
+    notedBy: u.name, notedAt: new Date().toISOString(), requestId, recordings: recording ? [recording] : [] };
+  SAFE.calls.unshift(c);
+  try { saveSafety({ strict: true }); }
+  catch (e) {
+    SAFE.calls.shift(); removeUncommittedRecording(recording);
+    return res.status(500).json({ error: '통화 기록을 저장하지 못했습니다. 다시 시도하세요.' });
+  }
+  broadcastSafety(); res.json({ ok: true, call: callForCtl(c) });
 });
 app.post('/api/safety/calls/:id/note', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
   const c = SAFE.calls.find(x => x.id === req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
   if(c.notedAt){c.noteHistory=c.noteHistory||[];c.noteHistory.push({note:c.note,by:c.notedBy,at:c.notedAt});}
-  c.note = String((req.body || {}).note || '').trim().slice(0, 300); c.notedBy = u.name; c.notedAt = new Date().toISOString();
+  c.note = String((req.body || {}).note || '').trim().slice(0, 3000); c.notedBy = u.name; c.notedAt = new Date().toISOString();
   saveSafety(); broadcastSafety();
   res.json({ ok: true });
 });
@@ -1675,7 +1765,7 @@ app.post('/api/on/notices/:id/reminders/stop',(req,res)=>{
 });
 app.get('/api/safety/history',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
-  res.json({hazards:SAFE.hazards.map(hazardForCtl),calls:SAFE.calls.map(c=>({...c,carrier:callLabel(c)})),alerts:SAFE.alerts});
+  res.json({hazards:SAFE.hazards.map(hazardForCtl),calls:SAFE.calls.map(callForCtl),alerts:SAFE.alerts});
 });
 
 /* 안전활동 통계·증빙 조회 — 기간별 음성신고/통화/알림/업무종료 원자료와 집계 */
@@ -1686,7 +1776,7 @@ app.get('/api/safety/evidence',(req,res)=>{
     return res.status(400).json({error:'조회 날짜를 확인하세요.'});
   const inRange=t=>{ const d=kstDate(new Date(t).getTime()); return d>=start&&d<=end; };
   const hazards=SAFE.hazards.filter(h=>inRange(h.createdAt)).map(hazardForCtl);
-  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(c=>({...c,carrier:callLabel(c)}));
+  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(callForCtl);
   const alerts=SAFE.alerts.filter(a=>inRange(a.createdAt));
   const notices=SAFE.notices.filter(n=>inRange(n.createdAt));
   const returns=[];
