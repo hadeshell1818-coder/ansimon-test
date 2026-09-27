@@ -1028,10 +1028,13 @@ let ROSTER = [ // id가 로그인 계정 id와 같으면 해당 계정과 연결
 const zoneById = id => ZONES.find(z => z.id === id);
 const rosterById = id => ROSTER.find(r => r.id === id);
 const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` : '-';
+const callLabel = c => c.callerName
+  ? `${c.callerName}${c.zoneName ? '(' + c.zoneName + ')' : ''}`
+  : (rosterById(c.carrierId) ? carrierLabel(rosterById(c.carrierId)) : '발신자 미상');
 const isSafetyCtl = u => !!u && u.kind === 'safety' && u.org === SAFETY_OFFICE;
 const safetyCarrier = u => (u && u.kind === 'carrier') ? rosterById(u.id) : null;
 
-let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], pushSubscriptions: {}, zones: null, roster: null };
+let SAFE = { seq: 1, hazards: [], calls: [], alerts: [], shifts: {}, returns: {}, absences: {}, notices: [], pushSubscriptions: {}, rosterSnapshots: {}, zones: null, roster: null };
 function saveSafety() {
   try { fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFE)); } catch (e) { console.error('safety save fail', e); }
 }
@@ -1235,7 +1238,7 @@ app.get('/api/safety/state', (req, res) => {
       role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, levels: LEVELS,
       push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
-      calls: SAFE.calls.filter(c => isToday(c.at)).map(c => ({ ...c, carrier: carrierLabel(rosterById(c.carrierId)) })),
+      calls: SAFE.calls.filter(c => isToday(c.at)).map(c => ({ ...c, carrier: callLabel(c) })),
       alerts: SAFE.alerts.filter(a => !a.deletedAt && isToday(a.createdAt)),
       shifts: shiftRows(today),
     });
@@ -1310,7 +1313,7 @@ function createAlert(u, b) {
   const a = {
     id: nextSafeId('A'), level, text, zones, targets: alertTargets(zones),
     createdAt: new Date().toISOString(), sender: `${u.org} ${u.name}`, acks: {},
-    repeatUntilAck: true, lastPushAt: Date.now(), version: 1,
+    repeatUntilAck: true, lastPushAt: Date.now(), version: 1, followups: [],
   };
   SAFE.alerts.unshift(a);
   return a;
@@ -1361,10 +1364,12 @@ async function resendUnacknowledged(now = Date.now()) {
 }
 app.post('/api/safety/alerts', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
-  const a = createAlert(u, req.body || {});
-  if (a.error) return res.status(400).json(a);
   const callId = (req.body || {}).fromCall;
   const call = callId && SAFE.calls.find(c => c.id === callId);
+  if (callId && !call) return res.status(404).json({ error: '통화 기록을 찾을 수 없습니다.' });
+  if (call && !call.note) return res.status(400).json({ error: '통화 메모를 먼저 저장하세요.' });
+  const a = createAlert(u, req.body || {});
+  if (a.error) return res.status(400).json(a);
   if (call) { call.alertId = a.id; a.fromCall = call.id; }
   saveSafety(); broadcastSafety();
   sendSafetyPush(a).catch(e => console.error('safety push', e.message));
@@ -1378,10 +1383,13 @@ app.patch('/api/safety/alerts/:id', (req, res) => {
   const level = req.body?.level, text = String(req.body?.text || '').trim().slice(0, 200);
   if (!LEVELS[level] || !text) return res.status(400).json({ error: '단계와 내용을 확인하세요.' });
   a.edits = a.edits || [];
-  a.edits.push({ level:a.level, text:a.text, at:new Date().toISOString(), by:u.name });
+  a.edits.push({ version:a.version||1, level:a.level, text:a.text, acks:{...(a.acks||{})},
+    reminderStoppedAt:a.reminderStoppedAt||null, reminderStopReason:a.reminderStopReason||null,
+    at:new Date().toISOString(), by:u.name });
   a.level = level; a.text = text; a.updatedAt = new Date().toISOString();
   a.updatedBy = u.name; a.version = (a.version || 1) + 1;
   a.acks = {}; a.repeatUntilAck = true; a.lastPushAt = Date.now();
+  a.reminderStoppedAt = null; a.reminderStoppedBy = null; a.reminderStopReason = null;
   saveSafety(); broadcastSafety();
   sendSafetyPush(a).catch(e => console.error('safety push', e.message));
   res.json({ ok:true, alert:a });
@@ -1395,6 +1403,33 @@ app.delete('/api/safety/alerts/:id', (req, res) => {
   a.repeatUntilAck = false;
   saveSafety(); broadcastSafety();
   res.json({ ok:true });
+});
+
+app.post('/api/safety/alerts/:id/reminders/stop', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const a = SAFE.alerts.find(x => x.id === req.params.id && !x.deletedAt);
+  if (!a) return res.status(404).json({ error: '알림을 찾을 수 없습니다.' });
+  const reason = String(req.body?.reason || '').trim().slice(0, 300);
+  if (!reason) return res.status(400).json({ error: '반복 알림 중단 사유를 입력하세요.' });
+  if (a.reminderStoppedAt) return res.status(409).json({ error: '이미 반복 알림이 중단되었습니다.' });
+  a.repeatUntilAck = false; a.reminderStoppedAt = new Date().toISOString();
+  a.reminderStoppedBy = u.name; a.reminderStopReason = reason;
+  saveSafety(); broadcastSafety(); res.json({ ok: true, alert: a });
+});
+
+app.post('/api/safety/alerts/:id/followups', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const a = SAFE.alerts.find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: '알림을 찾을 수 없습니다.' });
+  const targetId = String(req.body?.targetId || '');
+  if (!a.targets.includes(targetId)) return res.status(400).json({ error: '알림 대상자를 선택하세요.' });
+  const detail = String(req.body?.detail || '').trim().slice(0, 500);
+  const status = String(req.body?.status || '');
+  if (!detail || !['contacted', 'no_answer', 'resolved'].includes(status))
+    return res.status(400).json({ error: '조치 내용과 결과를 입력하세요.' });
+  a.followups = a.followups || [];
+  a.followups.push({ targetId, detail, status, version:a.version||1, at: new Date().toISOString(), by: u.name });
+  saveSafety(); broadcastSafety(); res.json({ ok: true, followups: a.followups });
 });
 
 app.get('/api/push/config', (req, res) => {
@@ -1436,14 +1471,28 @@ app.post('/api/safety/alerts/:id/ack', (req, res) => {
 app.post('/api/safety/calls', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {};
-  const c = { id: nextSafeId('C'), carrierId: me.id, at: new Date().toISOString(),
-    lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null, note: '', alertId: null };
+  const c = { id: nextSafeId('C'), carrierId: me.id, callerName: me.name,
+    zoneName: zoneById(me.zone)?.name || me.zone, at: new Date().toISOString(),
+    lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null, note: '', alertId: null, source: 'app_dial' };
   SAFE.calls.unshift(c); saveSafety(); broadcastSafety();
   res.json({ ok: true, callNumber: SAFETY_CALL_NUMBER });
+});
+app.post('/api/safety/calls/manual', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
+  const b = req.body || {}, carrierId = String(b.carrierId || '').trim();
+  if (carrierId && !rosterById(carrierId)) return res.status(400).json({ error: '등록된 집배원을 선택하세요.' });
+  const callerName = carrierId ? rosterById(carrierId).name : String(b.callerName || '').trim().slice(0, 80);
+  if (!callerName) return res.status(400).json({ error: '발신자 이름을 입력하세요.' });
+  const c = { id: nextSafeId('C'), carrierId: carrierId || null, callerName,
+    zoneName: carrierId ? zoneById(rosterById(carrierId).zone)?.name || rosterById(carrierId).zone : null,
+    phone: String(b.phone || '').trim().slice(0, 30), at: new Date().toISOString(),
+    note: String(b.note || '').trim().slice(0, 300), source: 'manual_incoming', recordedBy: u.name, alertId: null };
+  SAFE.calls.unshift(c); saveSafety(); broadcastSafety(); res.json({ ok: true, call: c });
 });
 app.post('/api/safety/calls/:id/note', (req, res) => {
   const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
   const c = SAFE.calls.find(x => x.id === req.params.id); if (!c) return res.status(404).json({ error: 'not found' });
+  if(c.notedAt){c.noteHistory=c.noteHistory||[];c.noteHistory.push({note:c.note,by:c.notedBy,at:c.notedAt});}
   c.note = String((req.body || {}).note || '').trim().slice(0, 300); c.notedBy = u.name; c.notedAt = new Date().toISOString();
   saveSafety(); broadcastSafety();
   res.json({ ok: true });
@@ -1507,12 +1556,26 @@ app.get('/api/safety/files/:hid/:kind', (req, res) => {
 /* ===== 안심ON v2: 귀국보고(건강+장비), 공지, 구역/집배원 기준정보 ===== */
 function ensureSafetyCollections(){
   SAFE.returns = SAFE.returns || {}; SAFE.absences = SAFE.absences || {}; SAFE.notices = SAFE.notices || [];
-  SAFE.pushSubscriptions = SAFE.pushSubscriptions || {};
+  SAFE.pushSubscriptions = SAFE.pushSubscriptions || {}; SAFE.rosterSnapshots = SAFE.rosterSnapshots || {};
+  const today=kstDate();
+  if(SAFE.rosterSnapshots[today]){
+    const current=ROSTER.map(r=>({...r,zoneName:zoneById(r.zone)?.name||r.zone}));
+    if(JSON.stringify(current)!==JSON.stringify(SAFE.rosterSnapshots[today])){
+      SAFE.rosterSnapshotHistory=SAFE.rosterSnapshotHistory||{};
+      SAFE.rosterSnapshotHistory[today]=SAFE.rosterSnapshotHistory[today]||[];
+      SAFE.rosterSnapshotHistory[today].push({at:new Date().toISOString(),roster:SAFE.rosterSnapshots[today]});
+      SAFE.rosterSnapshots[today]=current;
+    }
+  }
   SAFE.zones = ZONES; SAFE.roster = ROSTER;
+}
+function snapshotRoster(d) {
+  ensureSafetyCollections();
+  if (!SAFE.rosterSnapshots[d]) SAFE.rosterSnapshots[d] = ROSTER.map(r => ({ ...r, zoneName: zoneById(r.zone)?.name || r.zone }));
 }
 function returnRows(d){
   ensureSafetyCollections(); const day=SAFE.returns[d]||{}, absent=SAFE.absences[d]||{};
-  return ROSTER.map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zone,phone:r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
+  return (SAFE.rosterSnapshots[d] || ROSTER).map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:r.zoneName||zoneById(r.zone)?.name||r.zone,phone:r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
 }
 function returnSummary(rows){
   const active=rows.filter(r=>!r.absence), reportedRows=active.filter(r=>r.report), reported=reportedRows.length;
@@ -1535,8 +1598,9 @@ app.post('/api/on/return',(req,res)=>{
   const bodyDetail=String(b.bodyDetail||'').trim().slice(0,300),equipmentDetail=String(b.equipmentDetail||'').trim().slice(0,300);
   if(bodyIssue&&!bodyDetail)return res.status(400).json({error:'건강 이상 내용을 간단히 적어주세요.'});
   if(equipmentIssue&&!equipmentDetail)return res.status(400).json({error:'장비 이상 내용을 간단히 적어주세요.'});
-  const d=kstDate(); ensureSafetyCollections(); SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][me.id];
-  SAFE.returns[d][me.id]={returned:true,source:'self',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?bodyDetail:'',equipmentDetail:equipmentIssue?equipmentDetail:'',at:new Date().toISOString(),action:prev?.action||null};
+  const d=kstDate(); snapshotRoster(d); SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][me.id];
+  const history=prev?[...(prev.history||[]),{source:prev.source,bodyIssue:prev.bodyIssue,equipmentIssue:prev.equipmentIssue,bodyDetail:prev.bodyDetail,equipmentDetail:prev.equipmentDetail,at:prev.at}]:[];
+  SAFE.returns[d][me.id]={returned:true,source:'self',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?bodyDetail:'',equipmentDetail:equipmentIssue?equipmentDetail:'',at:new Date().toISOString(),action:prev?.action||null,actionHistory:prev?.actionHistory||[],history};
   saveSafety(); broadcastSafety(); res.json({ok:true});
 });
 app.get('/api/on/returns',(req,res)=>{
@@ -1545,25 +1609,34 @@ app.get('/api/on/returns',(req,res)=>{
 });
 app.post('/api/on/absences',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},d=String(b.date||kstDate()).slice(0,10);
-  ensureSafetyCollections(); SAFE.absences[d]={};
+  snapshotRoster(d); SAFE.absences[d]={};
   const items=Array.isArray(b.items)?b.items:[]; items.forEach(x=>{if(rosterById(x.id)){const reason=String(x.reason||'결원').trim().slice(0,80);SAFE.absences[d][x.id]={reason,at:new Date().toISOString(),by:u.name};}});
   saveSafety();broadcastSafety();const rows=returnRows(d);res.json({ok:true,date:d,summary:returnSummary(rows),rows});
 });
 app.post('/api/on/returns/:cid/control-confirm',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const b=req.body||{},d=String(b.date||kstDate()).slice(0,10), cid=req.params.cid;
-  if(!rosterById(cid))return res.status(404).json({error:'집배원을 찾을 수 없습니다.'}); ensureSafetyCollections();
+  if(!rosterById(cid))return res.status(404).json({error:'집배원을 찾을 수 없습니다.'}); snapshotRoster(d);
   if((SAFE.absences[d]||{})[cid])return res.status(409).json({error:'오늘 결원 처리된 집배원입니다.'});
   const bodyIssue=!!b.bodyIssue,equipmentIssue=!!b.equipmentIssue,callNote=String(b.callNote||'').trim().slice(0,300);
   if(!callNote)return res.status(400).json({error:'간단한 통화내역을 적어주세요.'});
+  if(bodyIssue&&!String(b.bodyDetail||'').trim())return res.status(400).json({error:'건강 이상 내용을 입력하세요.'});
+  if(equipmentIssue&&!String(b.equipmentDetail||'').trim())return res.status(400).json({error:'장비 이상 내용을 입력하세요.'});
   SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][cid];
-  SAFE.returns[d][cid]={returned:true,source:'control',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?String(b.bodyDetail||'').trim().slice(0,300):'',equipmentDetail:equipmentIssue?String(b.equipmentDetail||'').trim().slice(0,300):'',callNote,confirmedBy:u.name,at:new Date().toISOString(),action:prev?.action||null};
-  SAFE.calls.unshift({id:nextSafeId('C'),carrierId:cid,at:new Date().toISOString(),note:'[귀국 미보고 확인] '+callNote,by:u.name});
+  const history=prev?[...(prev.history||[]),{source:prev.source,bodyIssue:prev.bodyIssue,equipmentIssue:prev.equipmentIssue,bodyDetail:prev.bodyDetail,equipmentDetail:prev.equipmentDetail,at:prev.at}]:[];
+  SAFE.returns[d][cid]={returned:true,source:'control',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?String(b.bodyDetail||'').trim().slice(0,300):'',equipmentDetail:equipmentIssue?String(b.equipmentDetail||'').trim().slice(0,300):'',callNote,confirmedBy:u.name,at:new Date().toISOString(),action:prev?.action||null,actionHistory:prev?.actionHistory||[],history};
+  SAFE.calls.unshift({id:nextSafeId('C'),carrierId:cid,callerName:rosterById(cid)?.name||cid,
+    zoneName:zoneById(rosterById(cid)?.zone)?.name||rosterById(cid)?.zone,at:new Date().toISOString(),
+    note:'[귀국 미보고 확인] '+callNote,by:u.name,source:'control_confirm'});
   saveSafety();broadcastSafety();res.json({ok:true});
 });
 app.post('/api/on/returns/:cid/action',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String((req.body||{}).date||kstDate()).slice(0,10);
   ensureSafetyCollections(); const r=(SAFE.returns[d]||{})[req.params.cid]; if(!r)return res.status(404).json({error:'보고 내역이 없습니다.'});
-  r.action={detail:String((req.body||{}).detail||'').trim().slice(0,300),owner:String((req.body||{}).owner||u.name).trim().slice(0,50),status:['pending','in_progress','done'].includes((req.body||{}).status)?(req.body||{}).status:'in_progress',at:new Date().toISOString(),by:u.name};
+  const detail=String((req.body||{}).detail||'').trim().slice(0,300);
+  const status=['pending','in_progress','done'].includes((req.body||{}).status)?(req.body||{}).status:'in_progress';
+  if(status==='done'&&!detail)return res.status(400).json({error:'조치 완료 결과를 입력하세요.'});
+  r.actionHistory=r.actionHistory||[]; if(r.action)r.actionHistory.push(r.action);
+  r.action={detail,owner:String((req.body||{}).owner||u.name).trim().slice(0,50),status,at:new Date().toISOString(),by:u.name};
   saveSafety(); broadcastSafety(); res.json({ok:true});
 });
 app.get('/api/on/notices',(req,res)=>{
@@ -1591,25 +1664,43 @@ app.post('/api/on/notices/:id/ack',(req,res)=>{
   }
   res.json({ok:true});
 });
+app.post('/api/on/notices/:id/reminders/stop',(req,res)=>{
+  const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+  const n=SAFE.notices.find(x=>x.id===req.params.id);if(!n)return res.status(404).json({error:'공지를 찾을 수 없습니다.'});
+  const reason=String(req.body?.reason||'').trim().slice(0,300);
+  if(!reason)return res.status(400).json({error:'반복 알림 중단 사유를 입력하세요.'});
+  if(n.reminderStoppedAt)return res.status(409).json({error:'이미 반복 알림이 중단되었습니다.'});
+  n.repeatUntilAck=false;n.reminderStoppedAt=new Date().toISOString();n.reminderStoppedBy=u.name;n.reminderStopReason=reason;
+  saveSafety();broadcastSafety();res.json({ok:true,notice:n});
+});
 app.get('/api/safety/history',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
-  res.json({hazards:SAFE.hazards.map(hazardForCtl),calls:SAFE.calls.map(c=>({...c,carrier:carrierLabel(rosterById(c.carrierId))})),alerts:SAFE.alerts});
+  res.json({hazards:SAFE.hazards.map(hazardForCtl),calls:SAFE.calls.map(c=>({...c,carrier:callLabel(c)})),alerts:SAFE.alerts});
 });
 
 /* 안전활동 통계·증빙 조회 — 기간별 음성신고/통화/알림/업무종료 원자료와 집계 */
 app.get('/api/safety/evidence',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); ensureSafetyCollections();
-  const end=String(req.query.end||kstDate()).slice(0,10), start=String(req.query.start||end).slice(0,10);
+  const end=String(req.query.end||kstDate()), start=String(req.query.start||end);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end)||start>end)
+    return res.status(400).json({error:'조회 날짜를 확인하세요.'});
   const inRange=t=>{ const d=kstDate(new Date(t).getTime()); return d>=start&&d<=end; };
   const hazards=SAFE.hazards.filter(h=>inRange(h.createdAt)).map(hazardForCtl);
-  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(c=>({...c,carrier:carrierLabel(rosterById(c.carrierId))}));
+  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(c=>({...c,carrier:callLabel(c)}));
   const alerts=SAFE.alerts.filter(a=>inRange(a.createdAt));
+  const notices=SAFE.notices.filter(n=>inRange(n.createdAt));
   const returns=[];
-  Object.keys(SAFE.returns||{}).filter(d=>d>=start&&d<=end).sort().forEach(date=>{
+  const days=new Set([...Object.keys(SAFE.returns||{}),...Object.keys(SAFE.absences||{}),...Object.keys(SAFE.rosterSnapshots||{})].filter(d=>d>=start&&d<=end));
+  if(start<=kstDate()&&kstDate()<=end)days.add(kstDate());
+  [...days].sort().forEach(date=>{
     returnRows(date).forEach(r=>returns.push({date,...r}));
   });
-  const reports=returns.filter(r=>r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue), absences=returns.filter(r=>r.absence);
-  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts,returns});
+  const reports=returns.filter(r=>!r.absence&&r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue), absences=returns.filter(r=>r.absence);
+  const daily=[...days].sort().map(date=>({date,...returnSummary(returns.filter(r=>r.date===date))}));
+  const recipientStatus=item=>(item.targets||[]).map(id=>({id,name:(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id)?.name||id,ackAt:(item.acks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}));
+  const alertEvidence=alerts.map(a=>({...a,recipients:recipientStatus(a)}));
+  const noticeEvidence=notices.map(n=>({...n,recipients:recipientStatus(n)}));
+  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,notices:notices.length,alertTargets:alerts.reduce((n,a)=>n+a.targets.length,0),alertConfirmed:alerts.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,issuePeople:reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily});
 });
 app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
 app.post('/api/safety/config/zones',(req,res)=>{
