@@ -48,21 +48,28 @@ function sampleStaffTable(day) {
 function renderStatsSample(mode = 'day') {
   const days = mode === 'month' ? SAFETY_STATS_SAMPLE : SAFETY_STATS_SAMPLE.slice(-1);
   const q = summarizeStatsSample(days), unit = mode === 'month' ? '인원·일' : '명';
+  const dailyRows = days.map(day => ({ day, stats: summarizeStatsSample([day]) }));
+  const activeDays = dailyRows.filter(x => x.stats.target > 0).length;
+  const avgRoster = activeDays ? (q.target / activeDays).toFixed(1) : '0';
   $('sampleDay').setAttribute('aria-pressed', mode === 'day'); $('sampleMonth').setAttribute('aria-pressed', mode === 'month');
-  const metrics = [
-    ['총원', q.total, ''], ['결원', q.absent, ''], ['현원', q.target, ''], ['귀국보고', q.reported, 'returned'], ['미보고', q.missing, 'issue'],
+  const metrics = mode === 'month' ? [
+    ['일평균 근무대상', avgRoster, ''], ['귀국보고', `${q.reported}/${q.target}`, 'returned'], ['미보고', q.missing, 'issue'],
+    ['이상 없음', q.normal, 'returned'], ['건강 이상', q.body, 'issue'], ['장비 이상', q.equipment, 'issue'],
+    ['일별 중복 제외 이상 인원·일', q.issue, 'issue'], ['확인일수', activeDays, ''],
+  ] : [
+    ['근무대상', q.target, ''], ['귀국보고', q.reported, 'returned'], ['미보고', q.missing, 'issue'],
     ['이상 없음', q.normal, 'returned'], ['건강 이상', q.body, 'issue'], ['장비 이상', q.equipment, 'issue'], ['건강·장비 동시 이상', q.both, 'issue'], ['이상 보고자 (중복 제외)', q.issue, 'issue'],
   ];
-  $('statsSample').innerHTML = `<p class="sample-note"><b>${mode === 'month' ? '2026년 9월 · 기록이 있는 3일 합계 (22~24일)' : '2026년 9월 24일 · 18:00 기준'}</b></p>
+  $('statsSample').innerHTML = `<p class="sample-note"><b>${mode === 'month' ? '2026년 9월 · 기록이 있는 3일 예시 (22~24일)' : '2026년 9월 24일 · 18:00 기준'}</b></p>
     <div class="sample-metrics">${metrics.map(([label, value, type]) => `<div class="sample-metric ${type}"><span>${label}</span><b>${value}<small style="font-size:12px;font-weight:400"> ${unit}</small></b></div>`).join('')}</div>
-    <p class="sample-note">총원 ${q.total} − 결원 ${q.absent} = <b>현원 ${q.target}</b> · 귀국보고 ${q.reported} + 미보고 ${q.missing} = 현원 ${q.target}<br>
+    <p class="sample-note">${mode === 'month' ? `월간 근무대상 ${q.target}인원·일 · 귀국보고 ${q.reported} + 미보고 ${q.missing} = 근무대상 ${q.target}인원·일` : `근무대상 ${q.target}명 · 귀국보고 ${q.reported} + 미보고 ${q.missing} = 근무대상 ${q.target}명`}<br>
     건강 이상 ${q.body} + 장비 이상 ${q.equipment} − 동시 이상 ${q.both} = <b>이상 보고자 ${q.issue}</b>. 미보고는 이상 없음에 포함하지 않습니다.
-    ${mode === 'month' ? '<br>월별 인원·일은 날짜별 인원의 합입니다. 같은 직원이 3일 보고하면 3인원·일이며, 서로 다른 직원 3명을 뜻하지 않습니다.' : ''}</p>
-    ${mode === 'month' ? `<div class="sample-table-wrap"><table class="sample-table"><caption>날짜별 집계</caption><thead><tr><th>날짜</th><th>총원</th><th>결원</th><th>현원</th><th>보고</th><th>미보고</th><th>건강 이상</th><th>장비 이상</th></tr></thead><tbody>${days.map(day => { const d = summarizeStatsSample([day]); return `<tr><td>${day.date}</td><td>${d.total}</td><td>${d.absent}</td><td>${d.target}</td><td>${d.reported}</td><td>${d.missing}</td><td>${d.body}</td><td>${d.equipment}</td></tr>`; }).join('')}</tbody></table></div>` : sampleStaffTable(days[0])}
+    ${mode === 'month' ? '<br>월간 숫자는 날짜별 인원·일 합계입니다. 같은 직원의 여러 날 보고는 각 근무일로 계산하며, 건강·장비 이상은 두 항목 모두 이상인 직원을 각각 포함합니다. 결원은 월간 핵심 지표에서 제외합니다.' : ''}</p>
+    ${mode === 'month' ? `<div class="sample-table-wrap"><table class="sample-table"><caption>날짜별 집계 · 상세 직원 원자료와 조치 이력은 아래 날짜를 펼쳐 확인</caption><thead><tr><th>날짜</th><th>근무대상</th><th>보고</th><th>미보고</th><th>이상 없음</th><th>건강 이상</th><th>장비 이상</th></tr></thead><tbody>${dailyRows.map(({day,stats:d}) => `<tr><td>${day.date}</td><td>${d.target}</td><td>${d.reported}</td><td>${d.missing}</td><td>${d.normal}</td><td>${d.body}</td><td>${d.equipment}</td></tr>`).join('')}</tbody></table></div>` : sampleStaffTable(days[0])}
     <h3>공지 · 배달위험 알림 · 통화 기록</h3><div class="sample-activity"><div><b>공지 ${q.notices}건</b><p>대상 ${q.noticeTargets}명 · 앱 확인 ${q.noticeConfirmed}명 · 미확인 ${q.noticeTargets - q.noticeConfirmed}명</p></div>
     <div><b>위험 알림 ${q.alerts}건</b><p>발송별 대상 합계 ${q.alertTargets}명 · 앱 확인 ${q.alertConfirmed}명 · 미확인 ${q.alertTargets - q.alertConfirmed}명</p></div>
     <div><b>통화 기록 ${q.calls}건</b><p>수신 통화 ${days.length * 2}건 · 앱 전화 요청 ${days.length}건</p></div></div>
     <p class="sample-note">알림 대상·확인은 발송 건별 합계입니다. 같은 직원에게 두 번 발송하면 각각 집계합니다. 전화로 안내해도 앱 미확인은 자동으로 확인 처리되지 않습니다.</p>
     <div class="sample-table-wrap"><table class="sample-table"><caption>9월 24일 알림·통화 예시</caption><thead><tr><th>구분</th><th>내용</th><th>확인 / 대상</th></tr></thead><tbody>${SAFETY_STATS_SAMPLE[2].notices.map(n => `<tr><td>공지</td><td>${n.title}</td><td>${n.confirmed} / ${n.targets}명</td></tr>`).join('')}${SAFETY_STATS_SAMPLE[2].alerts.map(a => `<tr><td>위험 알림</td><td>${a.title}</td><td>${a.confirmed} / ${a.targets}명</td></tr>`).join('')}${SAFETY_STATS_SAMPLE[2].calls.map(c => `<tr><td>${c.source}</td><td>${c.text}</td><td>-</td></tr>`).join('')}</tbody></table></div>
-    ${mode === 'month' ? days.map(day => `<details><summary>${day.date} 직원별 원자료</summary>${sampleStaffTable(day)}</details>`).join('') : ''}`;
+    ${mode === 'month' ? days.map(day => `<details><summary>${day.date} 직원별 원자료 · 귀국보고·미보고·건강/장비 이상·조치</summary>${sampleStaffTable(day)}</details>`).join('') : ''}`;
 }

@@ -1527,20 +1527,24 @@ app.post('/api/safety/calls/:id/recordings/:rid/transcribe', async (req, res) =>
   const recording = c?.recordings?.find(r => r.id === req.params.rid);
   if (!recording) return res.status(404).json({ error: '녹음을 찾을 수 없습니다.' });
   if (recording.transcript) return res.json({ ok: true, call: callForCtl(c) });
-  if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: '음성 문자 변환용 OpenAI API 키가 설정되지 않았습니다. 녹음을 재생하고 메모를 직접 작성할 수 있습니다.' });
+  if (!process.env.OPENAI_API_KEY) {
+    recording.transcriptionStatus = 'unavailable'; saveSafety();
+    return res.status(503).json({ error: '음성 문자 변환용 OpenAI API 키가 설정되지 않았습니다. 녹음은 저장되어 있습니다.' });
+  }
   if (callTranscriptions.has(recording.id)) return res.status(409).json({ error: '문자 변환 중입니다. 잠시 후 다시 확인하세요.' });
   callTranscriptions.add(recording.id);
   const previous = { ...recording };
   try {
     const file = path.join(UP_DIR, path.basename(recording.audioFile));
     const text = await openaiTranscribe(fs.readFileSync(file), recording.mime, recording.ext);
-    if (!text) return res.status(502).json({ error: '문자 변환에 실패했습니다. 녹음은 보관되어 있으니 재시도하거나 메모를 직접 작성하세요.' });
+    if (!text) { recording.transcriptionStatus = 'failed'; saveSafety(); return res.status(502).json({ error: '문자 변환에 실패했습니다. 녹음은 보관되어 있으니 재시도하세요.' }); }
     recording.transcript = text.slice(0, 12000); recording.transcriptionStatus = 'done';
     recording.transcribedAt = new Date().toISOString(); recording.transcribedBy = u.name;
     saveSafety({ strict: true }); broadcastSafety();
     res.json({ ok: true, call: callForCtl(c) });
   } catch (e) {
-    Object.keys(recording).forEach(key => delete recording[key]); Object.assign(recording, previous);
+    Object.keys(recording).forEach(key => delete recording[key]); Object.assign(recording, previous, { transcriptionStatus: 'failed' });
+    saveSafety();
     res.status(500).json({ error: '녹음 문자 변환 결과를 저장하지 못했습니다. 다시 시도하세요.' });
   } finally { callTranscriptions.delete(recording.id); }
 });
@@ -1549,7 +1553,7 @@ app.post('/api/safety/calls', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {};
   const c = { id: nextSafeId('C'), carrierId: me.id, callerName: me.name,
-    zoneName: zoneById(me.zone)?.name || me.zone, at: new Date().toISOString(),
+    zoneName: zoneById(me.zone)?.name || me.zone, phone: me.phone || '', at: new Date().toISOString(),
     lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null, note: '', alertId: null, source: 'app_dial' };
   SAFE.calls.unshift(c); saveSafety(); broadcastSafety();
   res.json({ ok: true, callNumber: SAFETY_CALL_NUMBER });
@@ -1563,13 +1567,15 @@ app.post('/api/safety/calls/manual', (req, res) => {
   if (carrierId && !rosterById(carrierId)) return res.status(400).json({ error: '등록된 집배원을 선택하세요.' });
   const callerName = carrierId ? rosterById(carrierId).name : String(b.callerName || '').trim().slice(0, 80);
   if (!callerName) return res.status(400).json({ error: '발신자 이름을 입력하세요.' });
+  const source = b.source === 'control_confirm' ? 'control_confirm' : 'manual_incoming';
   let recording;
   try { if (b.audioBase64) recording = createCallRecording(b.audioBase64, u); }
   catch (e) { return res.status(400).json({ error: e.message }); }
   const c = { id: nextSafeId('C'), carrierId: carrierId || null, callerName,
     zoneName: carrierId ? zoneById(rosterById(carrierId).zone)?.name || rosterById(carrierId).zone : null,
-    phone: String(b.phone || '').trim().slice(0, 30), at: new Date().toISOString(),
-    note: String(b.note || '').trim().slice(0, 3000), source: 'manual_incoming', recordedBy: u.name, alertId: null,
+    phone: carrierId ? (rosterById(carrierId).phone || '') : String(b.phone || '').trim().slice(0, 30), at: new Date().toISOString(),
+    note: String(b.note || '').trim().slice(0, 3000), source, returnDate: /^\d{4}-\d{2}-\d{2}$/.test(String(b.returnDate||'')) ? String(b.returnDate) : null,
+    returnCarrierId: source === 'control_confirm' && carrierId ? carrierId : null, recordedBy: u.name, alertId: null,
     notedBy: u.name, notedAt: new Date().toISOString(), requestId, recordings: recording ? [recording] : [] };
   SAFE.calls.unshift(c);
   try { saveSafety({ strict: true }); }
@@ -1790,7 +1796,9 @@ app.get('/api/safety/evidence',(req,res)=>{
   const recipientStatus=item=>(item.targets||[]).map(id=>({id,name:(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id)?.name||id,ackAt:(item.acks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}));
   const alertEvidence=alerts.map(a=>({...a,recipients:recipientStatus(a)}));
   const noticeEvidence=notices.map(n=>({...n,recipients:recipientStatus(n)}));
-  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,notices:notices.length,alertTargets:alerts.reduce((n,a)=>n+a.targets.length,0),alertConfirmed:alerts.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,issuePeople:reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).length,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily});
+  const returnTarget=daily.reduce((n,r)=>n+r.target,0), returnMissing=daily.reduce((n,r)=>n+r.missing,0);
+  const issuePeopleUnique=new Set(reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).map(r=>r.id)).size;
+  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,notices:notices.length,alertTargets:alerts.reduce((n,a)=>n+a.targets.length,0),alertConfirmed:alerts.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,issuePeople:reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).length,issuePeopleUnique,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily});
 });
 app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
 app.post('/api/safety/config/zones',(req,res)=>{

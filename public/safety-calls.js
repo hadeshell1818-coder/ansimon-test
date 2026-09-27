@@ -14,6 +14,11 @@ const CallAudio = (() => {
     dispose();
     state = { call, requestId: crypto.randomUUID(), blob: null, urls: [], recorder: null, stream: null, busy: false, acquiring: false };
     renderSaved();
+    const pending = (call?.recordings || []).find(r => !r.transcript && (!r.transcriptionStatus || r.transcriptionStatus === 'not_started'));
+    if (pending) setTimeout(() => {
+      const button = document.querySelector(`[data-transcribe="${CSS.escape(pending.id)}"]`);
+      if (button && state?.call?.id === call.id) transcribe(pending.id, button);
+    }, 0);
   }
   function status(message) { if (document.getElementById('caStatus')) $('caStatus').textContent = message; }
   function controls() {
@@ -91,7 +96,7 @@ const CallAudio = (() => {
     if (!state || !document.getElementById('caSaved')) return;
     $('caSaved').innerHTML = (state.call?.recordings || []).map(r => `<article class="call-recording"><div><b>저장된 녹음</b> · ${esc(r.by)} · ${new Date(r.at).toLocaleString('ko-KR')}</div>
       <div class="call-audio-tools"><button class="btn" type="button" onclick="CallAudio.play('${r.id}',this)">녹음 재생</button>
-      <button class="btn" type="button" onclick="CallAudio.transcribe('${r.id}',this)" ${r.transcript ? 'disabled' : ''}>${r.transcript ? '문자 변환 완료' : '문자로 변환'}</button></div><div id="caPlayer-${r.id}"></div>
+      <button class="btn" type="button" data-transcribe="${r.id}" onclick="CallAudio.transcribe('${r.id}',this)" ${r.transcript ? 'disabled' : ''}>${r.transcript ? '문자 변환 완료' : r.transcriptionStatus === 'unavailable' ? '문자 변환 재시도' : '문자로 변환'}</button></div><div id="caPlayer-${r.id}"></div>
       ${r.transcript ? `<div class="field"><label>문자 변환 결과</label><textarea id="caText-${r.id}" readonly>${esc(r.transcript)}</textarea></div><button class="btn" type="button" onclick="CallAudio.useTranscript('${r.id}')">통화 메모에 반영</button>` : ''}</article>`).join('');
   }
   async function save() {
@@ -103,7 +108,11 @@ const CallAudio = (() => {
         method: 'POST', body: JSON.stringify({ audioBase64, requestId: current.recordingRequestId }),
       });
       rememberCall(result.call); if (state !== current) return;
-      current.call = result.call; current.blob = null; $('caPending').innerHTML = ''; renderSaved(); status('녹음을 저장했습니다.');
+      current.call = result.call; current.blob = null; $('caPending').innerHTML = ''; renderSaved(); status('녹음 저장 완료 · 문자 변환을 시작합니다.');
+      const recording = current.call.recordings.find(r => r.requestId === current.recordingRequestId);
+      const button = recording && document.querySelector(`[data-transcribe="${CSS.escape(recording.id)}"]`);
+      current.busy = false; controls();
+      if (button) await transcribe(recording.id, button);
     } catch (error) { if (state === current) status(error.message); }
     finally { current.busy = false; controls(); }
   }
