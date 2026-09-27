@@ -1666,8 +1666,11 @@ app.post('/api/on/returns/:cid/action',(req,res)=>{
   if(!detail)return res.status(400).json({error:'조치 내용을 입력하세요.'});
   if(status==='done'&&!completedDetail)return res.status(400).json({error:'완료 결과를 입력하세요.'});
   const now=new Date().toISOString(),existingActions=r.actions;const previous=existingActions?.[kind]||(!existingActions&&r.action?r.action:null);r.actions=existingActions||{};
-  const history=previous?[...(previous.history||[]),{detail:previous.detail,owner:previous.owner,status:previous.status,requestedAt:previous.requestedAt||previous.at,completedAt:previous.completedAt||null,completedDetail:previous.completedDetail||'',by:previous.by||null,updatedAt:previous.updatedAt||previous.at}]:[];
-  r.actions[kind]={kind,detail,owner:String(b.owner||u.name).trim().slice(0,50),status,requestedAt:previous?.requestedAt||now,completedAt:status==='done'?(previous?.status==='done'?previous.completedAt:now):null,completedDetail:status==='done'?completedDetail:'',updatedAt:now,by:u.name,history};
+  const dueDate=String(b.dueDate!=null?b.dueDate:previous?.dueDate||'').trim();
+  const dueTimestamp=dueDate?Date.parse(dueDate+'T00:00:00Z'):null;
+  if(dueDate&&(!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)||!Number.isFinite(dueTimestamp)||new Date(dueTimestamp).toISOString().slice(0,10)!==dueDate))return res.status(400).json({error:'조치 기한 날짜를 확인하세요.'});
+  const history=previous?[...(previous.history||[]),{detail:previous.detail,owner:previous.owner,status:previous.status,dueDate:previous.dueDate||'',requestedAt:previous.requestedAt||previous.at,completedAt:previous.completedAt||null,completedDetail:previous.completedDetail||'',by:previous.by||null,updatedAt:previous.updatedAt||previous.at}]:[];
+  r.actions[kind]={kind,detail,owner:String(b.owner||u.name).trim().slice(0,50),status,dueDate,requestedAt:previous?.requestedAt||now,completedAt:status==='done'?(previous?.status==='done'?previous.completedAt:now):null,completedDetail:status==='done'?completedDetail:'',updatedAt:now,by:u.name,history};
   r.action=r.actions[kind];
   saveSafety(); broadcastSafety(); res.json({ok:true});
 });
@@ -1753,6 +1756,20 @@ app.get('/api/safety/evidence',(req,res)=>{
   res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,alertBroadcasts:alertEvents.length,callBroadcasts,alertFollowups:alertFollowups.length,notices:notices.length,alertTargets:eventTargets,alertConfirmed:appConfirmed,alertPhoneConfirmed:phoneConfirmed,noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,bothIssues,actionPending,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily,healthLedger,equipmentLedger});
 });
 app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
+app.get('/api/safety/ledger',(req,res)=>{
+  const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+  const kind=String(req.query.kind||''),start=String(req.query.dueStart||''),end=String(req.query.dueEnd||'');
+  if(!['health','equipment'].includes(kind)||start&&!/^\d{4}-\d{2}-\d{2}$/.test(start)||end&&!/^\d{4}-\d{2}-\d{2}$/.test(end)||start&&end&&start>end)
+    return res.status(400).json({error:'조회 조건을 확인하세요.'});
+  ensureSafetyCollections();
+  const rows=Object.keys(SAFE.returns||{}).sort().flatMap(date=>returnRows(date).map(r=>({date,...r}))).filter(r=>{
+    const report=r.report,issue=kind==='health'?report?.bodyIssue:report?.equipmentIssue;
+    if(r.absence||!issue)return false;
+    const action=report.actions?.[kind]||(!report.actions?report.action:null),due=action?.dueDate||'';
+    return !start&&!end||!!due&&(!start||due>=start)&&(!end||due<=end);
+  }).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,absence:r.absence||null,report:r.report,demo:false}));
+  res.json({kind,dueStart:start,dueEnd:end,rows});
+});
 app.post('/api/safety/config/zones',(req,res)=>{
  const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const b=req.body||{},name=String(b.name||'').trim();if(!name)return res.status(400).json({error:'구역명을 입력하세요.'});
  const id=String(b.id||('z'+Date.now())).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,30);if(zoneById(id))return res.status(409).json({error:'이미 있는 구역 ID입니다.'});

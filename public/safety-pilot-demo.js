@@ -14,7 +14,7 @@ const PILOT_DEMO = (() => {
   const nextDate = date => new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
   const action = (detail, status, requestedAt, completedDetail = '', completedAt = null) => ({
     detail, status, owner: '시연 안전관리담당자', requestedAt: at(requestedAt[0], requestedAt[1]),
-    completedDetail, completedAt: completedAt ? at(completedAt[0], completedAt[1]) : null,
+    dueDate: nextDate(requestedAt[0]), completedDetail, completedAt: completedAt ? at(completedAt[0], completedAt[1]) : null,
   });
   const day = (date, states) => ({
     date,
