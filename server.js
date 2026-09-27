@@ -1354,7 +1354,7 @@ async function resendUnacknowledged(now = Date.now()) {
   let changed = false;
   for (const item of [...SAFE.alerts, ...(SAFE.notices || [])]) {
     if (!item.repeatUntilAck || item.deletedAt) continue;
-    const pending = item.targets.filter(id => !(item.acks || {})[id]);
+    const pending = item.targets.filter(id => !(item.acks || {})[id] && !(item.phoneAcks || {})[id]);
     if (!pending.length) { item.repeatUntilAck = false; changed = true; continue; }
     if (now - item.lastPushAt < PUSH_REPEAT_MS) continue;
     item.lastPushAt = now;
@@ -1388,12 +1388,12 @@ app.patch('/api/safety/alerts/:id', (req, res) => {
   const level = req.body?.level, text = String(req.body?.text || '').trim().slice(0, 200);
   if (!LEVELS[level] || !text) return res.status(400).json({ error: '단계와 내용을 확인하세요.' });
   a.edits = a.edits || [];
-  a.edits.push({ version:a.version||1, level:a.level, text:a.text, acks:{...(a.acks||{})},
+  a.edits.push({ version:a.version||1, level:a.level, text:a.text, acks:{...(a.acks||{})}, phoneAcks:{...(a.phoneAcks||{})},
     reminderStoppedAt:a.reminderStoppedAt||null, reminderStopReason:a.reminderStopReason||null,
     at:new Date().toISOString(), by:u.name });
   a.level = level; a.text = text; a.updatedAt = new Date().toISOString();
   a.updatedBy = u.name; a.version = (a.version || 1) + 1;
-  a.acks = {}; a.repeatUntilAck = true; a.lastPushAt = Date.now();
+  a.acks = {}; a.phoneAcks = {}; a.repeatUntilAck = true; a.lastPushAt = Date.now();
   a.reminderStoppedAt = null; a.reminderStoppedBy = null; a.reminderStopReason = null;
   saveSafety(); broadcastSafety();
   sendSafetyPush(a).catch(e => console.error('safety push', e.message));
@@ -1433,7 +1433,13 @@ app.post('/api/safety/alerts/:id/followups', (req, res) => {
   if (!detail || !['contacted', 'no_answer', 'resolved'].includes(status))
     return res.status(400).json({ error: '조치 내용과 결과를 입력하세요.' });
   a.followups = a.followups || [];
-  a.followups.push({ targetId, detail, status, version:a.version||1, at: new Date().toISOString(), by: u.name });
+  const at=new Date().toISOString();
+  a.followups.push({ targetId, detail, status, version:a.version||1, at, by: u.name });
+  if(status==='contacted'){
+    a.phoneAcks=a.phoneAcks||{};
+    a.phoneAcks[targetId]={at,by:u.name,detail,version:a.version||1};
+    if(a.targets.every(id=>a.acks?.[id]||a.phoneAcks[id]))a.repeatUntilAck=false;
+  }
   saveSafety(); broadcastSafety(); res.json({ ok: true, followups: a.followups });
 });
 
@@ -1467,7 +1473,7 @@ app.post('/api/safety/alerts/:id/ack', (req, res) => {
   a.acks = a.acks || {};
   if (!a.acks[me.id]) {
     a.acks[me.id] = new Date().toISOString();
-    if (a.targets.every(id => a.acks[id])) a.repeatUntilAck = false;
+    if (a.targets.every(id => a.acks[id] || a.phoneAcks?.[id])) a.repeatUntilAck = false;
     saveSafety(); broadcastSafety();
   }
   res.json({ ok: true });
@@ -1588,7 +1594,7 @@ function snapshotRoster(d) {
 }
 function returnRows(d){
   ensureSafetyCollections(); const day=SAFE.returns[d]||{}, absent=SAFE.absences[d]||{};
-  return (SAFE.rosterSnapshots[d] || ROSTER).map(r=>({id:r.id,name:r.name,zone:r.zone,zoneName:r.zoneName||zoneById(r.zone)?.name||r.zone,phone:r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
+  return (SAFE.rosterSnapshots[d] || ROSTER).map(r=>({id:r.id,name:rosterById(r.id)?.name||r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zoneName||r.zone,phone:rosterById(r.id)?.phone||r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
 }
 function returnSummary(rows){
   const active=rows.filter(r=>!r.absence), reportedRows=active.filter(r=>r.report), reported=reportedRows.length;
@@ -1597,8 +1603,13 @@ function returnSummary(rows){
   const both=reportedRows.filter(r=>r.report.bodyIssue&&r.report.equipmentIssue).length;
   const ok=reportedRows.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length;
   const controlConfirmed=reportedRows.filter(r=>r.report.source==='control').length;
-  const actionPending=reportedRows.filter(r=>(r.report.bodyIssue||r.report.equipmentIssue)&&r.report.action?.status!=='done').length;
+  const actionPending=reportedRows.filter(r=>returnActionPending(r.report)).length;
   return {total:rows.length,absent:rows.length-active.length,target:active.length,reported,missing:active.length-reported,ok,healthOnly,equipmentOnly,both,issue:healthOnly+equipmentOnly+both,controlConfirmed,selfReported:reported-controlConfirmed,actionPending};
+}
+function returnActionPending(report){
+  if(!report.bodyIssue&&!report.equipmentIssue)return false;
+  if(!report.actions)return report.action?.status!=='done';
+  return (report.bodyIssue&&report.actions.health?.status!=='done')||(report.equipmentIssue&&report.actions.equipment?.status!=='done');
 }
 app.get('/api/on/return/me',(req,res)=>{
   const me=safetyCarrier(userFromReq(req)); if(!me)return res.status(403).json({error:'집배원 계정만 이용할 수 있습니다.'});
@@ -1637,19 +1648,27 @@ app.post('/api/on/returns/:cid/control-confirm',(req,res)=>{
   SAFE.returns[d]=SAFE.returns[d]||{}; const prev=SAFE.returns[d][cid];
   const history=prev?[...(prev.history||[]),{source:prev.source,bodyIssue:prev.bodyIssue,equipmentIssue:prev.equipmentIssue,bodyDetail:prev.bodyDetail,equipmentDetail:prev.equipmentDetail,at:prev.at}]:[];
   SAFE.returns[d][cid]={returned:true,source:'control',bodyIssue,equipmentIssue,bodyDetail:bodyIssue?String(b.bodyDetail||'').trim().slice(0,300):'',equipmentDetail:equipmentIssue?String(b.equipmentDetail||'').trim().slice(0,300):'',callNote,confirmedBy:u.name,at:new Date().toISOString(),action:prev?.action||null,actionHistory:prev?.actionHistory||[],history};
-  SAFE.calls.unshift({id:nextSafeId('C'),carrierId:cid,callerName:rosterById(cid)?.name||cid,
-    zoneName:zoneById(rosterById(cid)?.zone)?.name||rosterById(cid)?.zone,at:new Date().toISOString(),
-    note:'[귀국 미보고 확인] '+callNote,by:u.name,source:'control_confirm'});
+  const call=SAFE.calls.find(c=>c.id===String(b.callId||''));
+  if(call){call.returnDate=d;call.returnCarrierId=cid;call.source='control_confirm';call.note=callNote;call.notedAt=call.notedAt||new Date().toISOString();}
+  else SAFE.calls.unshift({id:nextSafeId('C'),carrierId:cid,callerName:rosterById(cid)?.name||cid,
+    zoneName:zoneById(rosterById(cid)?.zone)?.name||rosterById(cid)?.zone,phone:rosterById(cid)?.phone||'',at:new Date().toISOString(),
+    note:'[귀국 미보고 확인] '+callNote,notedAt:new Date().toISOString(),notedBy:u.name,by:u.name,source:'control_confirm'});
   saveSafety();broadcastSafety();res.json({ok:true});
 });
 app.post('/api/on/returns/:cid/action',(req,res)=>{
   const u=userFromReq(req); if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'}); const d=String((req.body||{}).date||kstDate()).slice(0,10);
   ensureSafetyCollections(); const r=(SAFE.returns[d]||{})[req.params.cid]; if(!r)return res.status(404).json({error:'보고 내역이 없습니다.'});
-  const detail=String((req.body||{}).detail||'').trim().slice(0,300);
+  const b=req.body||{},kind=['health','equipment'].includes(b.kind)?b.kind:(r.bodyIssue?'health':'equipment');
+  if(kind==='health'&&!r.bodyIssue||kind==='equipment'&&!r.equipmentIssue)return res.status(400).json({error:'해당 이상 보고가 없습니다.'});
+  const detail=String(b.detail||'').trim().slice(0,300);
   const status=['pending','in_progress','done'].includes((req.body||{}).status)?(req.body||{}).status:'in_progress';
-  if(status==='done'&&!detail)return res.status(400).json({error:'조치 완료 결과를 입력하세요.'});
-  r.actionHistory=r.actionHistory||[]; if(r.action)r.actionHistory.push(r.action);
-  r.action={detail,owner:String((req.body||{}).owner||u.name).trim().slice(0,50),status,at:new Date().toISOString(),by:u.name};
+  const completedDetail=String(b.completedDetail||'').trim().slice(0,500);
+  if(!detail)return res.status(400).json({error:'조치 내용을 입력하세요.'});
+  if(status==='done'&&!completedDetail)return res.status(400).json({error:'완료 결과를 입력하세요.'});
+  const now=new Date().toISOString(),existingActions=r.actions;const previous=existingActions?.[kind]||(!existingActions&&r.action?r.action:null);r.actions=existingActions||{};
+  const history=previous?[...(previous.history||[]),{detail:previous.detail,owner:previous.owner,status:previous.status,requestedAt:previous.requestedAt||previous.at,completedAt:previous.completedAt||null,completedDetail:previous.completedDetail||'',by:previous.by||null,updatedAt:previous.updatedAt||previous.at}]:[];
+  r.actions[kind]={kind,detail,owner:String(b.owner||u.name).trim().slice(0,50),status,requestedAt:previous?.requestedAt||now,completedAt:status==='done'?(previous?.status==='done'?previous.completedAt:now):null,completedDetail:status==='done'?completedDetail:'',updatedAt:now,by:u.name,history};
+  r.action=r.actions[kind];
   saveSafety(); broadcastSafety(); res.json({ok:true});
 });
 app.get('/api/on/notices',(req,res)=>{
@@ -1699,8 +1718,12 @@ app.get('/api/safety/evidence',(req,res)=>{
     return res.status(400).json({error:'조회 날짜를 확인하세요.'});
   const inRange=t=>{ const d=kstDate(new Date(t).getTime()); return d>=start&&d<=end; };
   const hazards=SAFE.hazards.filter(h=>inRange(h.createdAt)).map(hazardForCtl);
-  const calls=SAFE.calls.filter(c=>inRange(c.at)).map(callForCtl);
-  const alerts=SAFE.alerts.filter(a=>inRange(a.createdAt)||(a.edits||[]).some(e=>inRange(e.at)));
+  const calls=SAFE.calls.filter(c=>inRange(c.notedAt||c.at)).map(callForCtl);
+  const alerts=SAFE.alerts.filter(a=>inRange(a.createdAt)||(a.edits||[]).some(e=>inRange(e.at))||(a.followups||[]).some(f=>inRange(f.at)));
+  const alertEvents=SAFE.alerts.flatMap(a=>[
+    ...(inRange(a.createdAt)?[{alert:a,acks:a.acks||{},phoneAcks:a.phoneAcks||{}}]:[]),
+    ...(a.edits||[]).filter(e=>inRange(e.at)).map(e=>({alert:a,acks:e.acks||{},phoneAcks:e.phoneAcks||{}})),
+  ]);
   const notices=SAFE.notices.filter(n=>inRange(n.createdAt));
   const returns=[];
   const days=new Set([...Object.keys(SAFE.returns||{}),...Object.keys(SAFE.absences||{}),...Object.keys(SAFE.rosterSnapshots||{})].filter(d=>d>=start&&d<=end));
@@ -1710,13 +1733,24 @@ app.get('/api/safety/evidence',(req,res)=>{
   });
   const reports=returns.filter(r=>!r.absence&&r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue), absences=returns.filter(r=>r.absence);
   const daily=[...days].sort().map(date=>({date,...returnSummary(returns.filter(r=>r.date===date))}));
-  const recipientStatus=item=>(item.targets||[]).map(id=>({id,name:(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id)?.name||id,ackAt:(item.acks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}));
+  const recipientStatus=item=>(item.targets||[]).map(id=>({id,name:rosterById(id)?.name||(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id)?.name||id,ackAt:(item.acks||{})[id]||null,phoneAck:(item.phoneAcks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}));
   const alertEvidence=alerts.map(a=>({...a,recipients:recipientStatus(a)}));
   const noticeEvidence=notices.map(n=>({...n,recipients:recipientStatus(n)}));
   const returnTarget=daily.reduce((n,r)=>n+r.target,0), returnMissing=daily.reduce((n,r)=>n+r.missing,0);
-  const issuePeopleUnique=new Set(reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).map(r=>r.id)).size;
-  const callBroadcasts=SAFE.alerts.filter(a=>a.fromCall).reduce((count,a)=>count+(inRange(a.createdAt)?1:0)+(a.edits||[]).filter(e=>inRange(e.at)).length,0);
-  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,callBroadcasts,notices:notices.length,alertTargets:alerts.reduce((n,a)=>n+a.targets.length,0),alertConfirmed:alerts.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,issuePeople:reports.filter(r=>r.report.bodyIssue||r.report.equipmentIssue).length,issuePeopleUnique,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily});
+  const callBroadcasts=alertEvents.filter(e=>e.alert.fromCall).length;
+  const ledgerRows=Object.keys(SAFE.returns||{}).sort().flatMap(date=>returnRows(date).map(r=>({date,...r})));
+  const actionDates=report=>Object.values(report.actions||{}).flatMap(a=>[a.requestedAt||a.at,a.updatedAt,a.completedAt,...(a.history||[]).flatMap(h=>[h.updatedAt||h.at,h.completedAt])]).filter(Boolean);
+  const legacyActionDates=report=>[report.action?.at,...(report.actionHistory||[]).map(a=>a.at)].filter(Boolean);
+  const relevantLedgerRecord=r=>inRange(r.report.at)||[...actionDates(r.report),...legacyActionDates(r.report)].some(inRange);
+  const healthLedger=ledgerRows.filter(r=>!r.absence&&r.report?.bodyIssue&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.bodyDetail,reportAt:r.report.at,actions:r.report.actions?(r.report.actions.health?[r.report.actions.health]:[]):(r.report.action?[r.report.action]:[])}));
+  const equipmentLedger=ledgerRows.filter(r=>!r.absence&&r.report?.equipmentIssue&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.equipmentDetail,reportAt:r.report.at,actions:r.report.actions?(r.report.actions.equipment?[r.report.actions.equipment]:[]):(r.report.action?[r.report.action]:[])}));
+  const appConfirmed=alertEvents.reduce((n,e)=>n+e.alert.targets.filter(id=>e.acks[id]).length,0);
+  const phoneConfirmed=SAFE.alerts.reduce((n,a)=>n+(a.followups||[]).filter(f=>f.status==='contacted'&&inRange(f.at)).length,0);
+  const alertFollowups=SAFE.alerts.flatMap(a=>a.followups||[]).filter(f=>inRange(f.at));
+  const eventTargets=alertEvents.reduce((n,e)=>n+e.alert.targets.length,0);
+  const bothIssues=reports.filter(r=>r.report.bodyIssue&&r.report.equipmentIssue).length;
+  const actionPending=reports.filter(r=>returnActionPending(r.report)).length;
+  res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,alertBroadcasts:alertEvents.length,callBroadcasts,alertFollowups:alertFollowups.length,notices:notices.length,alertTargets:eventTargets,alertConfirmed:appConfirmed,alertPhoneConfirmed:phoneConfirmed,noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,bothIssues,actionPending,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily,healthLedger,equipmentLedger});
 });
 app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
 app.post('/api/safety/config/zones',(req,res)=>{
