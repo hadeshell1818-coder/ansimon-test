@@ -1733,7 +1733,7 @@ app.get('/api/safety/evidence',(req,res)=>{
   });
   const reports=returns.filter(r=>!r.absence&&r.report), body=reports.filter(r=>r.report.bodyIssue), equipment=reports.filter(r=>r.report.equipmentIssue), absences=returns.filter(r=>r.absence);
   const daily=[...days].sort().map(date=>({date,...returnSummary(returns.filter(r=>r.date===date))}));
-  const recipientStatus=item=>(item.targets||[]).map(id=>({id,name:rosterById(id)?.name||(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id)?.name||id,ackAt:(item.acks||{})[id]||null,phoneAck:(item.phoneAcks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}));
+  const recipientStatus=item=>(item.targets||[]).map(id=>{const person=rosterById(id)||(SAFE.rosterSnapshots[kstDate(new Date(item.createdAt).getTime())]||ROSTER).find(r=>r.id===id);return {id,name:person?.name||id,zoneName:zoneById(person?.zone)?.name||person?.zoneName||person?.zone||'',ackAt:(item.acks||{})[id]||null,phoneAck:(item.phoneAcks||{})[id]||null,followups:(item.followups||[]).filter(f=>f.targetId===id)}});
   const alertEvidence=alerts.map(a=>({...a,recipients:recipientStatus(a)}));
   const noticeEvidence=notices.map(n=>({...n,recipients:recipientStatus(n)}));
   const returnTarget=daily.reduce((n,r)=>n+r.target,0), returnMissing=daily.reduce((n,r)=>n+r.missing,0);
