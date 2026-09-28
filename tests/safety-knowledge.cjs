@@ -67,7 +67,7 @@ async function main() {
       return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
     };
     const advice = await lawRepo.recommendRisk({ description: '계단 파손으로 넘어질 위험이 있습니다.' });
-    assert.deepEqual(advice.legalReferences, ['산업안전보건기준에 관한 규칙 · 제3조(전도의 방지) · (https://law.example.test)']);
+    assert.deepEqual(advice.legalReferences, ['제3조(전도의 방지)']);
   } finally { global.fetch = originalFetch; }
   const app = express(); app.use(express.json());
   mountKnowledge(app, req => req.headers.authorization === 'manager' ? { id: 'manager' } : null, {});

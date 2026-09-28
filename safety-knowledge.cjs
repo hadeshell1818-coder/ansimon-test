@@ -255,8 +255,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       ], 1000);
       const validRefs = new Set(evidence.map(item => item.ref));
       const citedEvidence = evidence.filter(item => (draft.citations || []).includes(item.ref)).slice(0, 8);
-      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || (item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item =>
-        [item.title, item.locator, item.sourceUrl ? `(${item.sourceUrl})` : ''].filter(Boolean).join(' · '));
+      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || (item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item => {
+        const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?/);
+        return locator?.[0]?.replace(/\s+/g, ' ').trim() || '';
+      }).filter(Boolean);
       return {
         factor: String(draft.factor || '').slice(0, 500), currentControl: String(draft.currentControl || '').slice(0, 500),
         assessmentMethod: 'three-step-v1',
