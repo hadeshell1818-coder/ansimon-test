@@ -18,6 +18,7 @@ const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const webpush = require('web-push');
+const XLSX = require('xlsx');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -1742,8 +1743,8 @@ app.get('/api/safety/evidence',(req,res)=>{
   const actionDates=report=>Object.values(report.actions||{}).flatMap(a=>[a.requestedAt||a.at,a.updatedAt,a.completedAt,...(a.history||[]).flatMap(h=>[h.updatedAt||h.at,h.completedAt])]).filter(Boolean);
   const legacyActionDates=report=>[report.action?.at,...(report.actionHistory||[]).map(a=>a.at)].filter(Boolean);
   const relevantLedgerRecord=r=>inRange(r.report.at)||[...actionDates(r.report),...legacyActionDates(r.report)].some(inRange);
-  const healthLedger=ledgerRows.filter(r=>!r.absence&&r.report?.bodyIssue&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.bodyDetail,reportAt:r.report.at,actions:r.report.actions?(r.report.actions.health?[r.report.actions.health]:[]):(r.report.action?[r.report.action]:[])}));
-  const equipmentLedger=ledgerRows.filter(r=>!r.absence&&r.report?.equipmentIssue&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.equipmentDetail,reportAt:r.report.at,actions:r.report.actions?(r.report.actions.equipment?[r.report.actions.equipment]:[]):(r.report.action?[r.report.action]:[])}));
+  const healthLedger=ledgerRows.filter(r=>!r.absence&&r.report&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.bodyIssue?r.report.bodyDetail:'이상 없음',hasIssue:!!r.report.bodyIssue,reportAt:r.report.at,report:r.report,actions:r.report.actions?(r.report.actions.health?[r.report.actions.health]:[]):(r.report.action?[r.report.action]:[])}));
+  const equipmentLedger=ledgerRows.filter(r=>!r.absence&&r.report&&relevantLedgerRecord(r)).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,detail:r.report.equipmentIssue?r.report.equipmentDetail:'이상 없음',hasIssue:!!r.report.equipmentIssue,reportAt:r.report.at,report:r.report,actions:r.report.actions?(r.report.actions.equipment?[r.report.actions.equipment]:[]):(r.report.action?[r.report.action]:[])}));
   const appConfirmed=alertEvents.reduce((n,e)=>n+e.alert.targets.filter(id=>e.acks[id]).length,0);
   const phoneConfirmed=SAFE.alerts.reduce((n,a)=>n+(a.followups||[]).filter(f=>f.status==='contacted'&&inRange(f.at)).length,0);
   const alertFollowups=SAFE.alerts.flatMap(a=>a.followups||[]).filter(f=>inRange(f.at));
@@ -1760,8 +1761,7 @@ app.get('/api/safety/ledger',(req,res)=>{
     return res.status(400).json({error:'조회 조건을 확인하세요.'});
   ensureSafetyCollections();
   const rows=Object.keys(SAFE.returns||{}).sort().flatMap(date=>returnRows(date).map(r=>({date,...r}))).filter(r=>{
-    const report=r.report,issue=kind==='health'?report?.bodyIssue:report?.equipmentIssue;
-    if(r.absence||!issue)return false;
+    if(r.absence||!r.report)return false;
     return (!start||r.date>=start)&&(!end||r.date<=end);
   }).map(r=>({date:r.date,id:r.id,name:r.name,zoneName:r.zoneName,absence:r.absence||null,report:r.report,demo:false}));
   res.json({kind,start,end,rows});
@@ -1962,6 +1962,28 @@ app.get('/api/risk/state', async (req, res) => {
     inbox: RISK.items.filter(it => !it.routingInactive && it.status === 'inbox').map(itemForMgr),
     registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
   });
+});
+app.get('/api/risk/export.xlsx', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
+  const rows = RISK.items.filter(it => !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status)).map((it, index) => ({
+    번호: index + 1,
+    공정명: it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '',
+    '유해·위험요인': it.factor || '',
+    '위험성 수준': it.riskLevel || '',
+    개선대책: it.reduction || '',
+    개선예정일: it.dueDate || '',
+    개선완료일: it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''),
+    담당자: it.owner || '',
+    이행결과서: it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성',
+    '관련근거(선택사항)': it.referenceText || '',
+  }));
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  sheet['!cols'] = [{ wch: 7 }, { wch: 24 }, { wch: 48 }, { wch: 13 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 48 }];
+  const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, '위험성평가표');
+  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''risk-assessment.xlsx");
+  res.send(buffer);
 });
 
 /* 현장 사진신고 접수 — 내근직원(바로 대기열) / 집배원(판별 후) 구분해 status 결정 */

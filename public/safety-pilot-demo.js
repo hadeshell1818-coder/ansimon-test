@@ -46,6 +46,7 @@ const PILOT_DEMO = (() => {
     day('2026-09-25', ['health', 'equipment', 'normal', 'both', 'normal', 'missing', 'absent', 'normal']),
     day('2026-09-26', ['normal', 'health', 'equipment', 'equipment', 'normal', 'normal', 'normal', 'missing']),
     day('2026-09-27', ['health', 'equipment', 'both', 'normal', 'normal', 'missing', 'normal', 'absent']),
+    day('2026-09-28', ['normal', 'health', 'equipment', 'normal', 'both', 'normal', 'missing', 'absent']),
   ];
   const recipients = (targetIds, ackIds, phoneIds = [], followups = [], date = '2026-09-27') => targetIds.map(id => {
     const person = people.find(p => p.id === id);
@@ -62,18 +63,23 @@ const PILOT_DEMO = (() => {
       followups: [{ targetId: all[5], status: 'contacted', detail: '미확인자 전화 연락 완료, 우회 안내 전달', by: '시연 상황관제담당자', at: at('2026-09-26', '17:32') }] },
     { id: 'pilot-alert-03', date: '2026-09-27', level: 'notice', text: '시연 3·4구 배달 종료 전 귀국보고를 확인 바랍니다.', sender: '시연 상황관제담당자',
       targets: all, ackIds: all.slice(0, 5), phoneIds: [], createdAt: at('2026-09-27', '16:55'), fromCall: null, edits: [], followups: [] },
+    { id: 'pilot-alert-04', date: '2026-09-28', level: 'caution', text: '비 온 뒤 계단과 보도블록이 미끄러울 수 있으니 우회·감속 배달 바랍니다.', sender: '상황관제 담당자',
+      targets: all, ackIds: all.slice(0, 5), phoneIds: [all[5]], createdAt: at('2026-09-28', '16:35'), fromCall: null, edits: [], followups: [] },
   ].map(a => ({ ...a, demo: true, recipients: recipients(a.targets, a.ackIds, a.phoneIds, a.followups || [], a.date) }));
   const notices = [
     { id: 'pilot-notice-01', date: '2026-09-25', title: '우천 시 배달 안전수칙', body: '젖은 계단과 보도에서는 속도를 줄이고 미끄럼에 주의 바랍니다.', sender: '시연 상황관제담당자', createdAt: at('2026-09-25', '08:10'), targets: all, recipients: recipients(all, all.slice(0, 7), [], [], '2026-09-25'), demo: true },
     { id: 'pilot-notice-02', date: '2026-09-27', title: '귀국보고 확인 안내', body: '배달을 마친 뒤 귀국 여부와 건강·장비 이상을 보고해 주세요.', sender: '시연 상황관제담당자', createdAt: at('2026-09-27', '08:05'), targets: all, recipients: recipients(all, all.slice(0, 6), [], [], '2026-09-27'), demo: true },
+    { id: 'pilot-notice-03', date: '2026-09-28', title: '귀국보고 및 장비 이상 보고 안내', body: '귀국 후 건강·장비 상태를 각각 확인해 보고해 주세요.', sender: '상황관제 담당자', createdAt: at('2026-09-28', '08:10'), targets: all, recipients: recipients(all, all.slice(0, 7), [], [], '2026-09-28'), demo: true },
   ];
   const hazards = [
     { id: 'pilot-voice-01', carrier: people[1].name, zoneName: people[1].zoneName, transcript: '시연 2구 진입로에 물이 차 있어 오토바이 통행이 어렵습니다. 우회가 필요합니다.', createdAt: at('2026-09-26', '17:02'), audioUrl: null, demo: true },
     { id: 'pilot-voice-02', carrier: people[4].name, zoneName: people[4].zoneName, transcript: '시연 3구 보도블록이 들떠 있어 보행 시 걸려 넘어질 위험이 있습니다.', createdAt: at('2026-09-27', '15:18'), audioUrl: null, demo: true },
+    { id: 'pilot-voice-03', carrier: people[2].name, zoneName: people[2].zoneName, transcript: '배달구간 계단의 미끄럼 위험이 있어 주의가 필요합니다.', createdAt: at('2026-09-28', '15:42'), audioUrl: null, demo: true },
   ];
   const calls = [
     { id: 'pilot-call-01', source: 'manual_incoming', carrier: people[1].name, callerName: people[1].name, carrierId: people[1].id, zoneName: people[1].zoneName, phone: '010-0000-0001', note: '시연 2구 도로 침수 신고 접수, 우회 필요 안내', at: at('2026-09-26', '17:05'), notedAt: at('2026-09-26', '17:08'), alertIds: ['pilot-alert-02'], demo: true },
     { id: 'pilot-call-02', source: 'control_confirm', carrier: people[5].name, callerName: people[5].name, carrierId: people[5].id, zoneName: people[5].zoneName, phone: '010-0000-0006', note: '미보고자 전화 확인, 귀국 및 건강·장비 이상 없음 확인', at: at('2026-09-27', '18:02'), notedAt: at('2026-09-27', '18:02'), alertIds: [], demo: true },
+    { id: 'pilot-call-03', source: 'manual_incoming', carrier: people[1].name, callerName: people[1].name, carrierId: people[1].id, zoneName: people[1].zoneName, phone: '010-0000-0002', note: '계단 미끄럼 주의 신고 접수, 우회 안내 전달', at: at('2026-09-28', '16:20'), notedAt: at('2026-09-28', '16:22'), alertIds: ['pilot-alert-04'], demo: true },
   ];
   return { people, days, notices, hazards, calls, alerts };
 })();

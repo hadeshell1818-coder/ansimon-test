@@ -10,13 +10,13 @@ const report = { bodyIssue: true, equipmentIssue: true, bodyDetail: '발목 통�
   health: { status: 'in_progress', detail: '진료 안내', dueDate: '2026-10-10', history: [], requestedAt: '2026-09-27T10:00:00Z' },
   equipment: { status: 'in_progress', detail: '정비 의뢰' },
 } };
-const SAFE = { returns: { '2026-09-27': { c1: report }, '2026-09-28': { c1: { ...report } } } };
+const SAFE = { returns: { '2026-09-27': { c1: report, c2: { ...report, bodyIssue: false, equipmentIssue: false, bodyDetail: '', equipmentDetail: '' } }, '2026-09-28': { c1: { ...report } } } };
 const ctx = vm.createContext({ SAFE, Date, app: {
   get: (path, handler) => routes[path] = handler,
   post: (path, handler) => routes[path] = handler,
 }, userFromReq: req => req.user, isSafetyCtl: u => u?.kind === 'safety',
 ensureSafetyCollections() {}, saveSafety() {}, broadcastSafety() {},
-returnRows: date => Object.entries(SAFE.returns[date]).map(([id, report]) => ({ id, name: '김직원', zoneName: '1구', report })),
+  returnRows: date => Object.entries(SAFE.returns[date]).map(([id, report]) => ({ id, name: id === 'c1' ? '김직원' : '박직원', zoneName: '1구', report })),
 });
 function load(begin, end) { vm.runInContext(source.slice(source.indexOf(begin), source.indexOf(end, source.indexOf(begin))), ctx); }
 load("app.get('/api/safety/ledger'", "app.post('/api/safety/config/zones'");
@@ -28,8 +28,9 @@ function call(path, req) {
 }
 const query = { kind: 'health', start: '2026-09-27', end: '2026-09-27' };
 let res = call('/api/safety/ledger', { user, query });
-assert.equal(res.body.rows.length, 1, 'filter report date, not action deadline');
+assert.equal(res.body.rows.length, 2, 'include normal reports and filter by report date, not action deadline');
 assert.equal(res.body.rows[0].date, '2026-09-27');
+assert.equal(res.body.rows.find(row => row.id === 'c2').report.bodyIssue, false, 'normal report is present in the ledger');
 assert.equal(call('/api/safety/ledger', { query }).code, 403);
 assert.equal(call('/api/safety/ledger', { user, query: { ...query, start: '2026-10-01' } }).code, 400);
 const actionRequest = { user, params: { cid: 'c1' }, body: { date: '2026-09-27', kind: 'health', detail: '진료 후 상태 확인', status: 'done', completedDetail: '치료 완료' } };
@@ -48,7 +49,7 @@ for (const kind of ['health', 'equipment']) {
   elements[kind + 'LedgerView'] = { innerHTML: '', textContent: '' };
 }
 let printed = '', prints = 0, blocked = false, message = '';
-const ui = vm.createContext({ Date, URLSearchParams, $: id => elements[id],
+const ui = vm.createContext({ Date, URLSearchParams, S: { roster: Array.from({length:8},(_,i)=>({id:`c${i+1}`,name:`집배원${i+1}`,zone:`z${i+1}`})), zones: [] }, $: id => elements[id],
   managementLedgerData: { health: [], equipment: [] }, managementLedgerRanges: { health: {}, equipment: {} },
   esc: text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
   evidenceTime: t => t ? new Date(t).toISOString() : '-', actionStatusLabel: s => s || '미기록',
@@ -62,7 +63,7 @@ const ui = vm.createContext({ Date, URLSearchParams, $: id => elements[id],
     document: { write: text => printed = text, close() {}, fonts: { ready: Promise.resolve() } } }) },
 });
 vm.runInContext(fs.readFileSync('public/safety-pilot-demo.js', 'utf8'), ui);
-vm.runInContext(html.slice(html.indexOf('async function clearLedgerDates('), html.lastIndexOf('</script>')), ui);
+vm.runInContext(html.slice(html.indexOf('function pilotRosterPerson('), html.lastIndexOf('</script>')), ui);
 (async () => {
   await ui.runManagementLedger('health');
   assert.match(elements.healthLedgerView.innerHTML, /개별 출력/);

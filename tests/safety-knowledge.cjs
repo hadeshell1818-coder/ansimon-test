@@ -47,8 +47,28 @@ async function main() {
   });
   const bodySearch = await searchRepo.search('계단 파손');
   assert.match(bodySearch.results[0].sections[0].body, /계단 파손은 미끄러짐/);
-  const failed = createKnowledgeRepository(configured, async () => ({ ok: false, status: 401 }));
+  const failed = createKnowledgeRepository(configured, async () => ({ ok: false, status: 401, text: async () => 'unauthorized' }));
   await assert.rejects(failed.list(), /401/);
+  const lawRepo = createKnowledgeRepository({ ...configured, OPENAI_API_KEY: 'test-openai-key' }, async url => {
+    const parsed = new URL(url), resource = parsed.pathname.split('/').pop();
+    if (resource === 'safety_documents' && parsed.searchParams.get('kind') === 'eq.law') return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
+    if (resource === 'safety_documents' && parsed.searchParams.has('id')) return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
+    if (resource === 'safety_document_sections' && parsed.searchParams.has('body')) return { ok: true, status: 200, json: async () => [{ id: 'law-section-1', document_id: 'law-1', version: 'current', locator: '제3조(전도의 방지)', body: '통로의 바닥을 안전하게 유지하여야 한다.' }] };
+    return { ok: true, status: 200, json: async () => [] };
+  });
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async (_url, options) => {
+      const requestBody = JSON.parse(options.body), first = requestBody.messages[0].content;
+      const content = first.startsWith('산업안전 위험 설명')
+        ? { queries: ['계단 파손'] }
+        : { factor: '계단 파손에 따른 전도 위험', measures: ['통로를 안전하게 유지한다.'], citations: ['doc:law-section-1'], limitations: '' };
+      if (!first.startsWith('산업안전 위험 설명')) assert.match(requestBody.messages[1].content, /승인된 법령/);
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
+    };
+    const advice = await lawRepo.recommendRisk({ description: '계단 파손으로 넘어질 위험이 있습니다.' });
+    assert.deepEqual(advice.legalReferences, ['산업안전보건기준에 관한 규칙 · 제3조(전도의 방지) · (https://law.example.test)']);
+  } finally { global.fetch = originalFetch; }
   const app = express(); app.use(express.json());
   mountKnowledge(app, req => req.headers.authorization === 'manager' ? { id: 'manager' } : null, {});
   const server = app.listen(0, '127.0.0.1');

@@ -88,7 +88,9 @@ routes['GET /api/safety/evidence']({ user, query: { start: '2026-09-27', end: '2
 assert.equal(res.body.summary.alertConfirmed, 1);
 assert.equal(res.body.summary.alertTargets, 2);
 assert.equal(res.body.summary.noticeConfirmed, 1);
-assert.equal(res.body.summary.issuePeople, 1);
+assert.equal(res.body.summary.bodyIssues, 1);
+assert.equal(res.body.summary.equipmentIssues, 1);
+assert.equal(res.body.summary.bothIssues, 1);
 assert.equal(res.body.daily[0].target, 2);
 assert.equal(res.body.daily[0].missing, 1);
 assert.equal(res.body.daily[0].healthOnly + res.body.daily[0].both, 1);
@@ -114,11 +116,15 @@ assert.equal(SAFE.calls[0].alertId, 'A-call');
 assert.equal(SAFE.alerts.at(-1).fromCall, SAFE.calls[0].id);
 
 const elements = {
-  evMode: { value: 'day' }, evDay: { value: '2026-09-27' },
-  evMonth: { value: '2026-09' }, evResult: { textContent: '', innerHTML: '' },
+  statsMonthField: { classList: { contains: name => name === 'hidden' } },
+  statsDay: { value: '2026-09-27' }, statsMonth: { value: '2026-09' },
+  evResult: { textContent: '', innerHTML: '' },
 };
+const element = () => ({ value: '', textContent: '', innerHTML: '',
+  classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+});
 const ui = vm.createContext({
-  $: id => elements[id], S: { levels: { urgent: '긴급' } }, Date,
+  $: id => elements[id] || (elements[id] = element()), S: { levels: { urgent: '긴급' } }, Date,
   esc: value => String(value ?? '').replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char])),
   followupLabel: status => status, api: async () => evidence,
 });

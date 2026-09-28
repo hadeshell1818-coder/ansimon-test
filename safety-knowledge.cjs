@@ -25,6 +25,18 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   }
   async function call(query, options = {}) { return callResource('safety_documents', query, options); }
   function eq(value) { return encodeURIComponent(String(value)); }
+  async function searchApprovedLaws(queries) {
+    const terms = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
+      .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
+      .filter(term => term.length >= 2).slice(0, 10);
+    if (!terms.length) return [];
+    const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&kind=eq.law&review_status=eq.approved&limit=200');
+    const approved = new Map(documents.map(doc => [doc.id, doc]));
+    const found = await Promise.all(terms.map(term => callResource('safety_document_sections',
+      `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(term)}*&limit=12`).catch(() => [])));
+    const unique = new Map(found.flat().filter(section => approved.has(section.document_id)).map(section => [section.id, section]));
+    return [...unique.values()].map(section => ({ ...section, ...approved.get(section.document_id) }));
+  }
   async function ensureSifDocument(actor, fileName) {
     const existing = await call(`?select=id&source_url=eq.${eq(SIF_SOURCE_URL)}&limit=1`);
     if (existing[0]?.id) return existing[0].id;
@@ -221,16 +233,21 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const extracted = await callAi([{ role: 'system', content: '산업안전 위험 설명에서 검색할 한국어 핵심어 3~5개를 JSON으로 뽑으세요. 작업, 기인물, 사고형태를 우선합니다. 형식: {"queries":["..."]}' }, { role: 'user', content: description }], 160);
       const queries = [...new Set((Array.isArray(extracted.queries) ? extracted.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 5);
       const found = await Promise.all(queries.map(query => this.search(query).catch(() => ({ results: [], cases: [] }))));
-      const caseMap = new Map(); const docMap = new Map();
+      const lawFound = await searchApprovedLaws(queries).catch(() => []);
+      const caseMap = new Map(); const docMap = new Map(); const lawMap = new Map();
       for (const result of found) {
         for (const item of result.cases || []) caseMap.set(item.id, item);
         for (const item of result.results || []) for (const section of item.sections || []) {
           if (section.body) docMap.set(section.id, { ...section, title: item.title, publisher: item.publisher, kind: item.kind, source_url: item.source_url, review_status: item.review_status });
         }
       }
+      for (const section of lawFound) {
+        if (section.body) lawMap.set(section.id, { ...section, kind: 'law' });
+      }
       const evidence = [
-        ...[...caseMap.values()].slice(0, 35).map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
-        ...[...docMap.values()].slice(0, 15).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
+        ...[...caseMap.values()].slice(0, 25).map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
+        ...[...lawMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
+        ...[...docMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
       ];
       const draft = await callAi([
         { role: 'system', content: '당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 입력과 제공된 근거만 사용해 JSON으로 답하세요. 유사 사고사례의 원인과 감소대책을 우선 검토해 현장에 적용할 개선대책을 제안하세요. 관련된 현행 법령 또는 사업장 위험성평가 지침 조문이 제공된 경우 citations에 함께 포함하세요. 근거 없는 사실이나 법령 조항을 만들지 말고 다른 업종 사례의 적용 한계를 표시하세요. 개선대책은 위험 제거·대체·공학적 개선을 먼저 검토하고 관리적 조치와 보호구를 보완으로 제시하세요. 현재 평가는 상·중·하 3단계입니다. 상: 사망 또는 장애 위험, 법령 기준 미충족. 중: 요양 필요 위험, 아차사고 사례 있음. 하: 작업 수행에 영향 없는 경미한 부상·질병 예상. 상·중은 허용 불가능, 하만 허용 가능합니다. 위험성 수준은 담당자가 현장 확인 후 선택하므로 숫자 점수나 확정 등급을 제시하지 말고 판단에 필요한 현장정보를 rationale에 적으세요. SIF 검색 건수는 현장 발생빈도가 아닙니다. citations에는 제공된 ref만 넣으세요. 형식: {"factor":"유해위험요인","currentControl":"현재 조치 파악 필요 또는 확인된 조치","rationale":"판단 근거와 추가 현장 확인사항","measures":["대책 후보"],"citations":["ref"],"limitations":"근거의 한계"}' },
@@ -238,7 +255,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       ], 1000);
       const validRefs = new Set(evidence.map(item => item.ref));
       const citedEvidence = evidence.filter(item => (draft.citations || []).includes(item.ref)).slice(0, 8);
-      const legalReferences = citedEvidence.filter(item => item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침')).map(item =>
+      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || (item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item =>
         [item.title, item.locator, item.sourceUrl ? `(${item.sourceUrl})` : ''].filter(Boolean).join(' · '));
       return {
         factor: String(draft.factor || '').slice(0, 500), currentControl: String(draft.currentControl || '').slice(0, 500),
