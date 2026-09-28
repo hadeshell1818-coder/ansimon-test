@@ -1816,27 +1816,12 @@ const SEV_TEXT = { 1: '경미(1일~1주 미만 휴업)', 2: '소(1~4주 휴업)'
 const FREQ_TEXT = { 1: '거의 없음', 2: '낮음', 3: '보통', 4: '높음', 5: '매우 높음' };
 const RISK_THRESHOLD = 9; // 위험성 이 값 이상이면 허용불가(교재 예시: 9=허용불가, 6=허용)
 const RISK_CRITERIA = {
-  frequency: [
-    { score: 1, label: '최저', detail: '발생 가능성 거의 없음 · 노출이 드묾' },
-    { score: 2, label: '낮음', detail: '간헐적 노출 · 발생 가능성 낮음' },
-    { score: 3, label: '보통', detail: '반복 노출 · 발생 가능성이 보통' },
-    { score: 4, label: '높음', detail: '자주 노출 · 발생 가능성이 높음' },
-    { score: 5, label: '최대', detail: '매우 빈번한 노출 · 사고가 임박하거나 반복됨' },
-  ],
-  severity: [
-    { score: 1, label: '최소', detail: '휴업을 동반하지 않는 경미한 상해' },
-    { score: 2, label: '소', detail: '1~4주 휴업재해 수준' },
-    { score: 3, label: '중', detail: '4~12주 휴업재해 수준' },
-    { score: 4, label: '대', detail: '12~24주 휴업재해 수준' },
-    { score: 5, label: '최대', detail: '사망 또는 24주 이상 휴업재해 수준' },
-  ],
-  bands: [
-    { range: '16~25', label: '매우 높음', action: '즉시 작업중지 · 개선 후 재개' },
-    { range: '13~15', label: '높음', action: '개선대책을 즉시 수립·이행' },
-    { range: '9~12', label: '약간 높음', action: '개선대책을 세우고 허용 여부 재검토' },
-    { range: '8', label: '보통', action: '계획된 정비·보수 기간에 개선' },
-    { range: '4~6', label: '낮음', action: '표지·절차·교육 등 관리' },
-    { range: '1~3', label: '매우 낮음', action: '현 상태 유지 및 정기 확인' },
+  method: 'three-step-v1',
+  source: 'riskchecklist3step_guide.pdf 5페이지',
+  levels: [
+    { value: '상', label: '매우 높음', color: 'red', allow: false, detail: '사고 발생 시 사망 또는 장애가 남을 수 있는 위험\n산업안전보건법에 따른 기준을 만족하지 못하는 경우' },
+    { value: '중', label: '보통', color: 'yellow', allow: false, detail: '사고 발생 시 요양이 필요한 위험\n아차사고 사례가 있는 경우' },
+    { value: '하', label: '매우 낮음', color: 'green', allow: true, detail: '작업 수행에 영향을 미치지 않는 경미한 부상 또는 질병이 예상되는 경우' },
   ],
 };
 
@@ -1946,7 +1931,7 @@ function riskCalc(freq, sev) {
   return { risk, allow: risk < RISK_THRESHOLD, band: riskBand(risk) };
 }
 function itemForMgr(it) {
-  const c = riskCalc(it.frequency, it.severity);
+  const level = RISK_CRITERIA.levels.find(x => x.value === it.riskLevel);
   return {
     ...it,
     procName: it.customProcess || procById(it.proc)?.name || null,
@@ -1955,7 +1940,8 @@ function itemForMgr(it) {
     beforePhotoUrl: it.beforePhotoFile ? signedRiskUrl(it.id, "before") : null,
     afterPhotoUrl: it.afterPhotoFile ? signedRiskUrl(it.id, "after") : null,
     additionalPhotoUrls: (it.additionalPhotoFiles || []).map((_, i) => signedRiskUrl(it.id, `additional-${i}`)),
-    riskValue: c.risk, riskBand: c.band, allow: c.allow,
+    riskValue: level?.value || null, riskBand: null, allow: level ? level.allow : null,
+    legacyReviewRequired: !level && (it.frequency != null || it.severity != null),
     photoFile: undefined, beforePhotoFile: undefined, afterPhotoFile: undefined, additionalPhotoFiles: undefined,
   };
 }
@@ -2048,15 +2034,23 @@ app.patch('/api/risk/items/:id', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
+  if (['frequency','severity','afterRisk'].some(k => Object.hasOwn(b,k))) return res.status(400).json({error:'상·중·하 평가방식으로 변경되었습니다. 화면을 새로고침하세요.'});
+  if (Object.hasOwn(b,'riskLevel') && b.riskLevel !== null && !RISK_CRITERIA.levels.some(x => x.value === b.riskLevel)) return res.status(400).json({error:'위험성 수준은 상·중·하 중 선택하세요.'});
   const str = (k, max = 300) => { if (typeof b[k] === 'string') it[k] = b[k].slice(0, max); };
   if (b.proc && procById(b.proc)) { it.proc = b.proc; it.customProcess = null; }
   if (typeof b.customProcess === 'string') it.customProcess = b.customProcess.slice(0, 120) || null;
   if (b.hazard && HAZARD_TYPES[b.hazard]) it.hazard = b.hazard;
   str('factor'); str('currentControl'); str('fieldReview', 500); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
   if (Array.isArray(b.evidenceIds)) it.evidenceIds = b.evidenceIds.filter(x => typeof x === 'string').slice(0, 20);
-  const num = (k) => { if (b[k] === null) it[k] = null; else if (b[k] != null) { const n = +b[k]; if (n >= 1 && n <= 5) it[k] = n; } };
-  num('frequency'); num('severity'); num('afterRisk');
-  if (it.status === 'assessing' && it.frequency && it.severity) it.status = 'assessed';
+  str('assessmentTarget',200); str('evaluator',100); str('referenceText',1500);
+  if (Object.hasOwn(b,'riskLevel')) {
+    if(it.riskLevel !== b.riskLevel) {
+      it.assessmentHistory = [...(it.assessmentHistory||[]), {riskLevel:it.riskLevel||null,frequency:it.frequency,severity:it.severity,by:u.name,at:new Date().toISOString()}];
+    }
+    it.riskLevel=b.riskLevel; it.assessmentMethod='three-step-v1';
+  }
+  if (it.status === 'done' && (!it.riskLevel || !it.afterRiskLevel)) it.status = 'assessing';
+  if (['assessing','assessed'].includes(it.status)) it.status = it.riskLevel ? 'assessed' : 'assessing';
   it.updatedAt = new Date().toISOString(); it.assessedBy = u.name;
   saveRisk(); broadcastRisk();
   res.json({ ok: true, item: itemForMgr(it) });
@@ -2067,18 +2061,28 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
-  if (b.afterPhotoBase64) { try { it.afterPhotoFile = path.basename(savePhoto('risk-after-' + it.id, b.afterPhotoBase64)); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  if (b.afterRisk != null) { const n = +b.afterRisk; if (n >= 1 && n <= 25) it.afterRisk = n; }
-  if (typeof b.reduction === 'string') it.reduction = b.reduction.slice(0, 500);
-  if (typeof b.improvementSteps === 'string') it.improvementSteps = b.improvementSteps.slice(0, 3000);
-  if (typeof b.resultNote === 'string') it.resultNote = b.resultNote.slice(0, 1500);
+  if (!RISK_CRITERIA.levels.some(x => x.value === it.riskLevel)) return res.status(400).json({error:'현재 위험성 수준을 먼저 상·중·하로 평가해 저장하세요.'});
+  if (!RISK_CRITERIA.levels.some(x => x.value === b.afterRiskLevel)) return res.status(400).json({error:'개선 후 위험성 수준을 선택하세요.'});
+  if (typeof b.completedDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.completedDate) || !Number.isFinite(Date.parse(b.completedDate+'T00:00:00Z')) || new Date(b.completedDate+'T00:00:00Z').toISOString().slice(0,10)!==b.completedDate) return res.status(400).json({error:'개선 완료일을 확인하세요.'});
+  if (!String(b.resultNote||'').trim()) return res.status(400).json({error:'조치 결과·확인 내용을 입력하세요.'});
+  const updated = {...it, additionalPhotoFiles:[...(it.additionalPhotoFiles||[])]};
+  if (b.afterPhotoBase64) { try { updated.afterPhotoFile = path.basename(savePhoto('risk-after-' + updated.id, b.afterPhotoBase64)); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  updated.improvementHistory = [...(updated.improvementHistory||[]), {afterRiskLevel:updated.afterRiskLevel||null,afterRisk:updated.afterRisk,completedDate:updated.completedDate||null,reduction:updated.reduction,improvementSteps:updated.improvementSteps,resultNote:updated.resultNote,doneAt:updated.doneAt,by:u.name,at:new Date().toISOString()}];
+  updated.afterRiskLevel=b.afterRiskLevel; updated.completedDate=b.completedDate;
+  for(const k of ['owner','dueDate']) if(typeof b[k]==='string') it[k]=b[k].slice(0,100);
+  if (typeof b.reduction === 'string') updated.reduction = b.reduction.slice(0, 500);
+  if (typeof b.improvementSteps === 'string') updated.improvementSteps = b.improvementSteps.slice(0, 3000);
+  if (typeof b.resultNote === 'string') updated.resultNote = b.resultNote.slice(0, 1500);
   if (Array.isArray(b.additionalPhotosBase64)) {
-    it.additionalPhotoFiles = it.additionalPhotoFiles || [];
+    updated.additionalPhotoFiles = updated.additionalPhotoFiles || [];
     for (const data of b.additionalPhotosBase64.slice(0, 6)) {
-      try { it.additionalPhotoFiles.push(path.basename(savePhoto('risk-additional-' + it.id, data))); } catch (e) { return res.status(400).json({ error: e.message }); }
+      try { updated.additionalPhotoFiles.push(path.basename(savePhoto('risk-additional-' + updated.id, data))); } catch (e) { return res.status(400).json({ error: e.message }); }
     }
   }
-  it.status = 'done'; it.doneAt = new Date().toISOString(); it.improvedBy = u.name;
+  updated.status = b.afterRiskLevel === '하' ? 'done' : 'assessed';
+  updated.doneAt = updated.status === 'done' ? (updated.doneAt || new Date().toISOString()) : null;
+  updated.improvedBy = u.name; updated.resultUpdatedAt = new Date().toISOString();
+  Object.assign(it, updated);
   saveRisk(); broadcastRisk();
   res.json({ ok: true });
 });
@@ -2090,15 +2094,15 @@ app.get('/api/risk/report-summary', (req, res) => {
   const days = Math.min(365, Math.max(1, +req.query.days || 30));
   const since = Date.now() - days * 864e5;
   const inRange = RISK.items.filter(it => it.status !== 'inbox' && it.status !== 'discarded' && new Date(it.createdAt).getTime() >= since);
-  const assessed = inRange.filter(it => it.frequency && it.severity);
-  const highRisk = assessed.filter(it => it.frequency * it.severity >= RISK_THRESHOLD);
-  const done = highRisk.filter(it => it.status === 'done');
+  const assessed = inRange.filter(it => RISK_CRITERIA.levels.some(x => x.value === it.riskLevel));
+  const highRisk = assessed.filter(it => it.riskLevel !== '하');
+  const done = highRisk.filter(it => it.status === 'done' && it.afterRiskLevel === '하');
   const byProc = PROCESSES.map(p => ({ proc: p.name, count: inRange.filter(it => it.proc === p.id).length })).filter(x => x.count);
-  const improved = inRange.filter(it => it.status === 'done' && it.afterRisk != null && it.frequency && it.severity)
-    .map(it => ({ id: it.id, before: it.frequency * it.severity, after: it.afterRisk, factor: it.factor, proc: procById(it.proc)?.name }));
+  const improved = assessed.filter(it => it.afterRiskLevel)
+    .map(it => ({ id: it.id, before: it.riskLevel, after: it.afterRiskLevel, factor: it.factor, proc: procById(it.proc)?.name }));
   res.json({
     days, office: SAFETY_OFFICE, generatedAt: new Date().toISOString(),
-    total: inRange.length, assessed: assessed.length,
+    total: inRange.length, assessed: assessed.length, reviewRequired: inRange.length-assessed.length,
     highRisk: highRisk.length, highRiskDone: done.length,
     actionRate: highRisk.length ? Math.round(done.length / highRisk.length * 100) : null,
     pending: inRange.filter(it => it.status === 'assessing' || it.status === 'assessed').length,

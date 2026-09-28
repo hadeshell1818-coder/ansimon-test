@@ -172,14 +172,13 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         ...[...docMap.values()].slice(0, 15).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, excerpt: item.body })),
       ];
       const draft = await callAi([
-        { role: 'system', content: '당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 입력과 제공된 근거만 사용해 JSON으로 답하세요. 근거가 없는 것을 사실처럼 말하지 말고, 우체국 업무와 업종이 다른 사례는 전이 한계를 표시하세요. 개선대책은 가능한 경우 위험원 제거·대체·공학적 개선을 먼저 검토하고 관리적 조치와 보호구를 보완으로 제시하세요. 가능성·중대성 점수는 담당자 검토용 제안이며 확정값이 아닙니다. 외부 SIF 사례 건수로 해당 우체국의 빈도 점수를 산출하지 마세요. 입력에 현장 노출·작업 빈도와 인원 등 충분한 정보가 없으면 frequency는 null로 답하고 무엇을 확인할지 rationale에 적으세요. citations에는 제공된 ref 값만 넣으세요. 형식: {"factor":"유해위험요인","currentControl":"현재 조치 파악 필요 또는 확인된 조치","frequency":null,"severity":1,"rationale":"점수 제안 이유와 확인할 현장정보","measures":["대책 후보"],"citations":["ref"],"limitations":"근거의 한계와 추가 확인사항"}' },
+        { role: 'system', content: '당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 입력과 제공된 근거만 사용해 JSON으로 답하세요. 근거 없는 사실이나 법령 조항을 만들지 말고 다른 업종 사례의 적용 한계를 표시하세요. 개선대책은 위험 제거·대체·공학적 개선을 먼저 검토하고 관리적 조치와 보호구를 보완으로 제시하세요. 현재 평가는 상·중·하 3단계입니다. 상: 사망 또는 장애 위험, 법령 기준 미충족. 중: 요양 필요 위험, 아차사고 사례 있음. 하: 작업 수행에 영향 없는 경미한 부상·질병 예상. 상·중은 허용 불가능, 하만 허용 가능합니다. 위험성 수준은 담당자가 현장 확인 후 선택하므로 숫자 점수나 확정 등급을 제시하지 말고 판단에 필요한 현장정보를 rationale에 적으세요. SIF 검색 건수는 현장 발생빈도가 아닙니다. citations에는 제공된 ref만 넣으세요. 형식: {"factor":"유해위험요인","currentControl":"현재 조치 파악 필요 또는 확인된 조치","rationale":"판단 근거와 추가 현장 확인사항","measures":["대책 후보"],"citations":["ref"],"limitations":"근거의 한계"}' },
         { role: 'user', content: JSON.stringify({ description, evidence }) },
       ], 1000);
       const validRefs = new Set(evidence.map(item => item.ref));
       return {
         factor: String(draft.factor || '').slice(0, 500), currentControl: String(draft.currentControl || '').slice(0, 500),
-        frequency: Number.isInteger(+draft.frequency) && +draft.frequency >= 1 && +draft.frequency <= 5 ? +draft.frequency : null,
-        severity: Number.isInteger(+draft.severity) && +draft.severity >= 1 && +draft.severity <= 5 ? +draft.severity : null,
+        assessmentMethod: 'three-step-v1',
         rationale: String(draft.rationale || '').slice(0, 1500), measures: (Array.isArray(draft.measures) ? draft.measures : []).map(x => String(x).slice(0, 500)).slice(0, 6),
         citations: (Array.isArray(draft.citations) ? draft.citations : []).filter(ref => validRefs.has(ref)).slice(0, 8),
         evidence: evidence.filter(item => (draft.citations || []).includes(item.ref)).slice(0, 8),
