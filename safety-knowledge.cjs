@@ -1,5 +1,6 @@
 const seeds = require('./seed-assets/safety-sources.json');
 const { parseSifWorkbook, SIF_SOURCE_URL, SIF_TITLE, SIF_PUBLISHER } = require('./sif-import.cjs');
+const { fetchOfficialSafetySources } = require('./official-law-import.cjs');
 const crypto = require('crypto');
 
 function createKnowledgeRepository(env = process.env, request = fetch) {
@@ -63,7 +64,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const sections = await callResource('safety_document_sections', `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(q)}*&limit=50`);
       const cases = await callResource('safety_import_rows', `?select=id,document_id,source_sheet,source_row,domain,industry_large,industry_medium,industry_small,work_category,work_name,unit_work,incident_type,incident_summary,hazard_object,high_risk_situation,causal_factors,reduction_measures,review_status&or=(incident_summary.ilike.*${encodeURIComponent(q)}*,hazard_object.ilike.*${encodeURIComponent(q)}*,high_risk_situation.ilike.*${encodeURIComponent(q)}*,causal_factors.ilike.*${encodeURIComponent(q)}*,reduction_measures.ilike.*${encodeURIComponent(q)}*,industry_large.ilike.*${encodeURIComponent(q)}*,industry_medium.ilike.*${encodeURIComponent(q)}*,industry_small.ilike.*${encodeURIComponent(q)}*)&limit=40`);
       const byId = new Map(documents.map(item => [item.id, item]));
-      sections.forEach(section => { if (!byId.has(section.document_id)) byId.set(section.document_id, { id: section.document_id, title: '본문 근거', review_status: 'pending' }); });
+      const missingIds = [...new Set(sections.map(section => section.document_id).filter(id => !byId.has(id)))];
+      if (missingIds.length) {
+        const related = await call(`?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,source_version,original_file_name,storage_path&id=in.(${missingIds.join(',')})`);
+        related.forEach(item => byId.set(item.id, item));
+      }
       return { connected: true, results: [...byId.values()].map(doc => {
         const hits = sections.filter(section => section.document_id === doc.id).map(section => ({ ...section, body: section.body.slice(0, 500) }));
         if (doc.body_text && doc.body_text.toLowerCase().includes(q.toLowerCase())) {
@@ -78,6 +83,55 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       // Seed metadata only; never overwrite a reviewed record or upload source content.
       return call('?on_conflict=source_url', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
         body: JSON.stringify(seeds.map(item => ({ ...item, created_by: actor, review_status: 'pending' }))) });
+    },
+    async importOfficialLaws(actor) {
+      if (!configured) throw new Error('Supabase 미연결: 저장하지 않았습니다.');
+      const officialDocuments = await fetchOfficialSafetySources(env, request);
+      const imported = [];
+      for (const item of officialDocuments) {
+        const checkedAt = new Date().toISOString();
+        const rows = await call('?on_conflict=source_url', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify([{
+            title: item.metadata.title,
+            source_url: item.metadata.source_url,
+            publisher: item.metadata.publisher,
+            category: item.metadata.category,
+            kind: item.metadata.kind,
+            tags: item.metadata.tags,
+            jurisdiction: item.metadata.jurisdiction,
+            rights_note: '국가법령정보센터 공식 공개 원문. 실제 적용 전 시행일과 개정 여부를 공식 원문에서 다시 확인',
+            source_group: 'PUBLIC',
+            review_status: 'approved',
+            content_use_allowed: true,
+            effective_from: item.metadata.effective_from,
+            effective_until: null,
+            source_version: item.metadata.source_version,
+            checked_at: checkedAt,
+            reviewed_by: `공식 원문 확인 · ${actor}`,
+            created_by: actor,
+          }]),
+        });
+        const document = rows?.[0];
+        if (!document?.id) throw new Error(`${item.metadata.title} 자료 레코드를 저장하지 못했습니다.`);
+        const sectionRows = item.sections.map(section => ({
+          document_id: document.id,
+          version: item.metadata.source_version,
+          locator: section.locator,
+          body: section.body,
+          content_hash: section.content_hash,
+        }));
+        for (let index = 0; index < sectionRows.length; index += 100) {
+          await callResource('safety_document_sections', '?on_conflict=document_id,version,locator', {
+            method: 'POST',
+            headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify(sectionRows.slice(index, index + 100)),
+          });
+        }
+        imported.push({ id: document.id, title: item.metadata.title, version: item.metadata.source_version, sections: sectionRows.length });
+      }
+      return { imported, checkedAt: new Date().toISOString() };
     },
     async add(body, actor) {
       const title = String(body.title || '').trim();
@@ -234,6 +288,11 @@ function mountKnowledge(app, authorize, env) {
   app.post('/api/safety-knowledge/seed', async (req, res) => {
     try { res.json({ added: await repository.seed(req.knowledgeUser.id) }); }
     catch (error) { res.status(503).json({ error: error.message }); }
+  });
+  app.post('/api/safety-knowledge/import-official-laws', async (req, res) => {
+    if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 저장하지 않았습니다.' });
+    try { res.status(201).json(await repository.importOfficialLaws(req.knowledgeUser.id)); }
+    catch (error) { res.status(400).json({ error: error.message }); }
   });
   app.post('/api/safety-knowledge', async (req, res) => {
     if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 저장하지 않았습니다.' });

@@ -110,7 +110,8 @@ function renderSourceRows() {
 function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
-    <div class="row-btns"><button class="btn" id="seed-sources" onclick="seedSources()" ${connected ? '' : 'disabled'}>기본 출처 목록 등록</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" id="seed-sources" onclick="seedSources()" ${connected ? '' : 'disabled'}>기본 출처 목록 등록</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    <p class="workspace-note">국가법령정보센터의 현행 산업안전보건법·시행령·시행규칙·안전보건규칙과 사업장 위험성평가 지침을 조문 단위로 저장합니다. 시행예정본과 연혁본은 제외합니다.</p>
     <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
       <div><h3>SIF 고위험요인 아카이브 가져오기</h3><p>한국산업안전보건공단 공개 엑셀의 제조업 등·건설업 원자료를 업종, 공종, 기인물, 유발요인, 감소대책으로 나누어 검토대기 상태로 저장합니다.</p></div>
       <label>원본 XLSX<input id="sif-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required ${connected ? '' : 'disabled'}></label>
@@ -207,6 +208,19 @@ function searchLibrary() {
   }, 350);
 }
 async function reloadLibrary() { await refreshKnowledge(); if (tab === 'library') renderLibrary(); }
+async function importOfficialLaws() {
+  const button = $('import-official-laws');
+  button.disabled = true;
+  if ($('library-result')) $('library-result').textContent = '국가법령정보센터에서 현행 조문을 확인하고 Supabase에 저장 중입니다.';
+  try {
+    const result = await api('/api/safety-knowledge/import-official-laws', { method: 'POST' });
+    const sections = (result.imported || []).reduce((sum, item) => sum + Number(item.sections || 0), 0);
+    if ($('library-result')) $('library-result').textContent = `공식 법령 ${result.imported.length}종 · 조문/별표 ${sections.toLocaleString()}개를 저장했습니다.`;
+    await refreshKnowledge();
+    toast('공식 법령 현행본 적재 완료');
+  } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
+  finally { button.disabled = false; }
+}
 async function seedSources() {
   $('seed-sources').disabled = true;
   try {
