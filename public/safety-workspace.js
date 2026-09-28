@@ -101,7 +101,11 @@ function renderSourceRows() {
     const url = safeSourceUrl(item.source_url);
     return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small>${item.storage_path?`<button class="btn" style="margin-top:6px" onclick="openKnowledgeFile('${esc(item.id)}')">원본 파일 열기</button>`:''}</td>
       <td>Supabase 등록<small>${status[item.review_status] || '검토 대기'}</small></td>
-      <td>${esc(item.rights_note)}<small>${item.case_count ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록` : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
+      <td>${esc(item.rights_note)}<small>${item.case_count
+        ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록`
+        : item.section_count
+          ? `조문·본문 ${Number(item.section_count).toLocaleString()}개 저장 · 키워드 검색 가능`
+          : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
 function renderLibrary() {
