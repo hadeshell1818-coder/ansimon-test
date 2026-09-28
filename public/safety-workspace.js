@@ -87,10 +87,7 @@ function toggleEvidence(control, id, title) {
 function openCategoryLibrary(category) { libraryQuery = category; setTab('library'); }
 function sourceRows() {
   if (!knowledgeState) return [];
-  const documents = knowledgeState.documents || [];
-  const urls = new Set(documents.map(item => item.source_url));
-  return [...documents.map(item => ({ ...item, stored: true })),
-    ...knowledgeState.candidates.filter(item => !urls.has(item.source_url)).map(item => ({ ...item, stored: false }))];
+  return (knowledgeState.documents || []).map(item => ({ ...item, stored: true }));
 }
 function safeSourceUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''; }
@@ -103,14 +100,14 @@ function renderSourceRows() {
   $('source-rows').innerHTML = rows.map(item => {
     const url = safeSourceUrl(item.source_url);
     return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small>${item.storage_path?`<button class="btn" style="margin-top:6px" onclick="openKnowledgeFile('${esc(item.id)}')">원본 파일 열기</button>`:''}</td>
-      <td>${item.stored ? 'Supabase 등록' : '출처 후보 · 미적재'}<small>${status[item.review_status] || '검토 대기'}</small></td>
+      <td>Supabase 등록<small>${status[item.review_status] || '검토 대기'}</small></td>
       <td>${esc(item.rights_note)}<small>${item.case_count ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록` : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
 function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
-    <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" id="seed-sources" onclick="seedSources()" ${connected ? '' : 'disabled'}>기본 출처 목록 등록</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
     <p class="workspace-note">국가법령정보센터의 현행 산업안전보건법·시행령·시행규칙·안전보건규칙과 사업장 위험성평가 지침을 조문 단위로 저장합니다. 시행예정본과 연혁본은 제외합니다.</p>
     <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
       <div><h3>SIF 고위험요인 아카이브 가져오기</h3><p>한국산업안전보건공단 공개 엑셀의 제조업 등·건설업 원자료를 업종, 공종, 기인물, 유발요인, 감소대책으로 나누어 검토대기 상태로 저장합니다.</p></div>
