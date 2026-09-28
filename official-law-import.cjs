@@ -112,6 +112,16 @@ function administrativeRuleSections(payload) {
   return sections;
 }
 
+function uniqueSectionLocators(sections) {
+  const counts = new Map();
+  return sections.map(section => {
+    const base = section.locator;
+    const count = (counts.get(base) || 0) + 1;
+    counts.set(base, count);
+    return { ...section, locator: count === 1 ? base : `${base} · ${count}` };
+  });
+}
+
 async function fetchJson(request, pathname, params, apiCode) {
   const url = new URL(pathname, LAW_API_BASE);
   url.search = new URLSearchParams({ OC: apiCode, type: 'JSON', ...params }).toString();
@@ -181,7 +191,7 @@ async function fetchOfficialSafetySources(env = process.env, request = fetch) {
       ? await fetchLaw(source, request, apiCode)
       : await fetchAdministrativeRule(source, request, apiCode);
     if (!document.sections.length) throw new Error(`${source.title} 조문을 추출하지 못했습니다.`);
-    document.sections = document.sections.map(section => ({
+    document.sections = uniqueSectionLocators(document.sections).map(section => ({
       ...section,
       content_hash: crypto.createHash('sha256').update(section.body).digest('hex'),
     }));

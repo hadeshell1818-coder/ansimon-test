@@ -16,7 +16,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...options.headers },
       signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok) throw new Error(`자료실 연결 실패 (${response.status}). 프로젝트 설정과 SQL 적용 여부를 확인하세요.`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const message = detail ? detail.replace(/\s+/g, ' ').slice(0, 240) : '프로젝트 설정과 SQL 적용 여부를 확인하세요.';
+      throw new Error(`자료실 연결 실패 (${response.status}). ${message}`);
+    }
     return response.status === 204 || options.headers?.Prefer?.includes('return=minimal') ? null : response.json();
   }
   async function call(query, options = {}) { return callResource('safety_documents', query, options); }
