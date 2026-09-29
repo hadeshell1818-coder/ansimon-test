@@ -11,12 +11,12 @@ const ctx = vm.createContext({ RISK, Date, process, console,
   app: { patch: (p,h) => routes[p] = h, post: (p,h) => routes[p] = h, get: (p,h) => routes[p] = h },
   userFromReq: req => req.user, isSafetyMgr: u => u?.kind === 'safety_mgr',
   procById: () => ({ name: '시설물' }), PROCESSES: [], HAZARD_TYPES: {}, SAFETY_OFFICE: '시험 우체국',
-  saveRisk() {}, broadcastRisk() {}, signedRiskUrl: () => '/photo',
+  saveRisk() {}, broadcastRisk() {}, signedRiskUrl: () => '/photo', nextRiskId: () => 'RA2',
 });
 function load(start,end){ const i=source.indexOf(start); assert.ok(i>=0); const j=source.indexOf(end,i); assert.ok(j>i); vm.runInContext(source.slice(i,j),ctx); }
 load('const RISK_CRITERIA =', 'let RISK =');
 load('function itemForMgr(', '/* 이미지 서명');
-load("app.patch('/api/risk/items/:id'", "app.get('/api/risk/files/:id/:kind'");
+load("app.post('/api/risk/items/manual'", "app.get('/api/risk/files/:id/:kind'");
 const criteria=vm.runInContext('RISK_CRITERIA',ctx);
 assert.deepEqual(Array.from(criteria.levels,x=>[x.value,x.allow]),[['상',false],['중',false],['하',true]]);
 assert.equal(ctx.itemForMgr(legacy).riskValue,null);
@@ -26,6 +26,8 @@ function call(path,body={},actor=user){const res={code:200,status(c){this.code=c
 assert.equal(call('/api/risk/items/:id',{riskLevel:'상'},null).code,403);
 assert.equal(call('/api/risk/items/:id',{riskLevel:3}).code,400);
 assert.equal(call('/api/risk/items/:id',{frequency:3}).code,400);
+const manual=call('/api/risk/items/manual',{customProcess:'집배',factor:'계단 파손으로 넘어짐 위험'});
+assert.equal(manual.code,200);assert.equal(manual.body.item.source,'safety_mgr');assert.equal(manual.body.item.assessmentTarget,'집배');
 for(const value of ['상','중','하']){
   const res=call('/api/risk/items/:id',{riskLevel:value,assessmentTarget:'계단',evaluator:'김담당',referenceText:'현장 확인'});
   assert.equal(res.code,200);assert.equal(res.body.item.allow,value==='하');

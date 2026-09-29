@@ -1965,7 +1965,8 @@ app.get('/api/risk/state', async (req, res) => {
 });
 app.get('/api/risk/export.xlsx', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
-  const rows = RISK.items.filter(it => !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status)).map((it, index) => ({
+  const month = typeof req.query.month === 'string' && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : null;
+  const rows = RISK.items.filter(it => !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && (!month || String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 7) === month)).map((it, index) => ({
     번호: index + 1,
     공정명: it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '',
     '유해·위험요인': it.factor || '',
@@ -2043,12 +2044,36 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const dec = (req.body || {}).decision;
-  if (dec === 'promote') it.status = 'assessing';
+  if (dec === 'promote') { it.status = 'assessing'; it.assessmentStartedAt = it.assessmentStartedAt || new Date().toISOString(); }
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();
   saveRisk(); broadcastRisk();
   res.json({ ok: true });
+});
+
+/* 안전보건담당자가 현장에서 직접 발굴한 위험요인을 평가표에 등록한다. */
+app.post('/api/risk/items/manual', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
+  const b = req.body || {};
+  const customProcess = String(b.customProcess || '').trim().slice(0, 120);
+  const factor = String(b.factor || '').trim().slice(0, 300);
+  if (!customProcess || !factor) return res.status(400).json({ error: '공정명과 유해·위험요인을 입력하세요.' });
+  const now = new Date().toISOString();
+  const it = {
+    id: nextRiskId(), status: 'assessing', source: 'safety_mgr',
+    reporter: u.name, reporterOrg: u.org || null, reporterZone: null, createdAt: now,
+    assessmentStartedAt: now, triagedAt: now, triagedBy: u.name,
+    lat: null, lng: null, note: '', photoFile: null, proc: null, customProcess,
+    assessmentTarget: customProcess, evaluator: u.name, hazard: null, aiMode: 'manual', aiDraft: null,
+    factor, currentControl: null, fieldReview: null, evidenceIds: [], frequency: null, severity: null,
+    riskLevel: null, reduction: null, afterRisk: null, afterRiskLevel: null, dueDate: null,
+    dept: null, owner: null, workContent: null, referenceText: '',
+    beforePhotoFile: null, afterPhotoFile: null, additionalPhotoFiles: [],
+    improvementSteps: '', resultNote: '', doneAt: null,
+  };
+  RISK.items.unshift(it); saveRisk(); broadcastRisk();
+  res.json({ ok: true, id: it.id, item: itemForMgr(it) });
 });
 
 /* 위험성평가 저장(담당자 확정) */
@@ -2073,6 +2098,7 @@ app.patch('/api/risk/items/:id', (req, res) => {
   }
   if (it.status === 'done' && (!it.riskLevel || !it.afterRiskLevel)) it.status = 'assessing';
   if (['assessing','assessed'].includes(it.status)) it.status = it.riskLevel ? 'assessed' : 'assessing';
+  it.assessmentStartedAt = it.assessmentStartedAt || it.triagedAt || new Date().toISOString();
   it.updatedAt = new Date().toISOString(); it.assessedBy = u.name;
   saveRisk(); broadcastRisk();
   res.json({ ok: true, item: itemForMgr(it) });

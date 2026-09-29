@@ -24,10 +24,10 @@ async function main(){
   await page.locator('#tab-table').click();
   await page.getByText('위험성평가 작성기준',{exact:true}).click();
   assert.equal(await page.locator('.criteria-table tbody tr').count(),3);
-  assert.equal(await page.locator('.three-step thead th').count(),8);
+  assert.equal(await page.locator('.three-step thead th').count(),9);
   assert.equal(await page.locator('.three-step select').inputValue(),'상');
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-desktop.png'),fullPage:true});
-  await page.getByRole('button',{name:'상세·입력',exact:true}).click();
+  await page.getByRole('button',{name:/평가 (작성|수정)/}).click();
   assert.equal(await page.locator('#e-level').inputValue(),'상');
   assert.equal(await page.locator('#e-f').count(),0);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
