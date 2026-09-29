@@ -330,6 +330,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       if (!key) throw new Error('AI 추천 설정이 없습니다. 서버의 OPENAI_API_KEY를 확인하세요.');
       const description = String(body.description || '').trim().slice(0, 3000);
       if (description.length < 8) throw new Error('작업과 위험 상황을 조금 더 자세히 입력하세요.');
+      const suppliedPhoto = String(body.photoBase64 || '').trim();
+      const photoBase64 = suppliedPhoto.length <= 8 * 1024 * 1024 && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(suppliedPhoto)
+        ? suppliedPhoto : '';
+      const withPhoto = (text) => photoBase64 ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: photoBase64 } }] : text;
       const callAi = async (messages, maxTokens) => {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -340,7 +344,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         if (!response.ok) throw new Error(`AI 추천 실패 (${response.status})`);
         return JSON.parse(result.choices?.[0]?.message?.content || '{}');
       };
-      const extracted = await callAi([{ role: 'system', content: '산업안전 위험 설명에서 검색할 한국어 핵심어 3~5개를 JSON으로 뽑으세요. 작업, 기인물, 사고형태를 우선합니다. 형식: {"queries":["..."]}' }, { role: 'user', content: description }], 160);
+      const extracted = await callAi([{ role: 'system', content: '산업안전 위험 설명과 사진에서 검색할 한국어 핵심어 3~5개를 JSON으로 뽑으세요. 작업, 기인물, 사고형태를 우선합니다. 형식: {"queries":["..."]}' }, { role: 'user', content: withPhoto(description) }], 160);
       const queries = [...new Set((Array.isArray(extracted.queries) ? extracted.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 5);
       const found = await Promise.all(queries.map(query => this.search(query).catch(() => ({ results: [], cases: [] }))));
       const lawFound = await searchApprovedLaws(queries).catch(() => []);
@@ -385,7 +389,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       }
       const draft = await callAi([
         { role: 'system', content: '당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 입력과 제공된 근거만 사용해 JSON으로 답하세요. 유사 사고사례의 원인과 감소대책을 우선 검토해 현장에 적용할 개선대책을 제안하세요. 관련된 현행 법령 또는 사업장 위험성평가 지침 조문이 제공된 경우 citations에 함께 포함하세요. 근거 없는 사실이나 법령 조항을 만들지 말고 다른 업종 사례의 적용 한계를 표시하세요. 개선대책은 위험 제거·대체·공학적 개선을 먼저 검토하고 관리적 조치와 보호구를 보완으로 제시하세요. 현재 평가는 상·중·하 3단계입니다. 상: 사망 또는 장애 위험, 법령 기준 미충족. 중: 요양 필요 위험, 아차사고 사례 있음. 하: 작업 수행에 영향 없는 경미한 부상·질병 예상. 상·중은 허용 불가능, 하만 허용 가능합니다. 위험성 수준은 담당자가 현장 확인 후 선택하므로 숫자 점수나 확정 등급을 제시하지 말고 판단에 필요한 현장정보를 rationale에 적으세요. SIF 검색 건수는 현장 발생빈도가 아닙니다. citations에는 제공된 ref만 넣으세요. 형식: {"factor":"유해위험요인","currentControl":"현재 조치 파악 필요 또는 확인된 조치","rationale":"판단 근거와 추가 현장 확인사항","measures":["대책 후보"],"citations":["ref"],"limitations":"근거의 한계"}' },
-        { role: 'user', content: JSON.stringify({ description, evidence }) },
+        { role: 'user', content: withPhoto(JSON.stringify({ description, evidence })) },
       ], 1000);
       const validRefs = new Set(evidence.map(item => item.ref));
       const draftCitations = (Array.isArray(draft.citations) ? draft.citations : []).filter(ref => validRefs.has(ref));

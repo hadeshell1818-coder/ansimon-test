@@ -1882,9 +1882,9 @@ async function classifyHazardPhoto(item, photoBase64) {
     hazard = item.hazard || 'cut'; // 시연 기본값
   } else {
     try {
-      const prompt = `우체국 물류 현장에서 근로자가 신고한 "구조적 안전위험" 사진입니다. 다음 중 가장 맞는 위험유형 하나로 분류하세요.
+      const prompt = `우체국 물류 현장에서 근로자가 신고한 "구조적 안전위험" 사진입니다. 사진에서 확인되는 구체적인 위험 상황을 유해·위험요인 문장으로도 정리하세요. 다음 중 가장 맞는 위험유형 하나로 분류하세요.
 ${Object.entries(HAZARD_TYPES).map(([k, v]) => `- ${k}: ${v.label} (${v.factor})`).join('\n')}
-JSON만: {"hazard":"pinch|cut|fall|msds|elec|collision|slip|other"}`;
+JSON만: {"hazard":"pinch|cut|fall|msds|elec|collision|slip|other","factor":"사진에서 확인되는 구체적인 유해·위험요인"}`;
       const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST', signal: ctrl.signal,
@@ -1895,14 +1895,17 @@ JSON만: {"hazard":"pinch|cut|fall|msds|elec|collision|slip|other"}`;
       const j = await r.json();
       const p = JSON.parse(j.choices[0].message.content);
       hazard = types.includes(p.hazard) ? p.hazard : 'other'; aiMode = 'openai';
+      item.photoFactor = typeof p.factor === 'string' ? p.factor.trim().slice(0, 500) : '';
     } catch (e) { console.error('hazard classify fail', e.message); hazard = item.hazard || 'other'; aiMode = 'error'; }
   }
   const live = RISK.items.find(x => x.id === item.id); if (!live) return;
   const t = HAZARD_TYPES[hazard];
   live.hazard = hazard; live.aiMode = aiMode;
   if (!live.proc) live.proc = t.proc;
+  const photoFactor = live.photoFactor || t.factor;
+  live.factor = live.factor || photoFactor;
   live.aiDraft = {
-    factor: t.factor, severity: t.severity, severityText: SEV_TEXT[t.severity],
+    factor: photoFactor, severity: t.severity, severityText: SEV_TEXT[t.severity],
     controls: t.controls, hazardLabel: t.label,
   };
   const f = await estimateFrequency(live.proc, hazard);
@@ -2058,26 +2061,37 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
 });
 
 /* 안전보건담당자가 현장에서 직접 발굴한 위험요인을 평가표에 등록한다. */
-app.post('/api/risk/items/manual', (req, res) => {
+app.post('/api/risk/items/manual', async (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {};
   const customProcess = String(b.customProcess || '').trim().slice(0, 120);
   const factor = String(b.factor || '').trim().slice(0, 300);
   if (!customProcess) return res.status(400).json({ error: '공정명을 입력하세요.' });
   const now = new Date().toISOString();
+  const id = nextRiskId();
+  let photoFile = null;
+  if (b.photoBase64) {
+    try { photoFile = path.basename(savePhoto('risk-manual-' + id, b.photoBase64)); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   const it = {
-    id: nextRiskId(), status: 'assessing', source: 'safety_mgr',
+    id, status: 'assessing', source: 'safety_mgr',
     reporter: u.name, reporterOrg: u.org || null, reporterZone: null, createdAt: now,
     assessmentStartedAt: now, triagedAt: now, triagedBy: u.name,
-    lat: null, lng: null, note: '', photoFile: null, proc: null, customProcess,
+    lat: null, lng: null, note: '', photoFile, proc: null, customProcess,
     assessmentTarget: customProcess, evaluator: u.name, hazard: null, aiMode: 'manual', aiDraft: null,
     factor, currentControl: null, fieldReview: null, evidenceIds: [], frequency: null, severity: null,
     riskLevel: null, reduction: null, afterRisk: null, afterRiskLevel: null, dueDate: null,
     dept: null, owner: null, workContent: null, referenceText: '',
-    beforePhotoFile: null, afterPhotoFile: null, additionalPhotoFiles: [],
+    beforePhotoFile: photoFile, afterPhotoFile: null, additionalPhotoFiles: [],
     improvementSteps: '', resultNote: '', doneAt: null,
   };
   RISK.items.unshift(it); saveRisk(); broadcastRisk();
+  if (photoFile) {
+    try { await classifyHazardPhoto(it, b.photoBase64); }
+    catch (e) { console.error('manual risk photo classify fail', e.message); }
+  }
+  saveRisk(); broadcastRisk();
   res.json({ ok: true, id: it.id, item: itemForMgr(it) });
 });
 

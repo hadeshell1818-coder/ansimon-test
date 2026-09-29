@@ -326,13 +326,16 @@ function printSelectedProcess(){if(!processOutput){toast('출력할 공정을 �
 async function downloadRiskExcel(){try{const query='?from='+encodeURIComponent(assessmentStart)+'&to='+encodeURIComponent(assessmentEnd);const response=await fetch('/api/risk/export.xlsx'+query,{headers:{Authorization:'Bearer '+token}});if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error||'엑셀 다운로드에 실패했습니다.')}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='위험성평가표-'+assessmentStart+'-'+assessmentEnd+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message)}}
 
 function openManualRisk(){
- $('modalCard').innerHTML=`<h3>위험성평가 추가</h3><div class="psub">공정만 입력하면 해당 공정의 평가표에 항목을 추가할 수 있습니다. 유해·위험요인은 평가표 작성에서 입력합니다.</div><div class="fld"><label>공정명</label><input id="manual-process" placeholder="예: 접수, 소포, 집배"></div><div class="row-btns"><button class="btn primary" onclick="submitManualRisk()">평가표에 추가</button><button class="btn" onclick="closeModal()">취소</button></div>`;
+ $('modalCard').innerHTML=`<h3>위험성평가 추가</h3><div class="psub">공정과 현장 사진을 등록하면 사진에서 유해·위험요인을 추정해 평가표 작성에 반영합니다. 유해·위험요인은 이후 직접 수정할 수 있습니다.</div><div class="fld"><label>공정명</label><input id="manual-process" placeholder="예: 접수, 소포, 집배"></div><div class="fld"><label>현장 사진(선택)</label><input type="file" accept="image/*" id="manual-photo"><small>사진이 있으면 AI가 위험유형과 유해·위험요인 초안을 제안합니다.</small></div><div class="row-btns"><button class="btn primary" onclick="submitManualRisk()">평가표에 추가</button><button class="btn" onclick="closeModal()">취소</button></div>`;
  $('modal').classList.add('on');
 }
 async function submitManualRisk(){
  const customProcess=$('manual-process').value.trim();
  if(!customProcess){toast('공정명을 입력하세요.');return}
- try{const result=await api('/api/risk/items/manual',{method:'POST',body:JSON.stringify({customProcess})});closeModal();await load();editRow(result.id)}catch(e){toast(e.message)}
+ let photoBase64='';
+ const file=$('manual-photo')?.files?.[0];
+ if(file){try{photoBase64=await fileToDataUrl(file)}catch(e){toast('사진 처리에 실패했습니다. 다시 선택하세요.');return}}
+ try{const result=await api('/api/risk/items/manual',{method:'POST',body:JSON.stringify({customProcess,photoBase64})});closeModal();await load();editRow(result.id)}catch(e){toast(e.message)}
 }
 
 function editRow(id){
@@ -403,7 +406,9 @@ async function requestRiskAdvice(id){
   if(!description){toast('유해·위험요인을 먼저 입력하세요.');return}
   host.innerHTML='<small>사례와 문서 내용을 찾고 대책 초안을 만드는 중입니다.</small>';
   try{
-    riskAdviceDraft=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description})});
+    let photoBase64='';
+    if(it.photoUrl||it.beforePhotoUrl){try{const response=await fetch(it.photoUrl||it.beforePhotoUrl);if(response.ok) photoBase64=await fileToDataUrl(new File([await response.blob()],'risk-photo.jpg',{type:'image/jpeg'}));}catch(_){} }
+    riskAdviceDraft=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description,photoBase64})});
     const d=riskAdviceDraft;
     const evidence=[...new Map([...selectedEvidence,...d.citations.map(ref=>({id:ref,title:`AI 추천 근거 ${ref}`}))].map(item=>[item.id,item])).values()];
     const review=d.review||{};
