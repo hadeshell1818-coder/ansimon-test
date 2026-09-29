@@ -814,6 +814,7 @@ function openDetail(id){
   }
   if(r.urgent) b+=row('긴급도', `<span style="color:var(--post);font-weight:800">🚨 긴급 (신고자 지정)</span>`);
   b+=row('현재 상태', `<span class="status-pill" style="background:${st.color}">${st.label}</span>`);
+  if(r.externalTransfer&&r.externalTransfer.status==='assigned') b+=row('관할 이관', `<span style="font-weight:800">${r.externalTransfer.organization} ${r.externalTransfer.department}</span><br><small style="color:var(--ink-2)">${r.externalTransfer.assignmentMode||'안심ON 관할 배정'} · ${r.externalTransfer.assignedAt?fmtFull(new Date(r.externalTransfer.assignedAt)):''}</small>`);
   b+=row('신고자', who);
   b+=row('접수 시각', fmtFull(r.createdAt));
   if(r.type==='welfare'&&r.welfare){const w=r.welfare;

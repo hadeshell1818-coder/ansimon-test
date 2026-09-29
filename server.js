@@ -509,6 +509,24 @@ function reportRoute(r) {
       /우체국|우편집중국|집배센터/.test(r.addr || '')) return 'confirmation';
   return 'external';
 }
+function jangheungDestination(r) {
+  if (r.region !== '장흥군' || !['safe', 'env', 'welfare'].includes(r.type)) return null;
+  const department = { safe: '교통과', env: '환경과', welfare: '복지과' }[r.type] || '교통과';
+  const accountId = { safe: 'jang1', env: 'jang2', welfare: 'jang3' }[r.type];
+  return { organization: '장흥군청', department, accountId, status: 'assigned' };
+}
+function syncRiskSource(it) {
+  if (!it?.fromReport) return;
+  const source = reports.find(r => r.id === it.fromReport);
+  if (!source) return;
+  const status = it.status === 'discarded' ? '오신고 폐기'
+    : it.status === 'done' ? '개선완료'
+    : it.status === 'assessed' ? '평가완료'
+    : it.status === 'assessing' ? '위험성평가 진행중' : '위험성평가 대기';
+  source.riskHandling = { status, riskId: it.id, updatedAt: new Date().toISOString(),
+    by: it.triagedBy || it.assessedBy || it.improvedBy || null,
+    triagedAt: it.triagedAt || null, discardReason: it.discardReason || null };
+}
 function routeReport(r) {
   const routing = reportRoute(r);
   if (r.routing !== routing) {
@@ -516,12 +534,18 @@ function routeReport(r) {
     r.routingHistory.push({from:r.routing, to:routing, at:new Date().toISOString()});
   }
   r.routing = routing;
+  if (routing === 'external') {
+    const destination = jangheungDestination(r);
+    if (destination) r.externalTransfer = { ...destination, assignedAt: r.externalTransfer?.assignedAt || new Date().toISOString(), assignmentMode: '안심ON 관할 자동 배정' };
+  } else if (r.externalTransfer?.status === 'assigned') {
+    r.externalTransfer = { ...r.externalTransfer, status: 'withdrawn', withdrawnAt: new Date().toISOString() };
+  }
   const existing = RISK.items.find(it => it.fromReport === r.id);
   if (routing !== 'internal') {
     if (existing) { existing.routingInactive = true; saveRisk(); broadcastRisk(); }
     return;
   }
-  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.internalNote||r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; saveRisk(); broadcastRisk(); return; }
+  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.internalNote||r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; syncRiskSource(existing); saveRisk(); broadcastRisk(); return; }
   const photoFile = r.photoUrl ? path.basename(r.photoUrl.split('?')[0]) : null;
   const item = {
     id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier',
@@ -535,12 +559,14 @@ function routeReport(r) {
   };
   RISK.items.unshift(item);
   r.riskId=item.id;
+  syncRiskSource(item);
   saveRisk(); broadcastRisk();
 }
 app.get('/api/reports/:id/routing', (req,res) => {
   const u=userFromReq(req), r=reports.find(x=>x.id===req.params.id);
   if(!u || !r || r.carrierId!==u.id) return res.status(404).json({error:'not found'});
   res.json({id:r.id,routing:r.routing||'external',type:r.type,addr:r.addr,
+    destination:r.externalTransfer||null,
     aiMode:r.aiMode||null,classificationPending:r.aiMode==null||r.aiMode==='pending'});
 });
 app.post('/api/reports/:id/routing', (req,res) => {
@@ -1935,6 +1961,7 @@ function riskCalc(freq, sev) {
 }
 function itemForMgr(it) {
   const level = RISK_CRITERIA.levels.find(x => x.value === it.riskLevel);
+  const source = it.fromReport ? reports.find(r => r.id === it.fromReport) : null;
   return {
     ...it,
     procName: it.customProcess || procById(it.proc)?.name || null,
@@ -1944,6 +1971,12 @@ function itemForMgr(it) {
     afterPhotoUrl: it.afterPhotoFile ? signedRiskUrl(it.id, "after") : null,
     additionalPhotoUrls: (it.additionalPhotoFiles || []).map((_, i) => signedRiskUrl(it.id, `additional-${i}`)),
     riskValue: level?.value || null, riskBand: null, allow: level ? level.allow : null,
+    sourceReport: source ? {
+      id: source.id, reporter: source.carrier || source.reporter || it.reporter || '-',
+      createdAt: source.createdAt, addr: source.addr || '', item: source.item || '우체국 내부 업무위험',
+      note: source.internalNote || source.memo || '', status: source.status || 'received',
+      routing: source.routing || null, riskHandling: source.riskHandling || null,
+    } : null,
     legacyReviewRequired: !level && (it.frequency != null || it.severity != null),
     photoFile: undefined, beforePhotoFile: undefined, afterPhotoFile: undefined, additionalPhotoFiles: undefined,
   };
@@ -2056,7 +2089,8 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();
-  saveRisk(); broadcastRisk();
+  syncRiskSource(it);
+  saveRisk(); save(); broadcastRisk();
   res.json({ ok: true });
 });
 
@@ -2119,7 +2153,8 @@ app.patch('/api/risk/items/:id', (req, res) => {
   if (['assessing','assessed'].includes(it.status)) it.status = it.riskLevel ? 'assessed' : 'assessing';
   it.assessmentStartedAt = it.assessmentStartedAt || it.triagedAt || new Date().toISOString();
   it.updatedAt = new Date().toISOString(); it.assessedBy = u.name;
-  saveRisk(); broadcastRisk();
+  syncRiskSource(it);
+  saveRisk(); save(); broadcastRisk();
   res.json({ ok: true, item: itemForMgr(it) });
 });
 
@@ -2150,7 +2185,8 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   updated.doneAt = updated.status === 'done' ? (updated.doneAt || new Date().toISOString()) : null;
   updated.improvedBy = u.name; updated.resultUpdatedAt = new Date().toISOString();
   Object.assign(it, updated);
-  saveRisk(); broadcastRisk();
+  syncRiskSource(it);
+  saveRisk(); save(); broadcastRisk();
   res.json({ ok: true });
 });
 
@@ -2167,13 +2203,24 @@ app.get('/api/risk/report-summary', (req, res) => {
   const byProc = PROCESSES.map(p => ({ proc: p.name, count: inRange.filter(it => it.proc === p.id).length })).filter(x => x.count);
   const improved = assessed.filter(it => it.afterRiskLevel)
     .map(it => ({ id: it.id, before: it.riskLevel, after: it.afterRiskLevel, factor: it.factor, proc: procById(it.proc)?.name }));
+  const internalIntakes = RISK.items
+    .filter(it => it.fromReport && new Date(it.createdAt).getTime() >= since)
+    .map(it => {
+      const source = reports.find(r => r.id === it.fromReport);
+      return { id: it.id, reportId: it.fromReport, reporter: source?.carrier || it.reporter || '-', createdAt: source?.createdAt || it.createdAt,
+        addr: source?.addr || it.addr || '', note: source?.internalNote || source?.memo || it.note || '',
+        status: it.status, handlingStatus: source?.riskHandling?.status || '위험성평가 대기', handledBy: source?.riskHandling?.by || null,
+        handledAt: source?.riskHandling?.updatedAt || null };
+    });
   res.json({
     days, office: SAFETY_OFFICE, generatedAt: new Date().toISOString(),
     total: inRange.length, assessed: assessed.length, reviewRequired: inRange.length-assessed.length,
     highRisk: highRisk.length, highRiskDone: done.length,
     actionRate: highRisk.length ? Math.round(done.length / highRisk.length * 100) : null,
     pending: inRange.filter(it => it.status === 'assessing' || it.status === 'assessed').length,
-    byProc, improved,
+    byProc, improved, internalIntakes,
+    internalIntakeTotal: internalIntakes.length,
+    internalIntakePending: internalIntakes.filter(x => ['inbox', 'assessing'].includes(x.status)).length,
     dataSource: process.env.RA_SOURCE === 'supabase' ? 'supabase' : 'sample',
   });
 });
@@ -2232,6 +2279,23 @@ function ensureRiskDemo() {
 }
 
 loadRisk();
+// 기존 내부위험 접수도 원본 신고와 처리 상태가 위험성평가 통계에 남도록 한 번 연결한다.
+let riskSourceMigrated = false;
+for (const it of RISK.items) {
+  if (!it.fromReport) continue;
+  const source = reports.find(r => r.id === it.fromReport);
+  if (source && !source.riskHandling) { syncRiskSource(it); riskSourceMigrated = true; }
+}
+if (riskSourceMigrated) { saveRisk(); save(); }
+let externalRoutingMigrated = false;
+for (const report of reports) {
+  const destination = reportRoute(report) === 'external' ? jangheungDestination(report) : null;
+  if (destination && !report.externalTransfer) {
+    report.externalTransfer = { ...destination, assignedAt: report.createdAt || new Date().toISOString(), assignmentMode: '안심ON 관할 자동 배정' };
+    externalRoutingMigrated = true;
+  }
+}
+if (externalRoutingMigrated) save();
 
 require('./safety-knowledge.cjs').mountKnowledge(app, req => {
   const user = userFromReq(req);

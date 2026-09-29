@@ -692,7 +692,7 @@ async function reportRoutingScreen(id){
         actions.innerHTML='';
         return true;
       }
-      state.textContent=r.routing==='internal'?'우체국 안전관리담당자에게 접수되었습니다.':'외부 관할 담당부서 접수함으로 배정되었습니다.';
+      state.textContent=r.routing==='internal'?'우체국 안전관리담당자에게 접수되었습니다.':(r.destination?`${r.destination.organization} ${r.destination.department} 접수함으로 배정되었습니다.`:'외부 관할 담당부서 접수함으로 배정되었습니다.');
       actions.innerHTML='<button class="save">홈으로</button>';
       actions.firstElementChild.onclick=home;
       return false;
