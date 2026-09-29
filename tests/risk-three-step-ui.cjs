@@ -24,14 +24,18 @@ async function main(){
   await page.locator('#tab-table').click();
   await page.getByText('위험성평가 작성기준',{exact:true}).click();
   assert.equal(await page.locator('.criteria-table tbody tr').count(),3);
-  assert.equal(await page.locator('.three-step thead th').count(),9);
+  assert.equal(await page.locator('.three-step thead th').count(),10);
   assert.equal(await page.locator('.three-step select').inputValue(),'상');
+  assert.equal(await page.getByRole('button',{name:'전체 보기',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'3개월',exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'공정별 출력',exact:true}).count(),1);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-desktop.png'),fullPage:true});
   await page.getByRole('button',{name:/평가 (작성|수정)/}).click();
-  assert.equal(await page.locator('#e-level').inputValue(),'상');
-  assert.equal(await page.locator('#e-f').count(),0);
+  assert.equal(await page.locator('#e-level').count(),0);
+  assert.equal(await page.locator('#e-red').count(),0);
+  assert.equal(await page.getByRole('button',{name:'AI로 초안 작성',exact:true}).count(),1);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
-  await page.getByRole('button',{name:'이행결과서',exact:true}).click();
+  await page.getByRole('button',{name:'보기·수정',exact:true}).click();
   assert.equal(await page.locator('.result-photo').count(),2);
   assert.match(await page.locator('.result-plan').innerText(),/담당자\(관리감독자\)/);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-result.png'),fullPage:true});
@@ -43,20 +47,13 @@ async function main(){
   assert.equal(await popup.locator('.ratable').count(),0,'result print must exclude the background assessment');
   await popup.close();
   await page.getByRole('button',{name:'닫기',exact:true}).click();
-  const blankEvent=page.waitForEvent('popup');await page.getByRole('button',{name:'빈 양식 인쇄'}).click();
-  const blank=await blankEvent;await blank.waitForLoadState();
-  assert.equal(await blank.locator('tbody tr').count(),5);
-  assert.doesNotMatch(await blank.locator('body').innerText(),/계단 파손|김담당|비계설치/);
-  await blank.pdf({path:path.join(os.tmpdir(),'risk-three-step-blank.pdf'),preferCSSPageSize:true});
-  await blank.screenshot({path:path.join(os.tmpdir(),'risk-three-step-blank.png'),fullPage:true});
-  await blank.close();
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflow');
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-mobile.png'),fullPage:true});
   await page.getByRole('button',{name:'이행결과서',exact:true}).click();
   assert.ok(await page.locator('#modalCard').evaluate(el=>el.scrollWidth<=el.clientWidth),'mobile result overflow');
   assert.deepEqual(errors,[]);
-  console.log('PASS: desktop/mobile, 3-level editor, 8-column blank form and isolated result printing');
+  console.log('PASS: desktop/mobile, period filters, compact editor, 10-column form and isolated result printing');
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

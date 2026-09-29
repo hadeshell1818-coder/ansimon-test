@@ -1965,8 +1965,13 @@ app.get('/api/risk/state', async (req, res) => {
 });
 app.get('/api/risk/export.xlsx', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
-  const month = typeof req.query.month === 'string' && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : null;
-  const rows = RISK.items.filter(it => !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && (!month || String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 7) === month)).map((it, index) => ({
+  const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : null;
+  const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : null;
+  if (!from || !to || from > to) return res.status(400).json({ error: '조회 시작일과 종료일을 확인하세요.' });
+  const rows = RISK.items.filter(it => {
+    const date = String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 10);
+    return !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
+  }).map((it, index) => ({
     번호: index + 1,
     공정명: it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '',
     '유해·위험요인': it.factor || '',
@@ -2044,7 +2049,7 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const dec = (req.body || {}).decision;
-  if (dec === 'promote') { it.status = 'assessing'; it.assessmentStartedAt = it.assessmentStartedAt || new Date().toISOString(); }
+  if (dec === 'promote') { it.status = 'assessing'; it.assessmentStartedAt = it.assessmentStartedAt || new Date().toISOString(); it.evaluator = it.evaluator || u.name; }
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();
