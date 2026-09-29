@@ -40,6 +40,17 @@ async function main() {
   assert.equal(uploadedRecord.source_url, null);
   assert.equal(uploadedRecord.body_text, '계단 파손과 미끄러짐 예방');
   assert.equal(uploadedRecord.review_status, 'pending');
+  const approvalCalls = [];
+  const approvalRepo = createKnowledgeRepository({ ...configured, OPENAI_API_KEY: 'test-openai-key' }, async (url, options) => {
+    approvalCalls.push({ url: String(url), options });
+    if (String(url).includes('/safety_documents')) return { ok: true, status: 201, json: async () => [{ id: 'external-doc' }] };
+    return { ok: true, status: 201, json: async () => [] };
+  });
+  const approved = await approvalRepo.approveExternal([{ title: '공식 안전지침', url: 'https://kosha.or.kr/guide', publisher: '한국산업안전보건공단', kind: 'guideline', locator: '제1장', excerpt: '적재물 전도 방지', measure: '적재 상태를 점검한다.' }], 'manager');
+  assert.equal(approved.count, 1);
+  const documentCall = approvalCalls.find(call => call.options.body);
+  assert.equal(JSON.parse(documentCall.options.body)[0].review_status, 'approved');
+  assert.equal((await approvalRepo.approveExternal([{ title: '임의 자료', url: 'https://example.com/a', publisher: '임의기관', excerpt: '근거' }], 'manager')).count, 0);
   const searchRepo = createKnowledgeRepository(configured, async url => {
     const path = new URL(url).pathname;
     if (path.endsWith('/safety_documents')) return { ok: true, status: 200, json: async () => [{ id: 'doc-1', title: '점검 지침', publisher: '우체국', review_status: 'pending', body_text: '계단 파손은 미끄러짐과 넘어짐 사고를 유발할 수 있다.' }] };

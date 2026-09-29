@@ -3,10 +3,43 @@ const { parseSifWorkbook, SIF_SOURCE_URL, SIF_TITLE, SIF_PUBLISHER } = require('
 const { fetchOfficialSafetySources } = require('./official-law-import.cjs');
 const crypto = require('crypto');
 
+const DEFAULT_EXTERNAL_DOMAINS = [
+  'law.go.kr',
+  'kosha.or.kr',
+  'moel.go.kr',
+  'koreapost.go.kr',
+  'data.go.kr',
+];
+
+function externalDomains(env) {
+  return String(env.SAFETY_EXTERNAL_ALLOWED_DOMAINS || DEFAULT_EXTERNAL_DOMAINS.join(','))
+    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+}
+
+function isAllowedExternalUrl(value, domains) {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    return parsed.protocol === 'https:' && domains.some(domain => host === domain || host.endsWith(`.${domain}`));
+  } catch (_) { return false; }
+}
+
+function responseText(result) {
+  if (typeof result?.output_text === 'string') return result.output_text;
+  return (result?.output || []).flatMap(item => item.content || [])
+    .map(item => item.text || item.value || '').filter(Boolean).join('\n');
+}
+
+function jsonFromResponse(result) {
+  const text = responseText(result).replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  try { return JSON.parse(text); } catch (_) { return {}; }
+}
+
 function createKnowledgeRepository(env = process.env, request = fetch) {
   const url = env.SAFETY_SUPABASE_URL;
   const key = env.SAFETY_SUPABASE_SERVICE_KEY;
   const configured = Boolean(url && key);
+  const allowedExternalDomains = externalDomains(env);
   async function callResource(resource, query, options = {}) {
     if (!configured) throw new Error('Supabase 연결 설정이 필요합니다.');
     const base = new URL(url);
@@ -36,6 +69,36 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(term)}*&limit=12`).catch(() => [])));
     const unique = new Map(found.flat().filter(section => approved.has(section.document_id)).map(section => [section.id, section]));
     return [...unique.values()].map(section => ({ ...section, ...approved.get(section.document_id) }));
+  }
+  async function searchExternalSources(description, queries) {
+    const openAiKey = env.OPENAI_API_KEY;
+    if (!openAiKey || env.SAFETY_EXTERNAL_SEARCH === 'off') return { configured: false, sources: [], message: '외부 공식자료 검색이 설정되지 않았습니다.' };
+    const response = await request('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
+      body: JSON.stringify({
+        model: env.SAFETY_EXTERNAL_SEARCH_MODEL || 'gpt-4o-mini',
+        tools: [{ type: 'web_search', filters: { allowed_domains: allowedExternalDomains }, search_context_size: 'high' }],
+        store: false,
+        input: `산업안전 위험성평가의 공식 외부 근거를 찾아주세요. 일반 블로그·쇼핑몰·커뮤니티는 제외하고, 허용된 공식기관 도메인의 원문만 사용하세요. 유해요인: ${description}\n검색어: ${queries.join(', ')}\n반드시 JSON만 반환하세요. 형식: {"sources":[{"title":"자료 제목","url":"https://...","publisher":"기관명","publishedAt":"발행일 또는 빈 문자열","kind":"law|guideline|incident","locator":"조항·장·페이지 또는 빈 문자열","hazard":"관련 유해요인","measure":"원문에서 확인한 예방·감소대책","excerpt":"원문 근거 요약"}],"limitations":"검색 한계"}`,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`외부 공식자료 검색 실패 (${response.status})`);
+    const result = await response.json();
+    const parsed = jsonFromResponse(result);
+    const sources = (Array.isArray(parsed.sources) ? parsed.sources : []).map(source => ({
+      title: String(source.title || '').trim().slice(0, 200),
+      url: String(source.url || '').trim().slice(0, 2000),
+      publisher: String(source.publisher || '').trim().slice(0, 120),
+      publishedAt: String(source.publishedAt || '').trim().slice(0, 40),
+      kind: ['law', 'guideline', 'incident'].includes(source.kind) ? source.kind : 'guideline',
+      locator: String(source.locator || '').trim().slice(0, 160),
+      hazard: String(source.hazard || '').trim().slice(0, 500),
+      measure: String(source.measure || '').trim().slice(0, 1000),
+      excerpt: String(source.excerpt || '').trim().slice(0, 1800),
+    })).filter(source => source.title && source.url && source.publisher && isAllowedExternalUrl(source.url, allowedExternalDomains) && (source.measure || source.excerpt)).slice(0, 8);
+    return { configured: true, sources, limitations: String(parsed.limitations || '').slice(0, 800), domains: allowedExternalDomains };
   }
   async function ensureSifDocument(actor, fileName) {
     const existing = await call(`?select=id&source_url=eq.${eq(SIF_SOURCE_URL)}&limit=1`);
@@ -166,6 +229,53 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         jurisdiction: '미확인', tags: [], rights_note: '이용조건 확인 필요', review_status: 'pending', created_by: actor,
       }) });
     },
+    async approveExternal(sources, actor) {
+      if (!configured) throw new Error('Supabase 미연결: 외부자료를 저장하지 않았습니다.');
+      if (!Array.isArray(sources) || !sources.length) throw new Error('승인할 외부자료가 없습니다.');
+      const approved = [];
+      for (const source of sources.slice(0, 8)) {
+        const urlValue = String(source.url || '').trim();
+        if (!isAllowedExternalUrl(urlValue, allowedExternalDomains)) continue;
+        const title = String(source.title || '').trim().slice(0, 200);
+        const publisher = String(source.publisher || '').trim().slice(0, 120);
+        const excerpt = String(source.excerpt || '').trim().slice(0, 1800);
+        const measure = String(source.measure || '').trim().slice(0, 1000);
+        if (!title || !publisher || (!excerpt && !measure)) continue;
+        const checkedAt = new Date().toISOString();
+        const rows = await call('?on_conflict=source_url', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify([{
+            title, source_url: urlValue, publisher, category: 'general',
+            kind: ['law', 'guideline', 'incident'].includes(source.kind) ? source.kind : 'guideline',
+            tags: ['외부공식자료', '위험성평가'], jurisdiction: '대한민국',
+            rights_note: '공식 원문 이용조건과 최신성을 담당자가 확인함', source_group: 'PUBLIC',
+            review_status: 'approved', content_use_allowed: true,
+            source_version: String(source.publishedAt || checkedAt.slice(0, 10)).slice(0, 80),
+            checked_at: checkedAt, reviewed_by: actor, created_by: actor,
+            body_text: [excerpt, measure].filter(Boolean).join('\n').slice(0, 500000),
+          }]),
+        });
+        const document = rows?.[0] || (await call(`?select=id&source_url=eq.${eq(urlValue)}&limit=1`))[0];
+        if (!document?.id) continue;
+        const body = [excerpt, measure].filter(Boolean).join('\n').slice(0, 5000);
+        if (body) {
+          await callResource('safety_document_sections', '?on_conflict=document_id,version,locator', {
+            method: 'POST',
+            headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify([{
+              document_id: document.id,
+              version: String(source.publishedAt || checkedAt.slice(0, 10)).slice(0, 80),
+              locator: String(source.locator || '외부 검색 결과').slice(0, 160),
+              body,
+              content_hash: crypto.createHash('sha256').update(body).digest('hex'),
+            }]),
+          });
+        }
+        approved.push({ id: document.id, title, url: urlValue, publisher });
+      }
+      return { approved, count: approved.length };
+    },
     async uploadDocument(body, actor) {
       if (!configured) throw new Error('Supabase 미연결: 저장하지 않았습니다.');
       const name = String(body.fileName || '').replace(/[\\/\r\n]/g, '_').slice(0, 180);
@@ -249,6 +359,30 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         ...[...lawMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
         ...[...docMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
       ];
+      let sourceOrigin = evidence.length ? 'internal' : 'none';
+      let externalSearch = { configured: Boolean(env.OPENAI_API_KEY && env.SAFETY_EXTERNAL_SEARCH !== 'off'), sources: [], limitations: '' };
+      if (!evidence.length) {
+        try {
+          externalSearch = await searchExternalSources(description, queries);
+          externalSearch.sources.forEach((source, index) => evidence.push({
+            ref: `external:${index}`,
+            type: '외부 공식자료',
+            status: 'pending',
+            title: source.title,
+            publisher: source.publisher,
+            kind: source.kind,
+            locator: source.locator,
+            sourceUrl: source.url,
+            excerpt: source.excerpt,
+            controls: source.measure,
+            hazard: source.hazard,
+            publishedAt: source.publishedAt,
+          }));
+          if (externalSearch.sources.length) sourceOrigin = 'external';
+        } catch (error) {
+          externalSearch = { ...externalSearch, error: error.message, sources: [] };
+        }
+      }
       const draft = await callAi([
         { role: 'system', content: '당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 입력과 제공된 근거만 사용해 JSON으로 답하세요. 유사 사고사례의 원인과 감소대책을 우선 검토해 현장에 적용할 개선대책을 제안하세요. 관련된 현행 법령 또는 사업장 위험성평가 지침 조문이 제공된 경우 citations에 함께 포함하세요. 근거 없는 사실이나 법령 조항을 만들지 말고 다른 업종 사례의 적용 한계를 표시하세요. 개선대책은 위험 제거·대체·공학적 개선을 먼저 검토하고 관리적 조치와 보호구를 보완으로 제시하세요. 현재 평가는 상·중·하 3단계입니다. 상: 사망 또는 장애 위험, 법령 기준 미충족. 중: 요양 필요 위험, 아차사고 사례 있음. 하: 작업 수행에 영향 없는 경미한 부상·질병 예상. 상·중은 허용 불가능, 하만 허용 가능합니다. 위험성 수준은 담당자가 현장 확인 후 선택하므로 숫자 점수나 확정 등급을 제시하지 말고 판단에 필요한 현장정보를 rationale에 적으세요. SIF 검색 건수는 현장 발생빈도가 아닙니다. citations에는 제공된 ref만 넣으세요. 형식: {"factor":"유해위험요인","currentControl":"현재 조치 파악 필요 또는 확인된 조치","rationale":"판단 근거와 추가 현장 확인사항","measures":["대책 후보"],"citations":["ref"],"limitations":"근거의 한계"}' },
         { role: 'user', content: JSON.stringify({ description, evidence }) },
@@ -278,7 +412,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const reviewedCitations = (Array.isArray(review.approvedCitations) ? review.approvedCitations : [])
         .filter(ref => draftCitations.includes(ref)).slice(0, 8);
       const citedEvidence = evidence.filter(item => reviewedCitations.includes(item.ref)).slice(0, 8);
-      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || (item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item => {
+      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || ((item.type === '문서 본문' || item.type === '외부 공식자료') && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item => {
         const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?/);
         return locator?.[0]?.replace(/\s+/g, ' ').trim() || '';
       }).filter(Boolean);
@@ -303,6 +437,9 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         },
         limitations: [String(draft.limitations || '').trim(), reviewNeedsAttention ? '유해요인·개선대책 또는 관련 근거의 연결성이 충분히 확인되지 않아 담당자 재검토가 필요합니다.' : ''].filter(Boolean).join(' ').slice(0, 1200),
         noEvidence: evidence.length === 0,
+        sourceOrigin,
+        externalSources: externalSearch.sources,
+        externalSearch: { configured: externalSearch.configured, used: sourceOrigin === 'external', error: externalSearch.error || null, limitations: externalSearch.limitations || '' },
       };
     },
     async importSif(fileBase64, fileName, actor) {
@@ -363,6 +500,11 @@ function mountKnowledge(app, authorize, env) {
   app.post('/api/safety-knowledge', async (req, res) => {
     if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 저장하지 않았습니다.' });
     try { res.status(201).json({ added: await repository.add(req.body || {}, req.knowledgeUser.id) }); }
+    catch (error) { res.status(400).json({ error: error.message }); }
+  });
+  app.post('/api/safety-knowledge/approve-external', async (req, res) => {
+    if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 저장하지 않았습니다.' });
+    try { res.status(201).json(await repository.approveExternal(req.body?.sources, req.knowledgeUser.id)); }
     catch (error) { res.status(400).json({ error: error.message }); }
   });
   app.post('/api/safety-knowledge/upload', async (req, res) => {
