@@ -1971,7 +1971,7 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const rows = RISK.items.filter(it => {
     const date = String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 10);
     return !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
-  }).map((it, index) => ({
+  }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt))).map((it, index) => ({
     번호: index + 1,
     공정명: it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '',
     '유해·위험요인': it.factor || '',
@@ -2063,7 +2063,7 @@ app.post('/api/risk/items/manual', (req, res) => {
   const b = req.body || {};
   const customProcess = String(b.customProcess || '').trim().slice(0, 120);
   const factor = String(b.factor || '').trim().slice(0, 300);
-  if (!customProcess || !factor) return res.status(400).json({ error: '공정명과 유해·위험요인을 입력하세요.' });
+  if (!customProcess) return res.status(400).json({ error: '공정명을 입력하세요.' });
   const now = new Date().toISOString();
   const it = {
     id: nextRiskId(), status: 'assessing', source: 'safety_mgr',
@@ -2122,7 +2122,7 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   if (b.afterPhotoBase64) { try { updated.afterPhotoFile = path.basename(savePhoto('risk-after-' + updated.id, b.afterPhotoBase64)); } catch (e) { return res.status(400).json({ error: e.message }); } }
   updated.improvementHistory = [...(updated.improvementHistory||[]), {afterRiskLevel:updated.afterRiskLevel||null,afterRisk:updated.afterRisk,completedDate:updated.completedDate||null,reduction:updated.reduction,improvementSteps:updated.improvementSteps,resultNote:updated.resultNote,doneAt:updated.doneAt,by:u.name,at:new Date().toISOString()}];
   updated.afterRiskLevel=b.afterRiskLevel; updated.completedDate=b.completedDate;
-  for(const k of ['owner','dueDate']) if(typeof b[k]==='string') it[k]=b[k].slice(0,100);
+  if (typeof b.owner === 'string') it.owner = b.owner.slice(0, 100);
   if (typeof b.reduction === 'string') updated.reduction = b.reduction.slice(0, 500);
   if (typeof b.improvementSteps === 'string') updated.improvementSteps = b.improvementSteps.slice(0, 3000);
   if (typeof b.resultNote === 'string') updated.resultNote = b.resultNote.slice(0, 1500);

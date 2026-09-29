@@ -50,6 +50,9 @@
   .src-tag{font-size:11px;font-weight:800;border-radius:5px;padding:2px 7px;color:#fff;}
   .src-carrier{background:var(--danger);} .src-staff{background:var(--ok);} .src-transfer{background:#6D28D9;}
   .ai-box{background:var(--ai-bg);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;}
+  .advice-edit-row{display:grid;grid-template-columns:88px 1fr auto;gap:8px;align-items:start;padding:8px 0;border-top:1px solid rgba(84,125,166,.25);}
+  .advice-edit{min-height:28px;padding:4px 6px;background:#fff;border:1px solid var(--line);border-radius:5px;white-space:pre-wrap;outline:0;}
+  .advice-edit:focus{border-color:var(--ai);box-shadow:0 0 0 2px rgba(84,125,166,.12)}
   .ai-box .tag{background:var(--ai);color:#fff;font-size:10.5px;font-weight:800;border-radius:5px;padding:1px 7px;margin-right:6px;}
   .ai-box b{color:var(--ai);}
   .row-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
@@ -65,6 +68,8 @@
   .ratable td.l{text-align:left;}
   .ratable .factor{width:12%;} .ratable .ctrl{white-space:pre-line;}
   .ratable .result-cell .btn{padding:5px 6px;font-size:10px;white-space:normal;}
+  .ratable td.center-edit{text-align:center;}
+  .file-icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--line);border-radius:5px;background:#f4f6f8;font-size:17px;line-height:1;}
   .ratable img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;}
   .assessment-layout{display:block;}
   .assessment-layout>div{min-width:0;}
@@ -113,6 +118,7 @@
   @media print{.top,.tabs,#on-knowledge,.row-btns,.btn,.aihint,.toast{display:none!important}.modal{display:none}.modal.on{display:flex!important;position:static;background:transparent;padding:0}.modal.on .card{max-width:none;max-height:none;box-shadow:none;border:0}body{background:#fff}.wrap{max-width:none;padding:0}.panel{border:0;padding:0}.assessment-layout{display:block}.criteria-panel{position:static;margin-bottom:12px}.ratable{font-size:9px}.ratable input{border:0;width:28px}.ratable th,.ratable td{padding:4px}}
 </style>
 <style id="risk-form-style">
+.process-evaluator{margin-left:auto;text-align:right}
 .criteria-table{width:100%;border-collapse:collapse;font-size:12px}.criteria-table th,.criteria-table td{border:1px solid #aab2ba;padding:8px}.criteria-detail{white-space:pre-line}.level-red{background:#ffe3e5;color:#9e1824}.level-yellow{background:#fff0b5;color:#604900}.level-green{background:#dcf4e4;color:#176337}
 .assessment-meta{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:16px 0}.three-step td{white-space:pre-wrap}.three-step select{max-width:100%;padding:5px;border:1px solid #aab2ba}.three-step small{display:block;font-size:10px}.screen-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}.screen-actions .btn{padding:4px 7px;font-size:11px}.result-form{max-width:760px;margin:auto}.result-form h2{text-align:center;border:1px solid #777;padding:16px;font-size:20px}.result-number{border:1px solid #777;padding:12px;margin:18px 0}.result-photos{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}.result-photos>div{border:1px solid #777}.result-photo{height:240px;display:flex;align-items:center;justify-content:center}.result-photo img{width:100%;max-height:230px;object-fit:contain}.result-caption{text-align:center;border-top:1px solid #777;background:#eee;padding:8px;font-weight:700}.result-form table{width:100%;border-collapse:collapse;table-layout:fixed;margin:18px 0;font-size:12px}.result-form th,.result-form td{border:1px solid #777;padding:9px;white-space:pre-wrap;overflow-wrap:anywhere}.result-form th{background:#eee}.result-measures th{width:20%}.result-measures td{height:110px}.result-plan th:first-child{width:20%}.result-plan td{height:35px}.result-appendix{margin:24px 0}.result-appendix p{white-space:pre-wrap;overflow-wrap:anywhere}.result-appendix img{width:45%;max-height:240px;object-fit:contain;margin:6px}.card:has(.result-form){max-width:850px}
 .process-group{margin:18px 0 26px}.process-group>header{display:flex;align-items:center;gap:10px;margin:10px 0}.process-name-edit{font-size:14px;font-weight:700;max-width:360px;min-width:150px;padding:4px 7px;border:1px solid #c8d0d8;border-radius:4px;background:#f7f9fa}.process-evaluator{font-size:14px;font-weight:700;color:var(--ink-2)}.direct-edit{cursor:text;min-height:40px}.direct-edit>div{min-height:24px;outline:0}.direct-edit:focus-within{box-shadow:inset 0 0 0 2px #547da6;background:#f7fbff}.direct-edit:empty:before{content:'클릭해 입력';color:#8a949e}
@@ -151,7 +157,7 @@
   <div class="wrap" id="content"></div>
 </div>
 
-<div class="modal" id="modal" onclick="if(event.target===this)closeModal()"><div class="card" id="modalCard"></div></div>
+<div class="modal" id="modal"><div class="card" id="modalCard"></div></div>
 <div class="lb" id="lb" onclick="this.classList.remove('on')"><img id="lbImg" src="" alt=""></div>
 <div class="toast" id="toast"></div>
 
@@ -270,10 +276,10 @@ async function triage(id,decision){
 }
 /* ---------- 위험성평가표 (교재 서식) ---------- */
 function assessmentDate(it){return String(it.assessmentStartedAt||it.triagedAt||it.createdAt||'').slice(0,10)}
-function assessmentRows(){return R.registered.filter(it=>['assessing','assessed','done'].includes(it.status)&&assessmentDate(it)>=assessmentStart&&assessmentDate(it)<=assessmentEnd)}
+function assessmentRows(){return R.registered.filter(it=>['assessing','assessed','done'].includes(it.status)&&assessmentDate(it)>=assessmentStart&&assessmentDate(it)<=assessmentEnd).sort((a,b)=>String(a.assessmentStartedAt||a.triagedAt||a.createdAt).localeCompare(String(b.assessmentStartedAt||b.triagedAt||b.createdAt)))}
 function assessmentProcess(it){return it.customProcess||it.assessmentTarget||procName(it.proc)||'미지정 공정'}
 function assessmentGroups(rows){const groups=new Map();rows.forEach(it=>{const key=assessmentProcess(it);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(it)});return [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'ko'))}
-function editableCell(it,field,value){return '<td class="l direct-edit"><div contenteditable="true" role="textbox" tabindex="0" aria-label="'+esc(field)+' 직접 수정" data-id="'+esc(it.id)+'" data-field="'+field+'" onblur="saveRiskCell(this)">'+esc(value||'')+'</div></td>'}
+function editableCell(it,field,value){const center=['dueDate','owner'].includes(field);return '<td class="'+(center?'center-edit':'l')+' direct-edit"><div contenteditable="true" role="textbox" tabindex="0" aria-label="'+esc(field)+' 직접 수정" data-id="'+esc(it.id)+'" data-field="'+field+'" onblur="saveRiskCell(this)">'+esc(value||'')+'</div></td>'}
 function numberedText(value){return String(value||'').split(/\n+/).map(x=>x.trim().replace(/^[-*•]\s*/,'').replace(/^\d+[.)]\s*/, '')).filter(Boolean).map((x,i)=>(i+1)+'. '+x).join('\n')}
 function assessmentTable(rows,print=false){
  return '<table class="ratable three-step"><colgroup><col style="width:4%"><col style="width:20%"><col style="width:8%"><col style="width:19%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:10%"></colgroup><thead><tr><th>번호</th><th>유해·위험요인<br>(위험한 상황과 사건)</th><th>위험성의 수준<br>(상,중,하)</th><th>개선대책</th><th>개선<br>예정일</th><th>개선<br>완료일</th><th>담당자</th><th>이행결과서</th><th>관련근거<br>(선택사항)</th><th>위험성<br>평가표</th></tr></thead><tbody>'+rows.map((it,i)=>rowHtml(it,i,print)).join('')+'</tbody></table>';
@@ -286,15 +292,17 @@ function renderTable(){
  const grouped=groups.map(([name,items])=>{const evaluators=[...new Set(items.map(it=>it.evaluator||it.assessedBy).filter(Boolean))];return '<section class="process-group"><header><input class="process-name-edit" aria-label="공정명 직접 수정" value="'+esc(name)+'" data-ids="'+esc(JSON.stringify(items.map(x=>x.id)))+'" onchange="saveProcessGroup(this)"><span class="process-evaluator">평가자: '+esc(evaluators.join(', ')||'-')+'</span></header>'+assessmentTable(items)+'</section>'}).join('');
  const count=level=>rows.filter(it=>it.riskLevel===level).length;
  const label=assessmentStart+' ~ '+assessmentEnd;
- $('content').innerHTML='<div class="panel"><div class="ph">위험성평가표</div>'+criteriaHtml()+'<div class="assessment-toolbar"><button class="btn primary" onclick="openManualRisk()">담당자 추가접수</button><label>조회 시작<input type="date" value="'+esc(assessmentStart)+'" onchange="assessmentStart=this.value;renderTable()"></label><label>조회 종료<input type="date" value="'+esc(assessmentEnd)+'" onchange="assessmentEnd=this.value;renderTable()"></label><div class="period-presets"><button class="btn" onclick="setAssessmentRange(0)">일별</button><button class="btn" onclick="setAssessmentRange(3)">3개월</button><button class="btn" onclick="setAssessmentRange(6)">6개월</button><button class="btn" onclick="setAssessmentRange(12)">1년</button></div><button class="btn" onclick="downloadRiskExcel()">엑셀 다운로드</button><select aria-label="출력할 공정" onchange="processOutput=this.value"><option value="">공정 선택</option>'+processes.map(name=>'<option value="'+esc(name)+'" '+(name===processOutput?'selected':'')+'>'+esc(name)+'</option>').join('')+'</select><button class="btn" onclick="printSelectedProcess()">공정별 출력</button></div><div class="psub">'+esc(label)+' 위험성평가 집계</div><div class="month-summary"><div><span>전체</span><b>'+rows.length+'</b></div><div><span>상</span><b>'+count('상')+'</b></div><div><span>중</span><b>'+count('중')+'</b></div><div><span>하</span><b>'+count('하')+'</b></div><div><span>개선완료</span><b>'+rows.filter(it=>it.status==='done').length+'</b></div></div><div class="assessment-layout">'+(grouped||'<div class="empty">선택한 기간의 평가 항목이 없습니다.</div>')+'</div></div>';
+ $('content').innerHTML='<div class="panel"><div class="ph">위험성평가표</div>'+criteriaHtml()+'<div class="assessment-toolbar"><button class="btn primary" onclick="openManualRisk()">위험성평가 추가</button><label>조회 시작<input type="date" value="'+esc(assessmentStart)+'" onchange="assessmentStart=this.value;renderTable()"></label><label>조회 종료<input type="date" value="'+esc(assessmentEnd)+'" onchange="assessmentEnd=this.value;renderTable()"></label><div class="period-presets"><button class="btn" onclick="setAssessmentRange(0)">일별</button><button class="btn" onclick="setAssessmentRange(3)">3개월</button><button class="btn" onclick="setAssessmentRange(6)">6개월</button><button class="btn" onclick="setAssessmentRange(12)">1년</button></div><button class="btn" onclick="downloadRiskExcel()">엑셀 다운로드</button><select aria-label="출력할 공정" onchange="processOutput=this.value"><option value="">공정 선택</option>'+processes.map(name=>'<option value="'+esc(name)+'" '+(name===processOutput?'selected':'')+'>'+esc(name)+'</option>').join('')+'</select><button class="btn" onclick="printSelectedProcess()">공정별 출력</button></div><div class="psub">'+esc(label)+' 위험성평가 집계</div><div class="month-summary"><div><span>전체</span><b>'+rows.length+'</b></div><div><span>상</span><b>'+count('상')+'</b></div><div><span>중</span><b>'+count('중')+'</b></div><div><span>하</span><b>'+count('하')+'</b></div><div><span>개선완료</span><b>'+rows.filter(it=>it.status==='done').length+'</b></div></div><div class="assessment-layout">'+(grouped||'<div class="empty">선택한 기간의 평가 항목이 없습니다.</div>')+'</div></div>';
 }
 function rowHtml(it,index,print=false){
  const options=['상','중','하'].map(x=>'<span>'+(it.riskLevel===x?'☑':'☐')+' '+x+'</span>').join(' ');
  const st={assessing:'평가중',assessed:'평가완료',done:'개선완료'}[it.status]||'',result=it.doneAt||it.resultUpdatedAt;
- const formLabel=it.status==='assessing'?'작성':'수정';
- return '<tr><td>'+(index+1)+'</td>'+ (print?'<td class="l factor">'+esc(it.factor||'')+'</td>':'<td class="l factor">'+editableCell(it,'factor',it.factor).replace(/^<td class="l direct-edit">|<\/td>$/g,'')+'<div class="screen-actions"><span>'+esc(st)+'</span></div></td>')+'<td>'+(print?options:'<select aria-label="위험성 수준" onchange="saveRiskLevel(\''+esc(it.id)+'\',this.value)">'+riskLevelOptions(it.riskLevel)+'</select>')+(!it.riskLevel?'<small>'+esc(levelText(it))+'</small>':'')+'</td>'+ (print?'<td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td>':editableCell(it,'reduction',numberedText(it.reduction))+editableCell(it,'dueDate',it.dueDate)+ '<td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td>'+editableCell(it,'owner',it.owner))+'<td class="result-cell">'+(print?(result?'작성 완료':'미작성'):'<button class="btn" onclick="'+(result?'showResult':'openImprove')+'(\''+esc(it.id)+'\')">'+(result?'수정':'작성')+'</button>')+'</td>'+(print?'<td class="l">'+esc(numberedText(it.referenceText))+'</td>':editableCell(it,'referenceText',numberedText(it.referenceText)))+(print?'<td>'+formLabel+'</td>':'<td class="result-cell"><button class="btn" onclick="editRow(\''+esc(it.id)+'\')">'+formLabel+'</button></td>')+'</tr>';
+ const formLabel='작성';
+ const resultButton=result?'<button class="btn" title="이행결과서 열기" aria-label="이행결과서 열기" onclick="showResult(\''+esc(it.id)+'\')"><span class="file-icon">▤</span></button>':'<button class="btn" onclick="openImprove(\''+esc(it.id)+'\')">작성</button>';
+ return '<tr><td>'+(index+1)+'</td>'+ (print?'<td class="l factor">'+esc(it.factor||'')+'</td>':'<td class="l factor">'+editableCell(it,'factor',it.factor).replace(/^<td class="l direct-edit">|<\/td>$/g,'')+'<div class="screen-actions"><span>'+esc(st)+'</span></div></td>')+'<td>'+(print?options:'<select aria-label="위험성 수준" onchange="saveRiskLevel(\''+esc(it.id)+'\',this.value)">'+riskLevelOptions(it.riskLevel)+'</select>')+(!it.riskLevel?'<small>'+esc(levelText(it))+'</small>':'')+'</td>'+ (print?'<td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td>':editableCell(it,'reduction',numberedText(it.reduction))+editableCell(it,'dueDate',it.dueDate)+ '<td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td>'+editableCell(it,'owner',it.owner))+'<td class="result-cell">'+(print?'작성':resultButton)+'</td>'+(print?'<td class="l">'+esc(numberedText(it.referenceText))+'</td>':editableCell(it,'referenceText',numberedText(it.referenceText)))+(print?'<td>'+formLabel+'</td>':'<td class="result-cell"><button class="btn" onclick="editRow(\''+esc(it.id)+'\')">'+formLabel+'</button></td>')+'</tr>';
 }
 async function saveRiskCell(cell){const field=cell.dataset.field,id=cell.dataset.id,value=cell.innerText.trim();try{await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({[field]:value})});toast('평가표 항목을 저장했습니다')}catch(e){toast(e.message);await load()}}
+async function clearAdviceField(id,field){try{await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({[field]:''})});const it=R.registered.find(x=>x.id===id);if(it)it[field]='';const el=document.querySelector('[data-advice-field="'+field+'"]');if(el)el.textContent='';toast('항목을 삭제했습니다')}catch(e){toast(e.message)}}
 async function saveProcessGroup(input){const value=input.value.trim();if(!value){toast('공정명을 입력하세요');await load();return}try{const ids=JSON.parse(input.dataset.ids);await Promise.all(ids.map(id=>api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({customProcess:value,assessmentTarget:value})})));await load()}catch(e){toast(e.message);await load()}}
 async function saveRiskLevel(id,value){try{await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify({riskLevel:value||null})});await load()}catch(e){toast(e.message);await load()}}
 function setAssessmentRange(months){
@@ -316,13 +324,13 @@ function printSelectedProcess(){if(!processOutput){toast('출력할 공정을 �
 async function downloadRiskExcel(){try{const query='?from='+encodeURIComponent(assessmentStart)+'&to='+encodeURIComponent(assessmentEnd);const response=await fetch('/api/risk/export.xlsx'+query,{headers:{Authorization:'Bearer '+token}});if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error||'엑셀 다운로드에 실패했습니다.')}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='위험성평가표-'+assessmentStart+'-'+assessmentEnd+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message)}}
 
 function openManualRisk(){
- $('modalCard').innerHTML=`<h3>담당자 추가접수</h3><div class="psub">현장에서 직접 발굴한 위험요인을 위험성평가 항목으로 등록합니다.</div><div class="fld"><label>공정명</label><input id="manual-process" placeholder="예: 접수, 소포, 집배"></div><div class="fld"><label>유해·위험요인</label><textarea id="manual-factor" placeholder="위험한 상황과 발생 가능한 사고를 입력하세요."></textarea></div><div class="row-btns"><button class="btn primary" onclick="submitManualRisk()">평가 작성 시작</button><button class="btn" onclick="closeModal()">취소</button></div>`;
+ $('modalCard').innerHTML=`<h3>위험성평가 추가</h3><div class="psub">공정만 입력하면 해당 공정의 평가표에 항목을 추가할 수 있습니다. 유해·위험요인은 평가표 작성에서 입력합니다.</div><div class="fld"><label>공정명</label><input id="manual-process" placeholder="예: 접수, 소포, 집배"></div><div class="row-btns"><button class="btn primary" onclick="submitManualRisk()">평가표에 추가</button><button class="btn" onclick="closeModal()">취소</button></div>`;
  $('modal').classList.add('on');
 }
 async function submitManualRisk(){
- const customProcess=$('manual-process').value.trim(),factor=$('manual-factor').value.trim();
- if(!customProcess||!factor){toast('공정명과 유해·위험요인을 입력하세요.');return}
- try{const result=await api('/api/risk/items/manual',{method:'POST',body:JSON.stringify({customProcess,factor})});closeModal();await load();editRow(result.id)}catch(e){toast(e.message)}
+ const customProcess=$('manual-process').value.trim();
+ if(!customProcess){toast('공정명을 입력하세요.');return}
+ try{const result=await api('/api/risk/items/manual',{method:'POST',body:JSON.stringify({customProcess})});closeModal();await load();editRow(result.id)}catch(e){toast(e.message)}
 }
 
 function editRow(id){
@@ -337,8 +345,6 @@ function editRow(id){
     <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"></div><div class="fld"><label>담당자</label><input id="e-owner" value="${esc(it.owner||'')}"></div></div></section>
     <div class="row-btns">
       <button class="btn primary" onclick="saveRow('${id}')">저장</button>
-      ${it.status!=='done'?`<button class="btn" onclick="openImprove('${id}')">개선완료 처리</button>`:''}
-      ${it.status==='done'?`<button class="btn" onclick="showResult('${id}')">이행결과서 보기</button>`:''}
       <button class="btn" onclick="closeModal()">닫기</button>
     </div>`;
   $('modal').classList.add('on');
@@ -358,7 +364,6 @@ function openImprove(id){
     <div class="fld"><label>현재 위험성</label><div>${esc(levelText(it))}</div></div>
     <div class="fld"><label>개선 후 위험성</label><select id="e-arisk">${riskLevelOptions(it.afterRiskLevel)}</select></div>
     <div class="fld"><label>담당자(관리감독자)</label><input id="i-owner" value="${esc(it.owner||'')}"></div>
-    <div class="fld"><label>개선 예정일</label><input id="i-due" value="${esc(it.dueDate||'')}"></div>
     <div class="fld"><label>개선 완료일</label><input type="date" id="i-completed" value="${esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))}"></div>
     <div class="fld"><label>감소대책(최종)</label><textarea id="e-red2">${esc(it.reduction||'')}</textarea></div>
     <div class="fld"><label>조치 실행 과정</label><textarea id="e-steps" placeholder="예: 6.20 현장 통제 → 6.21 파손부 교체 → 6.30 재점검">${esc(it.improvementSteps||'')}</textarea></div>
@@ -368,10 +373,10 @@ function openImprove(id){
 }
 function fileToDataUrl(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height,M=1600;if(w>M||h>M){const s=M/Math.max(w,h);w=(w*s)|0;h=(h*s)|0;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);res(c.toDataURL('image/jpeg',0.82));};img.onerror=rej;img.src=e.target.result;};r.onerror=rej;r.readAsDataURL(f);});}
 async function saveImprove(id){
-  const body={afterRiskLevel:$('e-arisk').value,owner:$('i-owner').value,dueDate:$('i-due').value,completedDate:$('i-completed').value,reduction:document.getElementById('e-red2').value.trim(),improvementSteps:document.getElementById('e-steps').value.trim(),resultNote:document.getElementById('e-result').value.trim()};
+  const body={afterRiskLevel:$('e-arisk').value,owner:$('i-owner').value,completedDate:$('i-completed').value,reduction:document.getElementById('e-red2').value.trim(),improvementSteps:document.getElementById('e-steps').value.trim(),resultNote:document.getElementById('e-result').value.trim()};
   const files=[...document.getElementById('e-after').files];
   if(files.length){ try{ body.afterPhotoBase64=await fileToDataUrl(files[0]); body.additionalPhotosBase64=await Promise.all(files.slice(1,7).map(fileToDataUrl)); }catch(e){toast('사진 처리에 실패했습니다. 다시 선택하세요.');return} }
-  try{ await api('/api/risk/items/'+id+'/improve',{method:'POST',body:JSON.stringify(body)}); toast(body.afterRiskLevel==='하'?'개선완료 처리했습니다':'결과를 저장했습니다. 추가 개선이 필요합니다.'); closeModal(); load(); }
+  try{ await api('/api/risk/items/'+id+'/improve',{method:'POST',body:JSON.stringify(body)}); toast('이행결과서를 저장했습니다.'); closeModal(); load(); }
   catch(e){ toast(e.message); }
 }
 function resultFormHtml(it){
@@ -380,7 +385,7 @@ function resultFormHtml(it){
  '<div class="result-photos"><div>'+photo(it.beforePhotoUrl||it.photoUrl,'개선전')+'</div><div>'+photo(it.afterPhotoUrl,'개선후')+'</div></div>'+
  '<table class="result-factor"><colgroup><col style="width:20%"><col style="width:52%"><col style="width:14%"><col style="width:14%"></colgroup><tbody><tr><th rowspan="2">유해위험 요인</th><td rowspan="2">'+esc(it.factor||'')+'</td><th>현재 위험성</th><th>개선 후 위험성</th></tr><tr><td>'+esc(levelText(it))+'</td><td>'+esc(levelText(it,true))+'</td></tr></tbody></table>'+
  '<table class="result-measures"><tbody><tr><th>감소대책</th><td>'+esc(it.reduction||'')+'</td></tr></tbody></table>'+
- '<table class="result-plan"><tbody><tr><th rowspan="2">개선계획</th><th>담당자(관리감독자)</th><th>개선 예정일</th><th>개선 완료일</th></tr><tr><td>'+esc(it.owner||'')+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td></tr></tbody></table></article>'+
+ '<table class="result-plan"><tbody><tr><th rowspan="2">개선계획</th><th>담당자(관리감독자)</th><th>개선 완료일</th></tr><tr><td>'+esc(it.owner||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td></tr></tbody></table></article>'+
  (it.improvementSteps||it.resultNote||it.additionalPhotoUrls?.length?'<section class="result-appendix"><h3>조치 과정·추가 증빙</h3><h4>조치 실행 과정</h4><p>'+esc(it.improvementSteps||'')+'</p><h4>조치 결과·확인 내용</h4><p>'+esc(it.resultNote||'')+'</p>'+(it.additionalPhotoUrls||[]).map(u=>'<img src="'+esc(u)+'" alt="추가 증빙">').join('')+'</section>':'');
 }
 function showResult(id){
@@ -403,13 +408,13 @@ async function requestRiskAdvice(id){
     const body={reduction:numberedText((d.measures||[]).join('\n')),referenceText:numberedText((d.legalReferences||[]).join('\n')),evidenceIds:evidence.map(item=>item.id)};
     if(d.factor) body.factor=d.factor;
     if(review.needsAttention){
-      host.innerHTML=`<div class="ai-box"><b>검토가 더 필요한 초안입니다.</b><p>${esc(d.factor||'현장 확인 필요')}</p><small>인과관계: ${esc(review.causalCheck||'확인 필요')} · 근거 적용성: ${esc(review.legalCheck||'확인 필요')}<br>${esc(review.summary||'')} ${esc(d.limitations||'')} ${d.noEvidence?'등록된 유사사례가 부족하므로 담당자 현장 확인이 필요합니다.':''}</small></div>`;
+      host.innerHTML='<div class="ai-box"><b>재검토 필요</b><small>인과관계 또는 관련근거가 충분히 확인되지 않았습니다.</small></div>';
       return;
     }
     const saved=await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)});
     selectedEvidence=evidence;
     Object.assign(it,saved.item);
-    host.innerHTML=`<div class="ai-box"><b>인과관계와 관련근거를 재검토한 대책을 표에 반영했습니다.</b><p>${esc(d.factor||'현장 확인 필요')}</p><small>인과관계: ${esc(review.causalCheck||'확인')} · 근거 적용성: ${esc(review.legalCheck||'확인')}<br>${esc(review.summary||'')} ${esc(d.limitations||'')} ${d.noEvidence?'등록된 유사사례가 부족하므로 담당자 현장 확인이 필요합니다.':''}</small></div>`;
+    host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거</b><div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-advice-field="reduction" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(numberedText((d.measures||[]).join('\n')))+'</div><button class="btn" type="button" onclick="clearAdviceField(\''+esc(id)+'\',\'reduction\')">삭제</button></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-advice-field="referenceText" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(numberedText((d.legalReferences||[]).join('\n')))+'</div><button class="btn" type="button" onclick="clearAdviceField(\''+esc(id)+'\',\'referenceText\')">삭제</button></div></div>';
   }catch(error){host.innerHTML=`<small class="workspace-error">${esc(error.message)}</small>`;}
 }
 function closeModal(){ $('modal').classList.remove('on'); }
