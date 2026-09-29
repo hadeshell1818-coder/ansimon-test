@@ -399,12 +399,17 @@ async function requestRiskAdvice(id){
     riskAdviceDraft=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description})});
     const d=riskAdviceDraft;
     const evidence=[...new Map([...selectedEvidence,...d.citations.map(ref=>({id:ref,title:`AI 추천 근거 ${ref}`}))].map(item=>[item.id,item])).values()];
+    const review=d.review||{};
     const body={reduction:numberedText((d.measures||[]).join('\n')),referenceText:numberedText((d.legalReferences||[]).join('\n')),evidenceIds:evidence.map(item=>item.id)};
     if(d.factor) body.factor=d.factor;
+    if(review.needsAttention){
+      host.innerHTML=`<div class="ai-box"><b>검토가 더 필요한 초안입니다.</b><p>${esc(d.factor||'현장 확인 필요')}</p><small>인과관계: ${esc(review.causalCheck||'확인 필요')} · 근거 적용성: ${esc(review.legalCheck||'확인 필요')}<br>${esc(review.summary||'')} ${esc(d.limitations||'')} ${d.noEvidence?'등록된 유사사례가 부족하므로 담당자 현장 확인이 필요합니다.':''}</small></div>`;
+      return;
+    }
     const saved=await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)});
     selectedEvidence=evidence;
     Object.assign(it,saved.item);
-    host.innerHTML=`<div class="ai-box"><b>개선대책과 관련근거를 표에 자동 반영했습니다.</b><p>${esc(d.factor||'현장 확인 필요')}</p><small>${esc(d.limitations||'')} ${d.noEvidence?'등록된 유사사례가 부족하므로 담당자 현장 확인이 필요합니다.':''}</small></div>`;
+    host.innerHTML=`<div class="ai-box"><b>인과관계와 관련근거를 재검토한 대책을 표에 반영했습니다.</b><p>${esc(d.factor||'현장 확인 필요')}</p><small>인과관계: ${esc(review.causalCheck||'확인')} · 근거 적용성: ${esc(review.legalCheck||'확인')}<br>${esc(review.summary||'')} ${esc(d.limitations||'')} ${d.noEvidence?'등록된 유사사례가 부족하므로 담당자 현장 확인이 필요합니다.':''}</small></div>`;
   }catch(error){host.innerHTML=`<small class="workspace-error">${esc(error.message)}</small>`;}
 }
 function closeModal(){ $('modal').classList.remove('on'); }

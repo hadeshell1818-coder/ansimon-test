@@ -254,19 +254,55 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         { role: 'user', content: JSON.stringify({ description, evidence }) },
       ], 1000);
       const validRefs = new Set(evidence.map(item => item.ref));
-      const citedEvidence = evidence.filter(item => (draft.citations || []).includes(item.ref)).slice(0, 8);
+      const draftCitations = (Array.isArray(draft.citations) ? draft.citations : []).filter(ref => validRefs.has(ref));
+      const draftEvidence = evidence.filter(item => draftCitations.includes(item.ref)).slice(0, 8);
+      const review = await callAi([
+        {
+          role: 'system',
+          content: '당신은 산업안전 위험성평가 초안의 품질 검토자입니다. 유해위험요인과 각 개선대책 사이에 실제 인과관계가 있는지, 대책이 위험을 줄이는 방향인지, 인용된 근거가 해당 위험과 대책에 실제로 적용 가능한지 다시 검토하세요. 제공된 근거에 없는 법령 조항이나 사실을 추가하지 마세요. 연결이 약한 대책은 제외하고, 근거가 약한 법령 인용은 제외하세요. 최종 위험성 상·중·하는 확정하지 말고 현장 확인 필요사항으로 남기세요. JSON 형식: {"causalCheck":"pass|partial|fail","legalCheck":"pass|partial|fail","approvedMeasures":["검토를 통과한 개선대책"],"approvedCitations":["제공된 ref"],"reviewSummary":"검토 결과","additionalChecks":["담당자가 확인할 사항"]}',
+        },
+        { role: 'user', content: JSON.stringify({
+          description,
+          draft: {
+            factor: draft.factor,
+            currentControl: draft.currentControl,
+            rationale: draft.rationale,
+            measures: Array.isArray(draft.measures) ? draft.measures : [],
+            citations: draftCitations,
+          },
+          evidence: draftEvidence,
+        }) },
+      ], 900);
+      const reviewedMeasures = (Array.isArray(review.approvedMeasures) ? review.approvedMeasures : [])
+        .map(item => String(item).trim().slice(0, 500)).filter(Boolean).slice(0, 6);
+      const reviewedCitations = (Array.isArray(review.approvedCitations) ? review.approvedCitations : [])
+        .filter(ref => draftCitations.includes(ref)).slice(0, 8);
+      const citedEvidence = evidence.filter(item => reviewedCitations.includes(item.ref)).slice(0, 8);
       const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || (item.type === '문서 본문' && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item => {
         const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?/);
         return locator?.[0]?.replace(/\s+/g, ' ').trim() || '';
       }).filter(Boolean);
+      const causalCheck = ['pass', 'partial', 'fail'].includes(review.causalCheck) ? review.causalCheck : 'partial';
+      const legalCheck = ['pass', 'partial', 'fail'].includes(review.legalCheck) ? review.legalCheck : 'partial';
+      const reviewNeedsAttention = evidence.length === 0 || causalCheck === 'fail' || legalCheck === 'fail' || !reviewedMeasures.length;
       return {
         factor: String(draft.factor || '').slice(0, 500), currentControl: String(draft.currentControl || '').slice(0, 500),
         assessmentMethod: 'three-step-v1',
-        rationale: String(draft.rationale || '').slice(0, 1500), measures: (Array.isArray(draft.measures) ? draft.measures : []).map(x => String(x).slice(0, 500)).slice(0, 6),
-        citations: (Array.isArray(draft.citations) ? draft.citations : []).filter(ref => validRefs.has(ref)).slice(0, 8),
+        rationale: String(draft.rationale || '').slice(0, 1500),
+        citations: reviewedCitations,
         evidence: citedEvidence,
         legalReferences: [...new Set(legalReferences)].slice(0, 6),
-        limitations: String(draft.limitations || '').slice(0, 1000), noEvidence: evidence.length === 0,
+        measures: reviewedMeasures,
+        review: {
+          causalCheck,
+          legalCheck,
+          passed: !reviewNeedsAttention,
+          needsAttention: reviewNeedsAttention,
+          summary: String(review.reviewSummary || '').slice(0, 1000),
+          additionalChecks: (Array.isArray(review.additionalChecks) ? review.additionalChecks : []).map(x => String(x).slice(0, 300)).slice(0, 8),
+        },
+        limitations: [String(draft.limitations || '').trim(), reviewNeedsAttention ? '유해요인·개선대책 또는 관련 근거의 연결성이 충분히 확인되지 않아 담당자 재검토가 필요합니다.' : ''].filter(Boolean).join(' ').slice(0, 1200),
+        noEvidence: evidence.length === 0,
       };
     },
     async importSif(fileBase64, fileName, actor) {

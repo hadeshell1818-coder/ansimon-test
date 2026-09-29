@@ -62,8 +62,10 @@ async function main() {
       const requestBody = JSON.parse(options.body), first = requestBody.messages[0].content;
       const content = first.startsWith('산업안전 위험 설명')
         ? { queries: ['계단 파손'] }
-        : { factor: '계단 파손에 따른 전도 위험', measures: ['통로를 안전하게 유지한다.'], citations: ['doc:law-section-1'], limitations: '' };
-      if (!first.startsWith('산업안전 위험 설명')) assert.match(requestBody.messages[1].content, /승인된 법령/);
+        : first.startsWith('당신은 산업안전 위험성평가 초안의 품질 검토자')
+          ? { causalCheck: 'pass', legalCheck: 'pass', approvedMeasures: ['통로를 안전하게 유지한다.'], approvedCitations: ['doc:law-section-1'], reviewSummary: '유해요인과 대책 및 법령 근거가 연결됩니다.', additionalChecks: [] }
+          : { factor: '계단 파손에 따른 전도 위험', measures: ['통로를 안전하게 유지한다.'], citations: ['doc:law-section-1'], limitations: '' };
+      if (!first.startsWith('산업안전 위험 설명') && !first.startsWith('당신은 산업안전 위험성평가 초안의 품질 검토자')) assert.match(requestBody.messages[1].content, /승인된 법령/);
       return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
     };
     const advice = await lawRepo.recommendRisk({ description: '계단 파손으로 넘어질 위험이 있습니다.' });
