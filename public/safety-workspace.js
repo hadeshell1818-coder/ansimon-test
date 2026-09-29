@@ -99,13 +99,13 @@ function renderSourceRows() {
   const status = { pending: '검토 대기', approved: '검토 완료', retired: '사용 중단' };
   $('source-rows').innerHTML = rows.map(item => {
     const url = safeSourceUrl(item.source_url);
-    return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)} · ${esc(item.jurisdiction)}<br>${esc((item.tags || []).join(' · '))}</small>${item.storage_path?`<button class="btn" style="margin-top:6px" onclick="openKnowledgeFile('${esc(item.id)}')">원본 파일 열기</button>`:''}</td>
+    return `<tr><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>` : esc(item.title)}<small>${esc(item.publisher)}</small>${item.storage_path?`<button class="btn" style="margin-top:6px" onclick="openKnowledgeFile('${esc(item.id)}')">원본 파일 열기</button>`:''}</td>
       <td>Supabase 등록<small>${status[item.review_status] || '검토 대기'}</small></td>
-      <td>${esc(item.rights_note)}<small>${item.case_count
-        ? `사례 ${Number(item.case_count).toLocaleString()}건 저장 · 벡터 색인 미등록`
+      <td>${item.case_count
+        ? `사례 ${Number(item.case_count).toLocaleString()}건 저장`
         : item.section_count
-          ? `조문·본문 ${Number(item.section_count).toLocaleString()}개 저장 · 키워드 검색 가능`
-          : '원문 본문·AI 색인 미등록'}</small></td></tr>`;
+          ? `본문 ${Number(item.section_count).toLocaleString()}개 저장`
+          : '저장 0건'}</td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
 function renderLibrary() {
@@ -139,7 +139,7 @@ function renderLibrary() {
     </form><p id="library-result" role="status"></p>
     <label for="source-search">자료·본문 검색</label><br><input class="workspace-search" id="source-search" value="${esc(libraryQuery)}" placeholder="본문에서 찾을 표현 입력" oninput="libraryQuery=this.value;renderSourceRows();searchLibrary()">
     <div id="library-search-results" class="evidence-list" aria-live="polite"></div>
-    <div class="workspace-scroll"><table class="workspace-table"><thead><tr><th>자료·제공기관</th><th>등록·검토 상태</th><th>이용조건</th></tr></thead><tbody id="source-rows"></tbody></table></div>`;
+    <div class="workspace-scroll"><table class="workspace-table"><thead><tr><th>자료·제공기관</th><th>등록·검토 상태</th><th>저장 현황</th></tr></thead><tbody id="source-rows"></tbody></table></div>`;
   renderSourceRows();
 }
 async function importSif(event) {
