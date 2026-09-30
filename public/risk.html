@@ -367,6 +367,7 @@ function editRow(id){
     <p>${esc(it.note||'')}</p>
     <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"></div><div class="fld"><label>평가자</label><input id="e-evaluator" value="${esc(it.evaluator||it.assessedBy||me.name||'')}"></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div><div class="ai-draft-action"><button class="btn" type="button" onclick="requestRiskAdvice('${id}')">AI로 초안 작성</button><small>유사사례와 관련 법령을 찾아 개선대책과 관련근거를 자동으로 채웁니다. 이후 표에서 직접 수정할 수 있습니다.</small></div><div id="risk-advice-result"></div></section>
     <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"></div><div class="fld"><label>담당자</label><input id="e-owner" value="${esc(it.owner||'')}"></div></div></section>
+    ${it.sourceReport?`<section class="form-section"><h4>신고자에게 처리결과 공유</h4><div class="fld"><label for="e-report-result">공개할 처리결과</label><textarea id="e-report-result" maxlength="1200" placeholder="확인한 내용, 조치 또는 현재 처리상황을 작성하세요.">${esc(it.reporterResult||'')}</textarea></div><div class="fld"><label style="display:flex;align-items:center;gap:8px;color:var(--ink)"><input id="e-report-publish" type="checkbox" style="width:auto" ${it.reporterResultPublished?'checked':''}> 신고자에게 공개</label></div><small>공개를 선택하면 신고자의 ‘내 신고내역’ 상세에서 확인할 수 있습니다. 내부 검토 메모는 공유되지 않습니다.</small></section>`:''}
     <div class="row-btns">
       <button class="btn primary" onclick="saveRow('${id}')">저장</button>
       <button class="btn" onclick="closeModal()">닫기</button>
@@ -376,6 +377,8 @@ function editRow(id){
 async function saveRow(id){
   const g=x=>document.getElementById(x).value.trim();
   const body={factor:g('e-factor'),dueDate:g('e-due'),owner:g('e-owner'),evidenceIds:selectedEvidence.map(x=>x.id)};
+  const reporterResult=document.getElementById('e-report-result');
+  if(reporterResult){body.reporterResult=reporterResult.value.trim();body.reporterResultPublished=document.getElementById('e-report-publish').checked;}
   body.assessmentTarget=g('e-target'); body.customProcess=g('e-target'); body.evaluator=g('e-evaluator');
   try{ await api('/api/risk/items/'+id,{method:'PATCH',body:JSON.stringify(body)}); toast('저장했습니다'); closeModal(); load(); }
   catch(e){ toast(e.message); }

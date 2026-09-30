@@ -524,6 +524,8 @@ function syncRiskSource(it) {
     : it.status === 'assessed' ? '평가완료'
     : it.status === 'assessing' ? '위험성평가 진행중' : '위험성평가 대기';
   source.riskHandling = { status, riskId: it.id, updatedAt: new Date().toISOString(),
+    reporterResult: it.reporterResult || '', reporterResultPublished: !!it.reporterResultPublished,
+    reporterResultUpdatedAt: it.reporterResultUpdatedAt || null,
     by: it.triagedBy || it.assessedBy || it.improvedBy || null,
     triagedAt: it.triagedAt || null, discardReason: it.discardReason || null };
 }
@@ -669,6 +671,17 @@ function validPhotoSignature(reportId, exp, sig) {
 function publicReport(user, report) {
   const copy = { ...report };
   copy.photoUrl = (copy.photo && copy.photoUrl && canViewReport(user, report)) ? signedPhotoUrl(report.id) : null;
+
+  if (user?.kind === 'carrier') {
+    const handling = report.carrierId === user.id && report.routing === 'internal' ? report.riskHandling : null;
+    copy.riskOutcome = handling ? {
+      status: handling.status || '위험성평가 대기',
+      updatedAt: handling.updatedAt || null,
+      result: handling.reporterResultPublished ? handling.reporterResult || '' : '',
+    } : null;
+    delete copy.riskHandling;
+    delete copy.riskId;
+  }
 
   // 중복신고로 병합된 신고는 '취소'로 접수 대기열에서는 빠지지만, 원 신고자 입장에서는
   // 자기 신고가 그냥 무시된 게 아니라는 걸 알아야 한다. 병합 대상 신고의 현재 처리
@@ -2187,6 +2200,12 @@ app.patch('/api/risk/items/:id', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
+  const reporterResultChange = Object.hasOwn(b, 'reporterResult') || Object.hasOwn(b, 'reporterResultPublished');
+  const nextReporterResult = typeof b.reporterResult === 'string' ? b.reporterResult.trim().slice(0, 1200) : (it.reporterResult || '');
+  const nextReporterPublished = typeof b.reporterResultPublished === 'boolean' ? b.reporterResultPublished : !!it.reporterResultPublished;
+  if (reporterResultChange && !it.fromReport) return res.status(400).json({ error: '신고자 결과 공유는 신고와 연결된 위험성평가에서만 가능합니다.' });
+  if (Object.hasOwn(b, 'reporterResultPublished') && typeof b.reporterResultPublished !== 'boolean') return res.status(400).json({ error: '공개 설정을 확인하세요.' });
+  if (nextReporterPublished && !nextReporterResult) return res.status(400).json({ error: '신고자에게 공개할 처리결과를 입력하세요.' });
   if (['frequency','severity','afterRisk'].some(k => Object.hasOwn(b,k))) return res.status(400).json({error:'상·중·하 평가방식으로 변경되었습니다. 화면을 새로고침하세요.'});
   if (Object.hasOwn(b,'riskLevel') && b.riskLevel !== null && !RISK_CRITERIA.levels.some(x => x.value === b.riskLevel)) return res.status(400).json({error:'위험성 수준은 상·중·하 중 선택하세요.'});
   const str = (k, max = 300) => { if (typeof b[k] === 'string') it[k] = b[k].slice(0, max); };
@@ -2196,6 +2215,14 @@ app.patch('/api/risk/items/:id', (req, res) => {
   str('factor'); str('currentControl'); str('fieldReview', 500); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
   if (Array.isArray(b.evidenceIds)) it.evidenceIds = b.evidenceIds.filter(x => typeof x === 'string').slice(0, 20);
   str('assessmentTarget',200); str('evaluator',100); str('referenceText',1500);
+  if (reporterResultChange) {
+    it.reporterResult = nextReporterResult;
+    it.reporterResultPublished = nextReporterPublished;
+    it.reporterResultUpdatedAt = new Date().toISOString();
+    it.reporterResultHistory = [...(it.reporterResultHistory || []), {
+      result: nextReporterResult, published: nextReporterPublished, by: u.name, at: it.reporterResultUpdatedAt,
+    }].slice(-100);
+  }
   if (Object.hasOwn(b,'riskLevel')) {
     if(it.riskLevel !== b.riskLevel) {
       it.assessmentHistory = [...(it.assessmentHistory||[]), {riskLevel:it.riskLevel||null,frequency:it.frequency,severity:it.severity,by:u.name,at:new Date().toISOString()}];

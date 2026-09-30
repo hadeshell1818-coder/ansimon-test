@@ -919,6 +919,10 @@ async function viewReportDetail(id){
     if(r.addr) body+=row('위치', r.addr);
     if(r.memo) body+=row('설명', r.memo);
   }
+  if(r.riskOutcome){
+    body+=row('위험성 검토', `${escON(r.riskOutcome.status||'진행 중')}${r.riskOutcome.updatedAt?' · 최근 갱신 '+fmtDate(r.riskOutcome.updatedAt):''}`);
+    body+=row('처리결과', r.riskOutcome.result?`<div style="white-space:pre-line">${escON(r.riskOutcome.result)}</div>`:'안전관리담당자가 검토 중입니다. 처리결과는 확인 후 공유됩니다.');
+  }
   if(r.reason) body+=row('처리 메모', r.reason);
   if(r.aiMode==='manual') body+=row('분류 방식', '담당자가 사진을 보고 직접 지정함');
   if(r.edited) body+=row('수정 이력', `접수 후 내용 수정함${r.editedAt?' · '+fmtDate(r.editedAt):''}`);
