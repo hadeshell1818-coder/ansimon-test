@@ -673,7 +673,7 @@ function publicReport(user, report) {
   copy.photoUrl = (copy.photo && copy.photoUrl && canViewReport(user, report)) ? signedPhotoUrl(report.id) : null;
 
   if (user?.kind === 'carrier') {
-    const handling = report.carrierId === user.id && report.routing === 'internal' ? report.riskHandling : null;
+    const handling = report.carrierId === user.id ? report.riskHandling : null;
     copy.riskOutcome = handling ? {
       status: handling.status || '위험성평가 대기',
       updatedAt: handling.updatedAt || null,
@@ -2023,7 +2023,7 @@ app.get('/api/risk/state', async (req, res) => {
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
     sevText: SEV_TEXT, freqText: FREQ_TEXT, threshold: RISK_THRESHOLD, criteria: RISK_CRITERIA,
-    inbox: RISK.items.filter(it => !it.routingInactive && it.status === 'inbox').map(itemForMgr),
+    inbox: RISK.items.filter(it => !it.routingInactive && ['inbox','referred'].includes(it.status)).map(itemForMgr),
     registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
   });
 });
@@ -2092,7 +2092,7 @@ function intakeRiskPhoto(u, b, viaTransfer) {
   const it = {
     id, status: 'inbox',
     source: viaTransfer ? 'transfer' : (fromCarrier ? 'carrier' : 'staff'),
-    reporter: u.name, reporterOrg: u.org || null, reporterZone: u.zone || null,
+    reporter: u.name, reporterId: fromCarrier ? u.id : null, reporterOrg: u.org || null, reporterZone: u.zone || null,
     createdAt: new Date().toISOString(),
     lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null,
     note: String(b.note || b.transcript || '').slice(0, 300),
@@ -2112,6 +2112,49 @@ app.post('/api/risk/report', reportLimiter, (req, res) => {
   if (!u || (u.kind !== 'carrier' && u.kind !== 'staff' && !isStaffLike(u))) return res.status(403).json({ error: '신고 권한이 없습니다.' });
   try { const it = intakeRiskPhoto(u, req.body || {}, false); res.json({ ok: true, id: it.id }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* 오접수된 내부위험을 장흥군청 교통과 외부 신고함으로 이관 */
+app.post('/api/risk/items/:id/transfer-traffic', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
+  const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
+  if (it.status === 'referred' && it.externalTransfer?.reportId) return res.json({ ok: true, reportId: it.externalTransfer.reportId });
+  if (it.status !== 'inbox') return res.status(409).json({ error: '접수 대기 중인 건만 지자체로 이관할 수 있습니다.' });
+
+  const now = new Date().toISOString();
+  let report = it.fromReport ? reports.find(r => r.id === it.fromReport) : null;
+  if (report) {
+    report.routingHistory = [...(report.routingHistory || []), { from: report.routing || 'internal', to: 'external', at: now }];
+    report.type = 'safe'; report.item = report.item || '우체국 내부 업무위험'; report.region = '장흥군';
+    report.routeChoice = 'external'; report.requestedInternal = false; report.routing = 'external';
+  } else {
+    const id = 'R' + (++SEQ);
+    report = {
+      id, type: 'safe', item: it.note || '우체국 내부 업무위험', subtype: null, region: '장흥군',
+      addr: it.addr || '', lat: it.lat ?? null, lng: it.lng ?? null, buildingName: '',
+      requestedInternal: false, routeChoice: 'external', routing: 'external', status: 'received',
+      reason: '', memo: String(it.note || '').slice(0, 1000), internalNote: String(it.note || '').slice(0, 1000),
+      photo: !!it.photoFile, photoUrl: it.photoFile ? '/uploads/' + path.basename(it.photoFile) : null,
+      photoPrivacy: it.photoFile ? 'manager-approved-referral' : null,
+      createdAt: it.createdAt || now, carrier: it.reporter || '안심ON 신고자', carrierId: it.reporterId || null,
+      reporterOrg: it.reporterOrg || '안심ON', edited: false, editedAt: null,
+      cancelledAt: null, cancelledBy: null, photoMosaic: false, mosaicBy: null, mosaicAt: null,
+      mergedInto: null, dupDismissed: [], invalidReport: false,
+    };
+    reports.unshift(report);
+  }
+  const destination = { organization: '장흥군청', department: '교통과', accountId: 'jang1', status: 'assigned' };
+  report.externalTransfer = { ...destination, assignedAt: now, assignmentMode: '안전관리담당자 수동 이관' };
+  report.riskHandling = {
+    status: '장흥군청 교통과 이관', riskId: it.id, updatedAt: now,
+    reporterResult: it.reporterResult || '', reporterResultPublished: !!it.reporterResultPublished,
+    reporterResultUpdatedAt: it.reporterResultUpdatedAt || null, by: u.name,
+  };
+  it.status = 'referred'; it.triagedBy = u.name; it.triagedAt = now;
+  it.externalTransfer = { ...destination, reportId: report.id, assignedAt: now, assignmentMode: '안전관리담당자 수동 이관' };
+  it.routingInactive = false;
+  saveRisk(); save(); broadcastRisk(); broadcast();
+  res.json({ ok: true, reportId: report.id, destination: '장흥군청 교통과' });
 });
 
 /* 소통팀장 → 위험성평가 이관: 음성신고를 구조위험으로 판단해 넘김 */

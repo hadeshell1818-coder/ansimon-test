@@ -262,12 +262,18 @@ function inboxCard(it){
       ${it.note?`<div style="font-size:13px;margin-top:6px">${esc(it.note)}</div>`:''}
       ${it.transferNote?`<div style="font-size:12px;color:#6D28D9;margin-top:4px">↪ ${esc(it.transferNote)}</div>`:''}
       ${ai}
-      <div class="row-btns">
+      ${it.status==='referred'?`<div class="detailbox">장흥군청 교통과로 이관했습니다.${it.externalTransfer?.reportId?` 신고번호 ${esc(it.externalTransfer.reportId)}`:''}${it.externalTransfer?.assignedAt?` · ${hm(it.externalTransfer.assignedAt)}`:''}</div>`:`<div class="row-btns">
         <button class="btn primary" onclick="triage('${it.id}','promote')">위험성평가로 등록</button>
+        <button class="btn" onclick="transferRiskToTraffic('${it.id}')">오접수 → 장흥군청 교통과 이관</button>
         <button class="btn danger" onclick="triage('${it.id}','invalid')">오신고 폐기</button>
-      </div>
+      </div>`}
     </div>
   </div>`;
+}
+async function transferRiskToTraffic(id){
+  if(!confirm('이 접수 내용을 장흥군청 교통과 신고함으로 이관할까요? 사진과 위치·설명이 함께 전달됩니다.'))return;
+  try{const r=await api('/api/risk/items/'+encodeURIComponent(id)+'/transfer-traffic',{method:'POST'});toast('장흥군청 교통과로 이관했습니다 · '+r.reportId);await load()}
+  catch(e){toast(e.message)}
 }
 async function triage(id,decision){
   if(decision!=='promote' && !confirm('오신고로 폐기할까요?')) return;
@@ -300,7 +306,7 @@ function renderTable(){
 function rowHtml(it,index,print=false){
  const options=['상','중','하'].map(x=>'<span>'+(it.riskLevel===x?'☑':'☐')+' '+x+'</span>').join(' ');
  const st={assessing:'평가중',assessed:'평가완료',done:'개선완료'}[it.status]||'',result=it.doneAt||it.resultUpdatedAt;
- const formLabel='작성';
+ const formLabel=print?'작성':(it.sourceReport?'평가·처리결과':'작성');
  const resultButton=result?'<button class="btn" title="이행결과서 열기" aria-label="이행결과서 열기" onclick="showResult(\''+esc(it.id)+'\')"><span class="file-icon">▤</span></button>':'<button class="btn" onclick="openImprove(\''+esc(it.id)+'\')">작성</button>';
  const intake=it.sourceReport;
  const intakeCell=print?(intake?esc(`${intake.reporter} · ${String(intake.createdAt||'').slice(0,10)} · ${intake.status||''}`):'-'):(intake?'<button class="btn" onclick="showIntake(\''+esc(it.id)+'\')">원문</button>':'-');
@@ -364,10 +370,10 @@ function editRow(id){
   const formTitle=it.status==='assessing'?'위험성평가 작성':'위험성평가 수정';
   $('modalCard').innerHTML=`<h3>${formTitle} · ${it.id}</h3>
     ${(it.photoUrl||it.beforePhotoUrl)?`<img class="evidence-photo" src="${esc(it.photoUrl||it.beforePhotoUrl)}" alt="신고 원본 사진" onclick="lightbox(this.src)">`:''}
+    ${it.sourceReport?`<section class="form-section"><h4>신고자 처리결과 공유</h4><div class="fld"><label for="e-report-result">공개할 처리결과</label><textarea id="e-report-result" maxlength="1200" placeholder="확인한 내용, 조치 또는 현재 처리상황을 작성하세요.">${esc(it.reporterResult||'')}</textarea></div><div class="fld"><label style="display:flex;align-items:center;gap:8px;color:var(--ink)"><input id="e-report-publish" type="checkbox" style="width:auto" ${it.reporterResultPublished?'checked':''}> 신고자에게 공개</label></div><small>공개하면 신고자의 ‘내 신고내역’ 상세에서 확인할 수 있습니다. 내부 검토 메모는 공유되지 않습니다.</small></section>`:''}
     <p>${esc(it.note||'')}</p>
     <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"></div><div class="fld"><label>평가자</label><input id="e-evaluator" value="${esc(it.evaluator||it.assessedBy||me.name||'')}"></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div><div class="ai-draft-action"><button class="btn" type="button" onclick="requestRiskAdvice('${id}')">AI로 초안 작성</button><small>유사사례와 관련 법령을 찾아 개선대책과 관련근거를 자동으로 채웁니다. 이후 표에서 직접 수정할 수 있습니다.</small></div><div id="risk-advice-result"></div></section>
     <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"></div><div class="fld"><label>담당자</label><input id="e-owner" value="${esc(it.owner||'')}"></div></div></section>
-    ${it.sourceReport?`<section class="form-section"><h4>신고자에게 처리결과 공유</h4><div class="fld"><label for="e-report-result">공개할 처리결과</label><textarea id="e-report-result" maxlength="1200" placeholder="확인한 내용, 조치 또는 현재 처리상황을 작성하세요.">${esc(it.reporterResult||'')}</textarea></div><div class="fld"><label style="display:flex;align-items:center;gap:8px;color:var(--ink)"><input id="e-report-publish" type="checkbox" style="width:auto" ${it.reporterResultPublished?'checked':''}> 신고자에게 공개</label></div><small>공개를 선택하면 신고자의 ‘내 신고내역’ 상세에서 확인할 수 있습니다. 내부 검토 메모는 공유되지 않습니다.</small></section>`:''}
     <div class="row-btns">
       <button class="btn primary" onclick="saveRow('${id}')">저장</button>
       <button class="btn" onclick="closeModal()">닫기</button>
