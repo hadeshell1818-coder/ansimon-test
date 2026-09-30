@@ -18,7 +18,7 @@ const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const webpush = require('web-push');
-const XLSX = require('xlsx');
+const XLSXStyle = require('xlsx-js-style');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -2019,25 +2019,52 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : null;
   const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : null;
   if (!from || !to || from > to) return res.status(400).json({ error: '조회 시작일과 종료일을 확인하세요.' });
-  const rows = RISK.items.filter(it => {
+  const items = RISK.items.filter(it => {
     const date = String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 10);
     return !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
-  }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt))).map((it, index) => ({
-    번호: index + 1,
-    공정명: it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '',
-    '유해·위험요인': it.factor || '',
-    '위험성 수준': it.riskLevel || '',
-    개선대책: it.reduction || '',
-    개선예정일: it.dueDate || '',
-    개선완료일: it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''),
-    담당자: it.owner || '',
-    이행결과서: it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성',
-    '관련근거(선택사항)': it.referenceText || '',
-  }));
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  sheet['!cols'] = [{ wch: 7 }, { wch: 24 }, { wch: 48 }, { wch: 13 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 48 }];
-  const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, '위험성평가표');
-  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt)));
+  const headers = ['번호', '유해·위험요인', '위험성 수준', '개선대책', '개선예정일', '개선완료일', '담당자', '이행결과서', '관련근거(선택사항)'];
+  const border = { top: { style: 'thin', color: { rgb: '9AA4AE' } }, bottom: { style: 'thin', color: { rgb: '9AA4AE' } }, left: { style: 'thin', color: { rgb: '9AA4AE' } }, right: { style: 'thin', color: { rgb: '9AA4AE' } } };
+  const workbook = XLSXStyle.utils.book_new();
+  const groups = new Map();
+  for (const it of items) {
+    const name = it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '미지정 공정';
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(it);
+  }
+  if (!groups.size) groups.set('조회결과', []);
+  const usedNames = new Set();
+  for (const [processName, group] of groups) {
+    const evaluators = [...new Set(group.map(it => it.evaluator || it.assessedBy).filter(Boolean))].join(', ') || '-';
+    const rows = group.map((it, index) => [
+      index + 1, it.factor || '', it.riskLevel || '', it.reduction || '', it.dueDate || '',
+      it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''), it.owner || '',
+      it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성', it.referenceText || '',
+    ]);
+    const sheet = XLSXStyle.utils.aoa_to_sheet([[`공정명: ${processName}`], [`평가자: ${evaluators}`], [], headers, ...rows]);
+    sheet['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
+    ];
+    sheet['!cols'] = [{ wch: 7 }, { wch: 48 }, { wch: 13 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 48 }];
+    sheet['!rows'] = [{ hpt: 24 }, { hpt: 21 }, { hpt: 8 }, { hpt: 30 }];
+    const endRow = 3 + rows.length;
+    for (let r = 0; r <= endRow; r++) for (let c = 0; c < headers.length; c++) {
+      const address = XLSXStyle.utils.encode_cell({ r, c });
+      const cell = sheet[address] || (sheet[address] = { t: 's', v: '' });
+      cell.s = { ...(cell.s || {}), border };
+      if (r === 0) cell.s = { ...cell.s, font: { bold: true, sz: 15 }, alignment: { horizontal: 'left', vertical: 'center' } };
+      else if (r === 1) cell.s = { ...cell.s, font: { bold: true, sz: 11 }, alignment: { horizontal: 'left', vertical: 'center' } };
+      else if (r === 3) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
+      else if (r >= 4) cell.s = { ...cell.s, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
+    }
+    const baseName = String(processName).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
+    let sheetName = baseName, suffix = 2;
+    while (usedNames.has(sheetName)) { const tail = ` (${suffix++})`; sheetName = baseName.slice(0, 31 - tail.length) + tail; }
+    usedNames.add(sheetName);
+    XLSXStyle.utils.book_append_sheet(workbook, sheet, sheetName);
+  }
+  const buffer = XLSXStyle.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''risk-assessment.xlsx");
   res.send(buffer);
