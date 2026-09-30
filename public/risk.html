@@ -305,7 +305,8 @@ function rowHtml(it,index,print=false){
  const intake=it.sourceReport;
  const intakeCell=print?(intake?esc(`${intake.reporter} · ${String(intake.createdAt||'').slice(0,10)} · ${intake.status||''}`):'-'):(intake?'<button class="btn" onclick="showIntake(\''+esc(it.id)+'\')">원문</button>':'-');
  const photo=it.photoUrl||it.beforePhotoUrl;
- const factorCell=print?'<td class="l factor">'+esc(it.factor||'')+'</td>':'<td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+editableCell(it,'factor',it.factor).replace(/^<td class="l direct-edit">|<\/td>$/g,'')+'<div class="screen-actions"><span>'+esc(st)+'</span></div></td>';
+ const deleteButton=it.source==='safety_mgr'&&!it.fromReport?'<button class="btn danger" onclick="deleteManualRisk(\''+esc(it.id)+'\')">삭제</button>':'';
+ const factorCell=print?'<td class="l factor">'+esc(it.factor||'')+'</td>':'<td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+editableCell(it,'factor',it.factor).replace(/^<td class="l direct-edit">|<\/td>$/g,'')+'<div class="screen-actions"><span>'+esc(st)+'</span>'+deleteButton+'</div></td>';
  return '<tr><td>'+(index+1)+'</td>'+factorCell+'<td>'+(print?options:'<select aria-label="위험성 수준" onchange="saveRiskLevel(\''+esc(it.id)+'\',this.value)">'+riskLevelOptions(it.riskLevel)+'</select>')+(!it.riskLevel?'<small>'+esc(levelText(it))+'</small>':'')+'</td>'+ (print?'<td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td>':editableCell(it,'reduction',numberedText(it.reduction))+editableCell(it,'dueDate',it.dueDate)+ '<td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td>'+editableCell(it,'owner',it.owner))+'<td class="result-cell">'+(print?'작성':resultButton)+'</td>'+(print?'<td class="l">'+esc(numberedText(it.referenceText))+'</td>':editableCell(it,'referenceText',numberedText(it.referenceText)))+(print?'<td>'+formLabel+'</td>':'<td class="result-cell"><button class="btn" onclick="editRow(\''+esc(it.id)+'\')">'+formLabel+'</button></td>')+'<td class="result-cell">'+intakeCell+'</td></tr>';
 }
 function showIntake(id){
@@ -349,6 +350,11 @@ async function submitManualRisk(){
  const file=$('manual-photo')?.files?.[0];
  if(file){try{photoBase64=await fileToDataUrl(file)}catch(e){toast('사진 처리에 실패했습니다. 다시 선택하세요.');return}}
  try{const result=await api('/api/risk/items/manual',{method:'POST',body:JSON.stringify({customProcess,photoBase64})});closeModal();await load();editRow(result.id)}catch(e){toast(e.message)}
+}
+async function deleteManualRisk(id){
+ if(!confirm('이 위험성평가 항목을 삭제할까요? 삭제 후에는 복구할 수 없습니다.'))return;
+ try{await api('/api/risk/items/'+encodeURIComponent(id),{method:'DELETE'});toast('위험성평가 항목을 삭제했습니다.');await load()}
+ catch(e){toast(e.message)}
 }
 
 function editRow(id){

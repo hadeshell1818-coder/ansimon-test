@@ -2144,6 +2144,17 @@ app.post('/api/risk/items/manual', async (req, res) => {
   res.json({ ok: true, id: it.id, item: itemForMgr(it) });
 });
 
+app.delete('/api/risk/items/:id', (req, res) => {
+  const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
+  const index = RISK.items.findIndex(it => it.id === req.params.id);
+  if (index < 0) return res.status(404).json({ error: 'not found' });
+  const it = RISK.items[index];
+  if (it.source !== 'safety_mgr' || it.fromReport) return res.status(409).json({ error: '직접 추가한 위험성평가만 삭제할 수 있습니다.' });
+  RISK.items.splice(index, 1);
+  saveRisk(); broadcastRisk();
+  res.json({ ok: true });
+});
+
 /* 위험성평가 저장(담당자 확정) */
 app.patch('/api/risk/items/:id', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
