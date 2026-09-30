@@ -527,6 +527,12 @@ function syncRiskSource(it) {
     by: it.triagedBy || it.assessedBy || it.improvedBy || null,
     triagedAt: it.triagedAt || null, discardReason: it.discardReason || null };
 }
+function reportPhotoFilename(report) {
+  const photoUrl = String(report?.photoUrl || '').split('?')[0];
+  if (!photoUrl.startsWith('/uploads/')) return null;
+  const filename = path.basename(photoUrl);
+  return filename && fs.existsSync(path.join(UP_DIR, filename)) ? filename : null;
+}
 function routeReport(r) {
   const routing = reportRoute(r);
   if (r.routing !== routing) {
@@ -545,8 +551,17 @@ function routeReport(r) {
     if (existing) { existing.routingInactive = true; saveRisk(); broadcastRisk(); }
     return;
   }
-  if (existing) { existing.routingInactive = false; existing.addr=r.addr; existing.note=[r.addr,r.item,r.internalNote||r.memo].filter(Boolean).join(' · '); r.riskId = existing.id; syncRiskSource(existing); saveRisk(); broadcastRisk(); return; }
-  const photoFile = r.photoUrl ? path.basename(r.photoUrl.split('?')[0]) : null;
+  const photoFile = reportPhotoFilename(r);
+  if (existing) {
+    existing.routingInactive = false;
+    existing.addr = r.addr;
+    existing.note = [r.addr, r.item, r.internalNote || r.memo].filter(Boolean).join(' · ');
+    if (photoFile && !existing.photoFile) existing.photoFile = photoFile;
+    if (photoFile && !existing.beforePhotoFile) existing.beforePhotoFile = photoFile;
+    if (existing.photoFile && !existing.beforePhotoFile) existing.beforePhotoFile = existing.photoFile;
+    r.riskId = existing.id;
+    syncRiskSource(existing); saveRisk(); broadcastRisk(); return;
+  }
   const item = {
     id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier',
     reporter:r.carrier, reporterOrg:r.reporterOrg, createdAt:new Date().toISOString(),
@@ -2284,6 +2299,10 @@ let riskSourceMigrated = false;
 for (const it of RISK.items) {
   if (!it.fromReport) continue;
   const source = reports.find(r => r.id === it.fromReport);
+  const sourcePhoto = reportPhotoFilename(source);
+  if (sourcePhoto && !it.photoFile) { it.photoFile = sourcePhoto; riskSourceMigrated = true; }
+  if (sourcePhoto && !it.beforePhotoFile) { it.beforePhotoFile = sourcePhoto; riskSourceMigrated = true; }
+  if (it.photoFile && !it.beforePhotoFile) { it.beforePhotoFile = it.photoFile; riskSourceMigrated = true; }
   if (source && !source.riskHandling) { syncRiskSource(it); riskSourceMigrated = true; }
 }
 if (riskSourceMigrated) { saveRisk(); save(); }
