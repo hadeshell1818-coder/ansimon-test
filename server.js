@@ -2054,22 +2054,20 @@ app.get('/api/risk/export.xlsx', (req, res) => {
       it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''), it.owner || '',
       it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성', it.referenceText || '',
     ]);
-    const sheet = XLSXStyle.utils.aoa_to_sheet([[`공정명: ${processName}`], [`평가자: ${evaluators}`], [], headers, ...rows]);
-    sheet['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-    ];
+    const titleRow = [`공정명: ${processName}`, '', '', '', '', '', '', '', `평가자: ${evaluators}`];
+    const sheet = XLSXStyle.utils.aoa_to_sheet([titleRow, [], headers, ...rows]);
+    sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 2 } }];
     sheet['!cols'] = [{ wch: 7 }, { wch: 48 }, { wch: 13 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 48 }];
-    sheet['!rows'] = [{ hpt: 24 }, { hpt: 21 }, { hpt: 8 }, { hpt: 30 }];
-    const endRow = 3 + rows.length;
+    sheet['!rows'] = [{ hpt: 24 }, { hpt: 8 }, { hpt: 30 }];
+    const endRow = 2 + rows.length;
     for (let r = 0; r <= endRow; r++) for (let c = 0; c < headers.length; c++) {
       const address = XLSXStyle.utils.encode_cell({ r, c });
       const cell = sheet[address] || (sheet[address] = { t: 's', v: '' });
       cell.s = { ...(cell.s || {}), border };
-      if (r === 0) cell.s = { ...cell.s, font: { bold: true, sz: 15 }, alignment: { horizontal: 'left', vertical: 'center' } };
-      else if (r === 1) cell.s = { ...cell.s, font: { bold: true, sz: 11 }, alignment: { horizontal: 'left', vertical: 'center' } };
-      else if (r === 3) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
-      else if (r >= 4) cell.s = { ...cell.s, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
+      if (r === 0 && c === 0) cell.s = { ...cell.s, font: { bold: true, sz: 14 }, alignment: { horizontal: 'left', vertical: 'center' } };
+      else if (r === 0 && c === headers.length - 1) cell.s = { ...cell.s, font: { bold: true, sz: 11 }, alignment: { horizontal: 'right', vertical: 'center' } };
+      else if (r === 2) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
+      else if (r >= 3) cell.s = { ...cell.s, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
     }
     const baseName = String(processName).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
     let sheetName = baseName, suffix = 2;
