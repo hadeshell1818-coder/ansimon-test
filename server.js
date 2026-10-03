@@ -19,6 +19,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const webpush = require('web-push');
 const XLSXStyle = require('xlsx-js-style');
+const { WIDTHS: RISK_EXPORT_WIDTHS, exportRows: riskExportRows, configureExport: configureRiskExport } = require('./risk-export-layout.cjs');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -2049,16 +2050,12 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const usedNames = new Set();
   for (const [processName, group] of groups) {
     const evaluators = [...new Set(group.map(it => it.evaluator || it.assessedBy).filter(Boolean))].join(', ') || '-';
-    const rows = group.map((it, index) => [
-      index + 1, it.factor || '', it.riskLevel || '', it.reduction || '', it.dueDate || '',
-      it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''), it.owner || '',
-      it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성', it.referenceText || '',
-    ]);
+    const { rows, heights } = riskExportRows(group);
     const titleRow = [`공정명: ${processName}`, '', '', '', '', '', '', '', `평가자: ${evaluators}`];
     const sheet = XLSXStyle.utils.aoa_to_sheet([titleRow, [], headers, ...rows]);
     sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 2 } }];
-    sheet['!cols'] = [{ wch: 7 }, { wch: 48 }, { wch: 13 }, { wch: 54 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 14 }, { wch: 48 }];
-    sheet['!rows'] = [{ hpt: 24 }, { hpt: 8 }, { hpt: 30 }];
+    sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch }));
+    sheet['!rows'] = [{ hpt: 30 }, { hpt: 8 }, { hpt: 42 }, ...heights.map(hpt => ({ hpt }))];
     const endRow = 2 + rows.length;
     for (let r = 0; r <= endRow; r++) for (let c = 0; c < headers.length; c++) {
       const address = XLSXStyle.utils.encode_cell({ r, c });
@@ -2067,7 +2064,7 @@ app.get('/api/risk/export.xlsx', (req, res) => {
       if (r === 0 && c === 0) cell.s = { ...cell.s, font: { bold: true, sz: 14 }, alignment: { horizontal: 'left', vertical: 'center' } };
       else if (r === 0 && c === headers.length - 1) cell.s = { ...cell.s, font: { bold: true, sz: 11 }, alignment: { horizontal: 'right', vertical: 'center' } };
       else if (r === 2) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
-      else if (r >= 3) cell.s = { ...cell.s, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
+      else if (r >= 3) cell.s = { ...cell.s, font: { sz: 10 }, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
     }
     const baseName = String(processName).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
     let sheetName = baseName, suffix = 2;
@@ -2075,7 +2072,7 @@ app.get('/api/risk/export.xlsx', (req, res) => {
     usedNames.add(sheetName);
     XLSXStyle.utils.book_append_sheet(workbook, sheet, sheetName);
   }
-  const buffer = XLSXStyle.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  const buffer = configureRiskExport(XLSXStyle.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''risk-assessment.xlsx");
   res.send(buffer);
@@ -2253,9 +2250,21 @@ app.patch('/api/risk/items/:id', (req, res) => {
   if (b.proc && procById(b.proc)) { it.proc = b.proc; it.customProcess = null; }
   if (typeof b.customProcess === 'string') it.customProcess = b.customProcess.slice(0, 120) || null;
   if (b.hazard && HAZARD_TYPES[b.hazard]) it.hazard = b.hazard;
-  str('factor'); str('currentControl'); str('fieldReview', 500); str('reduction', 500); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
+  str('factor', 1000); str('currentControl'); str('fieldReview', 4000); str('reduction', 6000); str('dept', 100); str('owner', 60); str('dueDate', 20); str('workContent', 200);
   if (Array.isArray(b.evidenceIds)) it.evidenceIds = b.evidenceIds.filter(x => typeof x === 'string').slice(0, 20);
-  str('assessmentTarget',200); str('evaluator',100); str('referenceText',1500);
+  str('assessmentTarget',200); str('evaluator',100); str('referenceText',10000);
+  if (b.aiAdvice && typeof b.aiAdvice === 'object' && !Array.isArray(b.aiAdvice)) {
+    const advice = b.aiAdvice;
+    it.aiAdvice = {
+      description: String(advice.description || '').slice(0, 3000),
+      answers: (Array.isArray(advice.answers) ? advice.answers : []).slice(0, 8).map(a => ({ question: String(a.question || '').slice(0, 300), answer: String(a.answer || '').slice(0, 1000) })),
+      rationale: String(advice.rationale || '').slice(0, 1500), limitations: String(advice.limitations || '').slice(0, 1200),
+      sourceOrigin: ['internal', 'external', 'mixed', 'none'].includes(advice.sourceOrigin) ? advice.sourceOrigin : 'none',
+      evidence: (Array.isArray(advice.evidence) ? advice.evidence : []).slice(0, 8).map(e => ({ ref: String(e.ref || '').slice(0, 200), title: String(e.title || e.work || '').slice(0, 300), locator: String(e.locator || '').slice(0, 200), sourceUrl: String(e.sourceUrl || '').slice(0, 2000) })),
+      review: { causalCheck: String(advice.review?.causalCheck || '').slice(0, 20), legalCheck: String(advice.review?.legalCheck || '').slice(0, 20), summary: String(advice.review?.summary || '').slice(0, 1000) },
+      at: new Date().toISOString(), by: u.name,
+    };
+  }
   if (reporterResultChange) {
     it.reporterResult = nextReporterResult;
     it.reporterResultPublished = nextReporterPublished;
@@ -2460,3 +2469,4 @@ const wsHeartbeat = setInterval(() => {
 wsHeartbeat.unref();
 
 server.listen(PORT, () => console.log(`▶ 생활안전·복지 신고 서버 실행 :${PORT}`));
+

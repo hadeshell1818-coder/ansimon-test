@@ -60,7 +60,8 @@ async function main() {
   assert.match(bodySearch.results[0].sections[0].body, /계단 파손은 미끄러짐/);
   const failed = createKnowledgeRepository(configured, async () => ({ ok: false, status: 401, text: async () => 'unauthorized' }));
   await assert.rejects(failed.list(), /401/);
-  const lawRepo = createKnowledgeRepository({ ...configured, OPENAI_API_KEY: 'test-openai-key' }, async url => {
+  const lawRepo = createKnowledgeRepository({ ...configured, OPENAI_API_KEY: 'test-openai-key', SAFETY_EXTERNAL_SEARCH: 'off' }, async (url, options) => {
+    if (String(url).includes('api.openai.com')) return global.fetch(url, options);
     const parsed = new URL(url), resource = parsed.pathname.split('/').pop();
     if (resource === 'safety_documents' && parsed.searchParams.get('kind') === 'eq.law') return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
     if (resource === 'safety_documents' && parsed.searchParams.has('id')) return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
@@ -76,7 +77,7 @@ async function main() {
         : first.startsWith('당신은 산업안전 위험성평가 초안의 품질 검토자')
           ? { causalCheck: 'pass', legalCheck: 'pass', approvedMeasures: ['통로를 안전하게 유지한다.'], approvedCitations: ['doc:law-section-1'], reviewSummary: '유해요인과 대책 및 법령 근거가 연결됩니다.', additionalChecks: [] }
           : { factor: '계단 파손에 따른 전도 위험', measures: ['통로를 안전하게 유지한다.'], citations: ['doc:law-section-1'], limitations: '' };
-      if (!first.startsWith('산업안전 위험 설명') && !first.startsWith('당신은 산업안전 위험성평가 초안의 품질 검토자')) assert.match(requestBody.messages[1].content, /승인된 법령/);
+      if (!first.startsWith('산업안전 위험 설명') && !first.startsWith('당신은 산업안전 위험성평가 초안의 품질 검토자')) assert.match(requestBody.messages.at(-1).content, /승인된 법령/);
       return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
     };
     const advice = await lawRepo.recommendRisk({ description: '계단 파손으로 넘어질 위험이 있습니다.' });
@@ -100,3 +101,4 @@ async function main() {
   console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, idempotent seeds, upstream failures');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
+

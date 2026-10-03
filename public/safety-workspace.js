@@ -112,6 +112,7 @@ function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
     <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    <details class="detailbox"><summary>외부 검색 참고자료 목록 · ${knowledgeState?.referenceCatalog?.titles?.length||0}종</summary><p>${esc(knowledgeState?.referenceCatalog?.note||'참고 목록 확인 중')}</p><p>AI 초안 작성 시 관련 자료의 공개 원문을 우선 검색합니다. 비공개 내부자료는 기관 승인 후 원문을 등록해 주세요.</p><ol>${(knowledgeState?.referenceCatalog?.titles||[]).map(title=>`<li>${esc(title)}</li>`).join('')}</ol></details>
     <p class="workspace-note">국가법령정보센터의 현행 산업안전보건법·시행령·시행규칙·안전보건규칙과 사업장 위험성평가 지침을 조문 단위로 저장합니다. 시행예정본과 연혁본은 제외합니다.</p>
     <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
       <div><h3>SIF 고위험요인 아카이브 가져오기</h3><p>한국산업안전보건공단 공개 엑셀의 제조업 등·건설업 원자료를 업종, 공종, 기인물, 유발요인, 감소대책으로 나누어 검토대기 상태로 저장합니다.</p></div>
@@ -241,3 +242,4 @@ async function saveSource(event) {
   } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
   finally { button.disabled = false; }
 }
+
