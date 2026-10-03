@@ -34,6 +34,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
+require('./carrier-weather.cjs').registerWeatherRoute(app, userFromReq);
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');

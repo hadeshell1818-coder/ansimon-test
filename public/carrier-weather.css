@@ -1,0 +1,12 @@
+:root{--screen:#f0f6f5}
+body{background:#f0f6f5}.wrap{background:linear-gradient(180deg,#eaf4f3,#f0f6f5 600px)}
+.card,.sub,.mrow{box-shadow:0 3px 12px rgba(27,66,62,.045)}
+.weather-card{background:linear-gradient(145deg,#e2f2fc,#f2f9fc);border:1px solid #bdd9e8;border-radius:19px;padding:16px;margin:0 0 16px;color:#173b53;box-shadow:0 5px 20px rgba(36,87,111,.08)}
+.weather-title{display:flex;align-items:center;justify-content:space-between;font-size:16px}.weather-title button{font-size:22px;padding:2px 8px}
+.weather-card button{font-family:inherit;border:1px solid #adcbdc;background:#fff9;color:#234e67;border-radius:9px;min-height:32px;font-weight:750;cursor:pointer}
+.weather-region{font-size:11px;color:#496c80;margin-top:3px}.weather-now{display:flex;gap:16px;align-items:center;margin:12px 0}.weather-now strong{font-size:46px;letter-spacing:-2px;line-height:1}.weather-now div{display:grid;gap:5px;font-size:14px}.weather-now span{font-weight:750}
+.weather-metrics{display:flex;justify-content:space-between;gap:6px;font-size:11px;flex-wrap:wrap}.weather-metrics b{font-size:12px}.weather-tip{font-size:12px;line-height:1.5;background:#fff8;border-radius:9px;padding:9px;margin:12px 0}
+.weather-tabs{display:flex;gap:6px}.weather-tabs button{padding:6px 12px;font-size:12px}.weather-tabs [aria-pressed=true]{background:#214f6b;color:white;border-color:#214f6b}
+.weather-card svg{display:block;width:100%;height:auto;margin-top:6px}.weather-card svg text{font:10px system-ui;fill:#3c5e72}.weather-legend{display:flex;gap:12px;font-size:10px;flex-wrap:wrap}.weather-legend span:first-child{color:#2668a5}.weather-legend span:nth-child(2){color:#ad5b25}.weather-legend small{font-size:9px;color:#486775;margin-left:auto}
+.weather-card details{margin-top:12px;font-size:12px}.weather-card summary{cursor:pointer;padding:5px 0;font-weight:700}.weather-table{max-height:230px;overflow:auto}.weather-table table{border-collapse:collapse;width:100%;font-size:11px;text-align:center}.weather-table th,.weather-table td{padding:6px 3px;border-bottom:1px solid #ccdde5}.weather-table th{position:sticky;top:0;background:#e8f3f8}
+.weather-source{font-size:9px;line-height:1.5;color:#516e80;margin-top:10px}.weather-source a{color:#335d77}.weather-card button:focus-visible,.weather-card summary:focus-visible{outline:3px solid #296798;outline-offset:2px}

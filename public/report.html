@@ -266,6 +266,8 @@
 <div class="sf-modal" id="sfModal" onclick="if(event.target===this&&!sfActiveAlert)this.classList.remove('on')"><div class="sf-sheet" id="sfSheet"></div></div>
 <div class="toast" id="toast"></div>
 
+<link rel="stylesheet" href="/carrier-weather.css">
+<script src="/carrier-weather.js"></script>
 <script>
 /* ===== 상태 ===== */
 // 모바일/PWA 창이 운영체제에 의해 종료돼도 서버 세션이 유효한 동안 로그인을 복구한다.
@@ -353,7 +355,7 @@ function home(){
   $('cw').innerHTML=`
     ${installBanner()}
     ${sfPushPromptHtml()}
-    <div class="home-welcome"><b>${sfEsc(me.name)}</b> · ${sfEsc(me.org||'')}<span>필요한 기능을 바로 선택하세요.</span></div>
+    <section id="carrier-weather" class="weather-card" aria-label="오늘의 배달 날씨"></section>
     <section class="home-section delivery" aria-label="배달위험 알림">
       <div class="home-section-title">배달위험 알림</div>
       <div class="home-grid">
@@ -376,6 +378,7 @@ function home(){
     </section>
     <button class="history-link" onclick="showReportHistory()">내 신고내역 · 처리현황 <span>›</span></button>
     <div class="home-emergency-note">급박한 생명·신체 위험은 119 또는 112에 먼저 신고하세요.</div>`;
+  CarrierWeather.mount(api);
 }
 async function showReportHistory(){
   let mine=[];
@@ -1581,3 +1584,4 @@ const old=window.home;window.home=async function(...args){const r=await old.appl
 </script>
 </body>
 </html>
+
