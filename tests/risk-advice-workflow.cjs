@@ -6,7 +6,7 @@ const catalog = require('../seed-assets/safety-reference-catalog.json');
 async function main() {
   assert.equal(catalog.titles.length, 74);
   const calls = [];
-  let questions = true, critical = true, searchFail = false, internalMode = false, sufficient = false;
+  let questions = true, critical = true, unresolvedMeaning = true, searchFail = false, internalMode = false;
   const request = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : {};
     calls.push({url:String(url),body});
@@ -26,7 +26,7 @@ async function main() {
     }
     const prompt=body.messages[0].content;
     let result;
-    if(prompt.startsWith('검색 근거가 실제'))result={sufficient,reason:'현장 적용성 검토'};
+    if(prompt.startsWith('질문 필요성을 재검토'))result={unresolvedMeaning:unresolvedMeaning && questions,queries:['운반 작업'],questions:[{question:'운반 방식은?',reason:'위험 대상 해석 불가'},{question:'설명한 설비는?',reason:'대상 설비 해석 불가'},{question:'세 번째 질문',reason:'제외해야 함'}]};
     else if(prompt.startsWith('산업안전 위험 설명')) result={queries:['운반 작업'],critical,questions:questions?[{question:'설명한 운반 작업은 차량 운행인가요, 수작업 운반인가요?',reason:'서로 다른 위험 대상이라 안전대책의 적용 대상을 해석할 수 없습니다.'},{question:'추가 질문',reason:'추가 이유'}]:[]};
     else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질')) result={causalCheck:'pass',legalCheck:'pass',approvedMeasures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],approvedCitations:['external:0'],reviewSummary:'현장 대책 검토',additionalChecks:[]};
     else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
@@ -34,7 +34,12 @@ async function main() {
   };
   const repo=createKnowledgeRepository({OPENAI_API_KEY:'test-key'},request);
   const first=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
-  assert.equal(first.needsClarification,true);assert.equal(calls.length,1);assert.equal(first.questions.length,1);
+  assert.equal(first.needsClarification,true);assert.equal(calls.length,2);assert.equal(first.questions.length,2);
+  assert.match(calls[1].body.messages[0].content,/질문 필요성을 재검토/);
+  unresolvedMeaning=false;
+  const resolved=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
+  assert.notEqual(resolved.needsClarification,true,'재검토에서 의미를 이해하면 질문 없이 작성');
+  unresolvedMeaning=true;
   const second=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',answers:[{question:first.questions[0].question,answer:'한 개 10kg, 하루 20회'}]});
   assert.equal(second.sourceOrigin,'external');assert.equal(second.externalSources.length,1);
   assert.equal(second.answers[0].answer,'한 개 10kg, 하루 20회');assert.deepEqual(second.citations,['external:0']);
@@ -54,9 +59,15 @@ async function main() {
   failingRepo.search=async()=>({cases:[{id:'case',review_status:'approved',reduction_measures:'운반 동선 분리'}],results:[{title:'운반 작업',kind:'guideline',review_status:'approved',sections:[{id:'section',body:'운반 보조기구 사용'}]}]});
   const mixed=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(mixed.sourceOrigin,'mixed');assert.equal(mixed.externalSearch.attempted,true);
-  sufficient=true;
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
-  assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
+  assert.equal(enough.sourceOrigin,'mixed');assert.equal(enough.externalSearch.attempted,true);
+  const draftCall=calls.find(call=>call.body.messages?.[0]?.content.startsWith('근거 검토와 해결책의 틀'));
+  assert.ok(draftCall,'단계별 근거·해결책 설계 지시');
+  const draftContext=JSON.parse(draftCall.body.messages.at(-1).content);
+  assert.deepEqual(draftContext.evidenceFramework.map(stage=>stage.level),['법','시행령','규칙','고시·공시','지침·매뉴얼·사례']);
+  const mixedReview=calls.find(call=>call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')&&JSON.parse(call.body.messages.at(-1).content).evidence.some(item=>item.ref.startsWith('doc:')));
+  assert.ok(mixedReview,'품질 재검토에 내부·외부 근거 함께 전달');
+  assert.ok(JSON.parse(mixedReview.body.messages.at(-1).content).evidence.some(item=>item.ref.startsWith('external:')));
   searchFail=true;
   const unavailable=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(unavailable.noEvidence,true);assert.equal(unavailable.review.passed,false);assert.match(unavailable.externalSearch.error,/503/);
