@@ -28,7 +28,7 @@ async function main() {
     let result;
     if(prompt.startsWith('질문 필요성을 재검토'))result={unresolvedMeaning:unresolvedMeaning && questions,queries:['운반 작업'],questions:[{question:'운반 방식은?',reason:'위험 대상 해석 불가'},{question:'설명한 설비는?',reason:'대상 설비 해석 불가'},{question:'세 번째 질문',reason:'제외해야 함'}]};
     else if(prompt.startsWith('산업안전 위험 설명')) result={queries:['운반 작업'],critical,questions:questions?[{question:'설명한 운반 작업은 차량 운행인가요, 수작업 운반인가요?',reason:'서로 다른 위험 대상이라 안전대책의 적용 대상을 해석할 수 없습니다.'},{question:'추가 질문',reason:'추가 이유'}]:[]};
-    else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질')) result={causalCheck:'pass',legalCheck:'pass',approvedMeasures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],approvedCitations:['external:0'],reviewSummary:'현장 대책 검토',additionalChecks:[]};
+    else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질')) result={approvedReply:'수작업 조건에서 적재물 제거와 동선 분리를 검토하세요.',causalCheck:'pass',legalCheck:'pass',approvedMeasures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],approvedCitations:['external:0'],reviewSummary:'현장 대책 검토',additionalChecks:[]};
     else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
     return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};
   };
@@ -52,6 +52,12 @@ async function main() {
   const unknown=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',answers:[{question:'운반 방식',answer:'모름'}]});
   assert.notEqual(unknown.needsClarification,true,'모름에도 반복 질문하지 않음');
   questions=false;
+  const chat=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',feedback:'차량이 아니라 수작업입니다. 대안을 제안해주세요.',currentDraft:{measures:'차량 분리'},conversation:[{role:'user',text:'작업 공간을 넓힐 수 없습니다.'}]});
+  assert.match(chat.chatReply,/수작업/);
+  assert.equal(chat.needsClarification,undefined);
+  const chatDraft=calls.find(call=>call.body.messages?.[0]?.content.startsWith('feedback')&&JSON.parse(call.body.messages.at(-1).content).feedback);
+  assert.ok(chatDraft);
+  assert.equal(JSON.parse(chatDraft.body.messages.at(-1).content).currentDraft.measures,'차량 분리');
   const failingRepo=createKnowledgeRepository({OPENAI_API_KEY:'test-key',SAFETY_SUPABASE_URL:'https://test.supabase.co',SAFETY_SUPABASE_SERVICE_KEY:'key'},request);
   const fallback=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(fallback.sourceOrigin,'external');assert.ok(fallback.internalSearch.errors.length);
@@ -61,7 +67,7 @@ async function main() {
   assert.equal(mixed.sourceOrigin,'mixed');assert.equal(mixed.externalSearch.attempted,true);
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(enough.sourceOrigin,'mixed');assert.equal(enough.externalSearch.attempted,true);
-  const draftCall=calls.find(call=>call.body.messages?.[0]?.content.startsWith('근거 검토와 해결책의 틀'));
+  const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
   assert.ok(draftCall,'단계별 근거·해결책 설계 지시');
   const draftContext=JSON.parse(draftCall.body.messages.at(-1).content);
   assert.deepEqual(draftContext.evidenceFramework.map(stage=>stage.level),['법','시행령','규칙','고시·공시','지침·매뉴얼·사례']);

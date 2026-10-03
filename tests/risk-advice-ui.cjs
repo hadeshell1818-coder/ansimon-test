@@ -40,6 +40,15 @@ async function main(){
   assert.match(item.referenceText,/https:\/\/www.kosha.or.kr\/guide/);
   assert.equal(item.aiAdvice.answers.length,1);
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),false);
+  const previous=item.reduction;
+  await page.locator('#risk-chat-input').fill('차량이 아니라 수작업입니다. 다른 대책을 제안해주세요.');
+  await page.locator('#risk-chat-send').click();
+  await page.locator('#risk-chat-apply').waitFor();
+  assert.match(requests[2].feedback,/수작업/);
+  assert.equal(item.reduction,previous,'대화 제안은 자동 저장하지 않음');
+  await page.locator('#risk-chat-apply').click();
+  await page.getByText('수정 대책과 검토 대화를 저장했습니다.',{exact:true}).waitFor();
+  assert.equal(item.aiAdvice.conversation.length,2);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
   await page.evaluate(()=>{window.originalOpen=window.open;window.open=(...args)=>{const w=window.originalOpen(...args);w.print=()=>{};return w}});
   const popupPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'위험성평가표 출력',exact:true}).click();

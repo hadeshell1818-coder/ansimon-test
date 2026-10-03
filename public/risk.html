@@ -367,19 +367,20 @@ async function deleteManualRisk(id){
 
 function editRow(id){
   const it=R.registered.find(x=>x.id===id); const d=it.aiDraft||{};
-  riskAdviceDraft=null; riskAdviceSession={id,description:it.factor||'',questions:[],answers:it.aiAdvice?.answers||[]};
+  riskAdviceDraft=null; riskAdviceSession={id,description:it.factor||'',questions:[],answers:it.aiAdvice?.answers||[],conversation:it.aiAdvice?.conversation||[]};
   selectedEvidence=(it.evidenceIds||[]).map(id=>({id,title:`연결된 근거 ${id}`}));
   const formTitle=it.status==='assessing'?'위험성평가 작성':'위험성평가 수정';
   $('modalCard').innerHTML=`<h3>${formTitle} · ${it.id}</h3>
     ${(it.photoUrl||it.beforePhotoUrl)?`<img class="evidence-photo" src="${esc(it.photoUrl||it.beforePhotoUrl)}" alt="신고 원본 사진" onclick="lightbox(this.src)">`:''}
     ${it.sourceReport?`<section class="form-section"><h4>신고자 처리결과 공유</h4><div class="fld"><label for="e-report-result">공개할 처리결과</label><textarea id="e-report-result" maxlength="1200" placeholder="확인한 내용, 조치 또는 현재 처리상황을 작성하세요.">${esc(it.reporterResult||'')}</textarea></div><div class="fld"><label style="display:flex;align-items:center;gap:8px;color:var(--ink)"><input id="e-report-publish" type="checkbox" style="width:auto" ${it.reporterResultPublished?'checked':''}> 신고자에게 공개</label></div><small>공개하면 신고자의 ‘내 신고내역’ 상세에서 확인할 수 있습니다. 내부 검토 메모는 공유되지 않습니다.</small></section>`:''}
     <p>${esc(it.note||'')}</p>
-    <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"></div><div class="fld"><label>평가자</label><input id="e-evaluator" value="${esc(it.evaluator||it.assessedBy||me.name||'')}"></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div><div class="ai-draft-action"><button id="risk-advice-button" class="btn" type="button" onclick="requestRiskAdvice('${id}')">AI로 초안 작성</button><small>유사사례와 관련 법령을 찾아 개선대책과 관련근거를 자동으로 채웁니다. 이후 표에서 직접 수정할 수 있습니다.</small></div><div id="risk-advice-result">${it.aiAdvice?'<div class="ai-box"><b>이전 AI 초안 검토 이력</b><p>'+esc(it.aiAdvice.rationale||'')+'</p><p>'+esc(it.aiAdvice.limitations||'')+'</p>'+it.aiAdvice.answers.map(a=>'<p><b>'+esc(a.question)+'</b><br>'+esc(a.answer)+'</p>').join('')+'</div>':''}</div></section>
+    <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"></div><div class="fld"><label>평가자</label><input id="e-evaluator" value="${esc(it.evaluator||it.assessedBy||me.name||'')}"></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor">${esc(it.factor||d.factor||'')}</textarea></div><div class="ai-draft-action"><button id="risk-advice-button" class="btn" type="button" onclick="requestRiskAdvice('${id}')">AI로 초안 작성</button><small>유사사례와 관련 법령을 찾아 개선대책과 관련근거를 자동으로 채웁니다. 이후 표에서 직접 수정할 수 있습니다.</small></div><div id="risk-advice-result">${it.aiAdvice?'<div class="ai-box"><b>이전 AI 초안 검토 이력</b><p>'+esc(it.aiAdvice.rationale||'')+'</p><p>'+esc(it.aiAdvice.limitations||'')+'</p>'+it.aiAdvice.answers.map(a=>'<p><b>'+esc(a.question)+'</b><br>'+esc(a.answer)+'</p>').join('')+'</div>':''}</div>${riskChatPanel(id)}</section>
     <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"></div><div class="fld"><label>담당자</label><input id="e-owner" value="${esc(it.owner||'')}"></div></div></section>
     <div class="row-btns">
       <button class="btn primary" onclick="saveRow('${id}')">저장</button>
       <button class="btn" onclick="closeModal()">닫기</button>
     </div>`;
+  renderRiskChat();
   $('modal').classList.add('on');
 }
 async function saveRow(id){
@@ -449,6 +450,7 @@ async function requestRiskAdvice(id,answerQuestions=false){
   try{
     let photoBase64='';
     if(it.photoUrl||it.beforePhotoUrl){try{const response=await fetch(it.photoUrl||it.beforePhotoUrl);if(response.ok)photoBase64=await fileToDataUrl(new File([await response.blob()],'risk-photo.jpg',{type:'image/jpeg'}));}catch(_){}}
+    session.photoBase64=photoBase64;
     const d=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description,photoBase64,process:$('e-target')?.value||assessmentProcess(it),answers:session.answers})});
     if(riskAdviceSession!==session||$('risk-advice-result')!==host)return;
     if($('e-factor').value.trim()!==description){host.innerHTML='<small>작성 중 유해·위험요인이 변경되었습니다. 변경된 내용으로 다시 작성해 주세요.</small>';return}
@@ -472,6 +474,36 @@ async function requestRiskAdvice(id,answerQuestions=false){
     host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거 초안</b><small>근거 구분: '+esc(origin)+' · 최종 평가는 담당자가 확인해 주세요.</small><div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(body.reduction)+'</div></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(body.referenceText)+'</div></div>'+explanation+approval+'</div>';
   }catch(error){if(riskAdviceSession===session&&$('risk-advice-result')===host)host.innerHTML='<small class="workspace-error">'+esc(error.message)+'</small>';}
   finally{if(button){button.disabled=false;button.textContent='AI로 초안 작성'}}
+}
+function riskChatPanel(id){return '<section class="ai-box"><b>AI 초안 검토 대화</b><p>잘못 이해한 부분을 알려주거나 다른 대책을 요청하세요. 수정 제안은 확인 후 반영할 수 있습니다.</p><div id="risk-chat-messages" style="white-space:pre-wrap"></div><label for="risk-chat-input">검토 질문·현장 정정</label><textarea id="risk-chat-input" maxlength="1500" placeholder="예: 차량 작업이 아니라 수작업 운반입니다. 공간을 넓힐 수 없는데 다른 대책은?"></textarea><button id="risk-chat-send" class="btn" type="button" onclick="sendRiskChat(\''+esc(id)+'\')">AI와 검토</button><div id="risk-chat-proposal" style="white-space:pre-wrap"></div></section>'}
+function renderRiskChat(){const session=riskAdviceSession;if(!session||!$('risk-chat-messages'))return;$('risk-chat-messages').innerHTML=(session.conversation||[]).map(turn=>'<p><b>'+(turn.role==='user'?'담당자':'AI 검토')+'</b><br>'+esc(turn.text)+'</p>').join('')}
+async function sendRiskChat(id){
+  const session=riskAdviceSession,button=$('risk-chat-send'),input=$('risk-chat-input'),proposal=$('risk-chat-proposal');
+  if(!session||session.id!==id||session.chatBusy||$('risk-advice-button')?.disabled)return;
+  const feedback=input?.value.trim(),it=R.registered.find(item=>item.id===id);if(!feedback||!it)return;
+  const currentMeasures=session.proposal?.measures?.join('\n')||it.reduction||riskAdviceDraft?.measures?.join('\n')||'';
+  if(!currentMeasures){toast('먼저 AI 초안을 작성해 주세요.');return}
+  session.chatBusy=true;button.disabled=true;button.textContent='검토중…';$('risk-advice-button').disabled=true;proposal.textContent='내부·외부 근거를 검색하고 대책을 재검토하고 있습니다.';
+  const description=$('e-factor').value.trim();
+  try{
+    const d=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description,photoBase64:session.photoBase64||'',process:$('e-target')?.value||assessmentProcess(it),answers:session.answers,feedback,conversation:session.conversation||[],currentDraft:{measures:currentMeasures,rationale:session.proposal?.rationale||riskAdviceDraft?.rationale||it.aiAdvice?.rationale||''}})});
+    if(riskAdviceSession!==session||$('e-factor').value.trim()!==description)return;
+    session.conversation=[...(session.conversation||[]),{role:'user',text:feedback},{role:'assistant',text:d.chatReply||d.review?.summary||'검토 결과를 확인해 주세요.'}].slice(-8);renderRiskChat();input.value='';
+    session.proposal=d;session.proposalDescription=description;
+    proposal.innerHTML='<p><b>수정 대책 제안</b><br>'+esc((d.measures||[]).join('\n'))+'</p><p>'+esc(d.rationale||'')+'</p><p>'+esc(d.limitations||'')+'</p>'+riskAdviceSources(d)+(d.review?.passed?'<button id="risk-chat-apply" class="btn primary" type="button" onclick="applyRiskChat(\''+esc(id)+'\')">수정안 반영</button>':'<p>근거·대책 검토가 완료되지 않아 자동 반영할 수 없습니다.</p>');
+  }catch(error){if(riskAdviceSession===session)proposal.textContent=error.message;}
+  finally{session.chatBusy=false;if(riskAdviceSession===session){button.disabled=false;button.textContent='AI와 검토';$('risk-advice-button').disabled=false;}}
+}
+async function applyRiskChat(id){
+  const session=riskAdviceSession,d=session?.proposal,it=R.registered.find(item=>item.id===id),button=$('risk-chat-apply');if(!it||!d?.review?.passed||session.chatBusy||button?.disabled)return;
+  if($('e-factor').value.trim()!==session.proposalDescription){toast('유해요인이 변경되었습니다. 다시 검토해 주세요.');return}
+  button.disabled=true;
+  try{
+    const references=(d.evidence||[]).map(item=>[item.title||item.work||item.ref,item.locator,item.publisher,item.sourceUrl].filter(Boolean).join(' · '));
+    const body={reduction:numberedText((d.measures||[]).join('\n')),referenceText:numberedText(references.join('\n')),evidenceIds:[...new Set([...(it.evidenceIds||[]),...(d.citations||[])])],fieldReview:[d.rationale,...(d.review.additionalChecks||[])].filter(Boolean).join('\n'),aiAdvice:{description:session.proposalDescription,answers:session.answers,conversation:session.conversation,rationale:d.rationale,limitations:d.limitations,evidence:d.evidence||[],review:d.review,sourceOrigin:d.sourceOrigin}};
+    const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)});Object.assign(it,saved.item);
+    if(riskAdviceSession!==session)return;riskAdviceDraft=d;session.proposal=null;selectedEvidence=body.evidenceIds.map(id=>({id,title:id}));$('risk-advice-result').innerHTML='<div class="ai-box"><b>대화로 수정한 개선대책</b><p style="white-space:pre-wrap">'+esc(body.reduction)+'</p><p>'+esc(d.rationale||'')+'</p>'+riskAdviceSources(d)+'</div>';$('risk-chat-proposal').textContent='수정 대책과 검토 대화를 저장했습니다.';toast('수정안을 반영했습니다.');
+  }catch(error){toast(error.message);button.disabled=false;}
 }
 function closeModal(){ riskAdviceSession=null;$('modal').classList.remove('on'); }
 

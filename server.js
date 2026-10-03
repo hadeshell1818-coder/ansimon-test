@@ -2258,6 +2258,7 @@ app.patch('/api/risk/items/:id', (req, res) => {
     it.aiAdvice = {
       description: String(advice.description || '').slice(0, 3000),
       answers: (Array.isArray(advice.answers) ? advice.answers : []).slice(0, 8).map(a => ({ question: String(a.question || '').slice(0, 300), answer: String(a.answer || '').slice(0, 1000) })),
+      conversation: (Array.isArray(advice.conversation) ? advice.conversation : []).slice(-8).map(turn => ({ role: turn.role === 'assistant' ? 'assistant' : 'user', text: String(turn.text || '').slice(0, 2000) })),
       rationale: String(advice.rationale || '').slice(0, 1500), limitations: String(advice.limitations || '').slice(0, 1200),
       sourceOrigin: ['internal', 'external', 'mixed', 'none'].includes(advice.sourceOrigin) ? advice.sourceOrigin : 'none',
       evidence: (Array.isArray(advice.evidence) ? advice.evidence : []).slice(0, 8).map(e => ({ ref: String(e.ref || '').slice(0, 200), title: String(e.title || e.work || '').slice(0, 300), locator: String(e.locator || '').slice(0, 200), sourceUrl: String(e.sourceUrl || '').slice(0, 2000) })),
