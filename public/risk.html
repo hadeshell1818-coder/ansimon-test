@@ -441,8 +441,7 @@ async function requestRiskAdvice(id,answerQuestions=false){
   if(!riskAdviceSession||riskAdviceSession.id!==id||riskAdviceSession.description!==description)riskAdviceSession={id,description,questions:[],answers:[]};
   const session=riskAdviceSession;
   if(answerQuestions){
-    const answers=session.questions.map((q,index)=>({question:q.question,answer:$('risk-answer-'+index)?.value.trim()||''}));
-    if(answers.some(a=>!a.answer)){toast('추가 질문에 답해주세요. 확인할 수 없으면 모름이라고 적어주세요.');return}
+    const answers=session.questions.map((q,index)=>({question:q.question,answer:$('risk-answer-'+index)?.value.trim()||'미확인 — 조건별 안전대책으로 초안 작성'}));
     session.answers=[...session.answers,...answers].slice(-8);
   }
   if(button){button.disabled=true;button.textContent='작성중…'}
@@ -456,7 +455,7 @@ async function requestRiskAdvice(id,answerQuestions=false){
     riskAdviceDraft=d;
     if(d.needsClarification){
       session.questions=d.questions||[];
-      host.innerHTML='<div class="ai-box"><b>추가 현장정보가 필요합니다</b><p>답변을 검토한 뒤 근거 검색과 초안 작성을 진행합니다. 미확인 사항은 모름으로 답할 수 있습니다.</p>'+session.questions.map((q,index)=>'<div class="fld"><label for="risk-answer-'+index+'">'+esc(q.question)+'</label><small>'+esc(q.reason)+'</small><textarea id="risk-answer-'+index+'"></textarea></div>').join('')+'<button class="btn primary" onclick="requestRiskAdvice(\''+esc(id)+'\',true)">답변 검토 후 초안 작성</button></div>';
+      host.innerHTML='<div class="ai-box"><b>핵심 의미 한 가지만 확인합니다</b><p>설명 해석에 꼭 필요한 확인입니다. 짧게 답하거나 비워두고 진행할 수 있습니다. 미확인 사항은 조건별 대책과 한계로 표시합니다.</p>'+session.questions.map((q,index)=>'<div class="fld"><label for="risk-answer-'+index+'">'+esc(q.question)+'</label><small>'+esc(q.reason)+'</small><textarea id="risk-answer-'+index+'"></textarea></div>').join('')+'<button class="btn primary" onclick="requestRiskAdvice(\''+esc(id)+'\',true)">초안 작성 계속</button></div>';
       return;
     }
     const review=d.review||{},evidence=[...new Map([...selectedEvidence,...(d.citations||[]).map(ref=>({id:ref,title:'AI 추천 근거 '+ref}))].map(item=>[item.id,item])).values()];

@@ -34,7 +34,7 @@ async function main(){
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),true);
   release();await page.locator('#risk-answer-0').waitFor();
   await page.locator('#risk-answer-0').fill('한 개 10kg, 하루 20회');
-  await page.getByRole('button',{name:'답변 검토 후 초안 작성'}).click();
+  await page.getByRole('button',{name:'초안 작성 계속'}).click();
   await page.getByText('개선대책과 관련근거 초안',{exact:true}).waitFor();
   assert.equal(requests[1].answers[0].answer,'한 개 10kg, 하루 20회');
   assert.match(item.referenceText,/https:\/\/www.kosha.or.kr\/guide/);
