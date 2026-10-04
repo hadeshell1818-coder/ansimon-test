@@ -19,4 +19,13 @@ const examples=vm.createContext({});vm.runInContext(fs.readFileSync('public/safe
 assert.equal(examples.fixture.notices.length,3);assert.equal(examples.fixture.alerts.length,3);
 assert.equal(examples.fixture.days[0].date,'2026-09-28');assert.equal(examples.fixture.days[2].date,'2026-09-30');
 assert.ok(examples.fixture.people.every(p=>p.id.startsWith('prototype-')));
+for(const day of examples.fixture.days){assert.equal(day.returns.length,6);for(const row of day.returns){assert.equal(row.report.bodyIssue,false);assert.equal(row.report.equipmentIssue,false);const hour=new Date(row.report.at).getUTCHours()+9;assert.equal(hour,15);}}
+let exampleOnly=true;
+const evidence=vm.createContext({PILOT_DEMO:examples.fixture,$:()=>({checked:exampleOnly}),evidenceDate:s=>String(s).slice(0,10)});
+vm.runInContext(html.slice(html.indexOf('function pilotRosterPerson('),html.indexOf('function pilotRecipients(')),evidence);
+vm.runInContext(html.slice(html.indexOf('function pilotRecipients('),html.indexOf('\n',html.indexOf('function pilotMessage('))),evidence);
+vm.runInContext(html.slice(html.indexOf('function mergePilotEvidence('),html.indexOf('async function togglePilotDemo(')),evidence);
+const actual={summary:{notices:2,voice:1},returns:[{id:'actual',date:'2026-09-28',name:'실제 직원'}],daily:[],notices:[],alerts:[],hazards:[{id:'real-hazard'}],calls:[],healthLedger:[],equipmentLedger:[]};
+const report=evidence.mergePilotEvidence(actual,'2026-09-28','2026-09-30');assert.equal(report.returns.length,18);assert.equal(report.daily.length,3);assert.equal(report.hazards.length,0);assert.equal(report.calls.length,0);assert.equal(report.notices.length,3);assert.equal(report.alerts.length,3);assert.ok(report.returns.every(r=>/^집배원[1-6]$/.test(r.name)));assert.equal(actual.returns[0].name,'실제 직원');
+exampleOnly=false;assert.equal(evidence.mergePilotEvidence(actual,'2026-09-28','2026-09-30'),actual);
 console.log('PASS: township groups, six anonymous assignments, dependent town selection, collapsed print exclusion, isolated September examples');
