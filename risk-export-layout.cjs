@@ -1,4 +1,5 @@
 const XLSX = require('xlsx-js-style');
+const {conciseReferences}=require('./public/risk-reference.js');
 const WIDTHS = [5, 23, 10, 30, 12, 12, 10, 11, 24];
 function wrapLines(value, width) {
   const lines = [];
@@ -16,7 +17,7 @@ function wrapLines(value, width) {
 function exportRows(items) {
   const rows = [], heights = [];
   for (const [index, it] of items.entries()) {
-    const values = [index + 1, it.factor || '', it.riskLevel || '', it.reduction || '', it.dueDate || '', it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''), it.owner || '', it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성', it.referenceText || ''];
+    const values = [index + 1, it.factor || '', it.riskLevel || '', it.reduction || '', it.dueDate || '', it.completedDate || (it.doneAt ? it.doneAt.slice(0, 10) : ''), it.owner || '', it.doneAt || it.resultUpdatedAt ? '작성 완료' : '미작성', conciseReferences(it.referenceText)];
     const cells = values.map((value, column) => wrapLines(value, WIDTHS[column] - 2));
     const maxLines = Math.max(...cells.map(lines => lines.length));
     for (let offset = 0; offset < maxLines; offset += 18) {

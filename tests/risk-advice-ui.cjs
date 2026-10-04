@@ -20,7 +20,7 @@ async function main(){
    if(url.pathname==='/api/safety-knowledge/recommend'){
     const body=route.request().postDataJSON();requests.push(body);recommendCount++;
     if(recommendCount===1){await pending;data={needsClarification:true,questions:[{question:'운반물 무게와 하루 횟수는?',reason:'노출 부하 확인'}]};}
-    else data={factor:item.factor,measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'공식 자료',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
+    else data={factor:item.factor,measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'산업안전보건법',locator:'제36조',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
    }
    if(url.pathname==='/api/risk/items/K1'){const body=route.request().postDataJSON();Object.assign(item,body);data={item};}
    await route.fulfill({json:data});
@@ -37,10 +37,11 @@ async function main(){
   await page.getByRole('button',{name:'초안 작성 계속'}).click();
   await page.getByText('개선대책과 관련근거 초안',{exact:true}).waitFor();
   assert.equal(requests[1].answers[0].answer,'한 개 10kg, 하루 20회');
-  assert.match(item.referenceText,/https:\/\/www.kosha.or.kr\/guide/);
+  assert.match(item.referenceText,/산업안전보건법 제36조/);assert.ok(!item.referenceText.includes('https://'));
   assert.equal(item.aiAdvice.answers.length,1);
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),false);
   const previous=item.reduction;
+  const inputBox=await page.locator('#risk-chat-input').boundingBox(),buttonBox=await page.locator('#risk-chat-send').boundingBox();assert.ok(buttonBox.x>=inputBox.x+inputBox.width);assert.ok(Math.abs(inputBox.y+inputBox.height/2-buttonBox.y-buttonBox.height/2)<2);
   await page.locator('#risk-chat-input').fill('차량이 아니라 수작업입니다. 다른 대책을 제안해주세요.');
   await page.locator('#risk-chat-send').click();
   await page.locator('#risk-chat-apply').waitFor();
