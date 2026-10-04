@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 async function main(){
  const server=fs.readFileSync('server.js','utf8'),html=fs.readFileSync('public/safety.html','utf8'),routes={},writes=[];
  let failing=false,broadcasts=0;
- const context=vm.createContext({structuredClone,ROSTER:[{id:'jip',name:'이전 이름',zone:'z1'}],SAFE:{rosterSnapshots:{today:[]}},userFromReq:()=>({kind:'safety'}),isSafetyCtl:()=>true,zoneById:id=>id==='z1'?{id,name:'1구'}:null,app:Object.fromEntries(['post','patch','delete'].map(method=>[method,(path,fn)=>routes[method+path]=fn])),broadcastSafety:()=>broadcasts++});
+ const context=vm.createContext({structuredClone,ZONES:[{id:'z1',name:'1구'}],POSTAL_PROTOTYPE:require('../seed-assets/postal-prototype.json'),ROSTER:[{id:'jip',name:'이전 이름',zone:'z1'}],SAFE:{rosterSnapshots:{today:[]}},userFromReq:()=>({kind:'safety'}),isSafetyCtl:()=>true,zoneById:id=>id==='z1'?{id,name:'1구'}:null,app:Object.fromEntries(['post','patch','delete'].map(method=>[method,(path,fn)=>routes[method+path]=fn])),broadcastSafety:()=>broadcasts++});
  context.rosterById=id=>context.ROSTER.find(r=>r.id===id);
  context.ensureSafetyCollections=()=>{context.SAFE.roster=context.ROSTER;context.SAFE.rosterSnapshots.today=structuredClone(context.ROSTER)};
  context.saveSafety=opts=>{assert.equal(opts.strict,true);if(failing)throw Error('disk');writes.push(structuredClone(context.SAFE));};
@@ -15,6 +15,7 @@ async function main(){
  assert.equal(invoke('patch','/api/safety/config/roster/:id',{zone:'wrong'},'jip').code,400);
  failing=true;const count=broadcasts;assert.equal(invoke('patch','/api/safety/config/roster/:id',{name:'저장 실패 이름'},'jip').code,500);assert.equal(context.ROSTER[0].name,'수정 이름');assert.equal(broadcasts,count);
  failing=false;invoke('delete','/api/safety/config/roster/:id',{},'jip');invoke('delete','/api/safety/config/roster/:id',{},'new');assert.equal(writes.at(-1).roster.length,0);
+ assert.equal(invoke('post','/api/safety/config/prototype-layout').code,200);assert.equal(context.ROSTER.length,6);assert.equal(context.ZONES.length,8);assert.equal(context.ROSTER.filter(r=>r.zone==='gs').length,2);
  // Empty saved rosters must survive restart instead of reviving seeded names.
  const load=vm.createContext({fs:{existsSync:()=>true,readFileSync:()=>JSON.stringify({roster:[],zones:[]})},SAFETY_FILE:'test',SAFE:{},ROSTER:[{id:'seed'}],ZONES:[{id:'seed'}],console});
  vm.runInContext(server.slice(server.indexOf('function loadSafety()'),server.indexOf('const nextSafeId')),load);assert.equal(load.loadSafety(),true);assert.equal(load.ROSTER.length,0);

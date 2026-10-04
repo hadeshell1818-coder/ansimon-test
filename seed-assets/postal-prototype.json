@@ -1,0 +1,20 @@
+{
+  "zones": [
+    {"id":"dd","group":"시외통상구","name":"시외통상구 · 대덕읍·회진면","area":"대덕읍·회진면","places":["대덕읍","대덕","회진면","회진"],"near":[]},
+    {"id":"gs","group":"시외통상구","name":"시외통상구 · 관산읍","area":"관산읍","places":["관산읍","관산"],"near":[]},
+    {"id":"ys","group":"시외통상구","name":"시외통상구 · 용산면","area":"용산면","places":["용산면","용산"],"near":[]},
+    {"id":"yc","group":"시외통상구","name":"시외통상구 · 유치면","area":"유치면","places":["유치면","유치"],"near":[]},
+    {"id":"jp","group":"시외통상구","name":"시외통상구 · 장평면","area":"장평면","places":["장평면","장평"],"near":[]},
+    {"id":"ay","group":"시외통상구","name":"시외통상구 · 안양면","area":"안양면","places":["안양면","안양"],"near":[]},
+    {"id":"bs","group":"시외통상구","name":"시외통상구 · 부산면","area":"부산면","places":["부산면"],"near":[]},
+    {"id":"jh","group":"시내통상구","name":"시내통상구 · 장흥읍","area":"장흥읍","places":["장흥읍"],"near":[]}
+  ],
+  "roster": [
+    {"id":"jip11","name":"집배원1","zone":"dd","phone":""},
+    {"id":"jip12","name":"집배원2","zone":"gs","phone":""},
+    {"id":"jip13","name":"집배원3","zone":"gs","phone":""},
+    {"id":"jip14","name":"집배원4","zone":"ys","phone":""},
+    {"id":"jip15","name":"집배원5","zone":"yc","phone":""},
+    {"id":"jip16","name":"집배원6","zone":"jp","phone":""}
+  ]
+}

@@ -137,6 +137,11 @@ if (process.env.PW_JIP5) {
 } else {
   console.warn('⚠️ PW_JIP5 미설정 — 안전보건담당자(jip5) 계정이 비활성화됩니다.');
 }
+// Prototype accounts use per-account passwords when configured, otherwise existing PW_JIP.
+for (let i=11;i<=16;i++) {
+  const envName=process.env['PW_JIP'+i]?'PW_JIP'+i:'PW_JIP';
+  USERS['jip'+i]={pwHash:requiredPassword(envName),kind:'carrier',name:'집배원'+(i-10),org:'장흥우체국',region:'장흥군',type:null,role:'집배원'};
+}
 function publicUser(id) { const u = USERS[id]; if (!u) return null;
   return { id, kind: u.kind, name: u.name, org: u.org, zone: u.zone || null, region: u.region, type: u.type, role: u.role }; }
 
@@ -1062,26 +1067,9 @@ const kstDate = (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice
 
 /* 집배 구역·명부 — ⚠️ 시연용 예시 데이터. 실제 집배구·인원·PDA 번호로 교체할 것.
  * places: 음성 속 지명을 구역으로 매칭할 때 쓰는 키워드 / near: 인접 구역 */
-let ZONES = [
-  { id: 'jh1', name: '장흥1구',   area: '장흥읍 북부',     places: ['건산', '기양', '장흥읍 북'],      near: ['jh2', 'jh3', 'by'],       lat: 34.692, lng: 126.905 },
-  { id: 'jh2', name: '장흥2구',   area: '장흥읍 동부',     places: ['평화', '순지', '장흥읍 동'],      near: ['jh1', 'jh3', 'ay', 'ys'], lat: 34.683, lng: 126.925 },
-  { id: 'jh3', name: '장흥3구',   area: '장흥읍 남부',     places: ['예양', '원도', '흥성로', '장흥읍'], near: ['jh1', 'jh2', 'ay', 'ys'], lat: 34.672, lng: 126.905 },
-  { id: 'ay',  name: '안양구',    area: '안양면',          places: ['안양', '해안로', '수문'],         near: ['jh2', 'jh3', 'ys'],       lat: 34.660, lng: 126.990 },
-  { id: 'ys',  name: '용산구',    area: '용산면',          places: ['용산', '어산', '운주'],           near: ['jh2', 'jh3', 'ay', 'gs'], lat: 34.640, lng: 126.950 },
-  { id: 'gs',  name: '관산구',    area: '관산읍',          places: ['관산', '방촌', '천관산', '23번'], near: ['ys', 'dd'],               lat: 34.590, lng: 126.960 },
-  { id: 'dd',  name: '대덕구',    area: '대덕읍·회진면',   places: ['대덕', '회진', '신리', '노력도'], near: ['gs'],                     lat: 34.540, lng: 126.880 },
-  { id: 'by',  name: '부산·유치구', area: '부산면·유치면', places: ['부산면', '유치', '보림사', '탐진댐'], near: ['jh1'],                 lat: 34.740, lng: 126.890 },
-];
-let ROSTER = [ // id가 로그인 계정 id와 같으면 해당 계정과 연결된다(jip = 김철수)
-  { id: 'jip', name: '김철수', zone: 'jh3', phone: '010-0000-0003' },
-  { id: 'c01', name: '정민수', zone: 'jh1', phone: '010-0000-0001' },
-  { id: 'c02', name: '최은비', zone: 'jh2', phone: '010-0000-0002' },
-  { id: 'c03', name: '윤서진', zone: 'ay',  phone: '010-0000-0004' },
-  { id: 'c04', name: '한지우', zone: 'ys',  phone: '010-0000-0005' },
-  { id: 'c05', name: '오태민', zone: 'gs',  phone: '010-0000-0006' },
-  { id: 'c06', name: '강도현', zone: 'dd',  phone: '010-0000-0007' },
-  { id: 'c07', name: '임재원', zone: 'by',  phone: '010-0000-0008' },
-];
+const POSTAL_PROTOTYPE = require('./seed-assets/postal-prototype.json');
+let ZONES = structuredClone(POSTAL_PROTOTYPE.zones);
+let ROSTER = structuredClone(POSTAL_PROTOTYPE.roster);
 const zoneById = id => ZONES.find(z => z.id === id);
 const rosterById = id => ROSTER.find(r => r.id === id);
 const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` : '-';
@@ -1109,7 +1097,7 @@ const decMemo = b => b ? (decryptPrivate(b) || '') : '';
 /* 시연용: 오늘 날짜 보고가 비어 있으면 일부 집배원 보고를 채워 집계 화면이 비지 않게 한다.
  * 실제 운영 시 SAFETY_DEMO=off 로 끈다. */
 function ensureDemoDay() {
-  if (process.env.SAFETY_DEMO === 'off') return;
+  if (process.env.SAFETY_DEMO !== 'on') return;
   const d = kstDate();
   if (SAFE.shifts[d]) return;
   const at = new Date().toISOString();
@@ -1830,11 +1818,15 @@ app.post('/api/safety/config/zones',(req,res)=>{
 app.patch('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const z=zoneById(req.params.id);if(!z)return res.status(404).json({error:'not found'});const b=req.body||{};if(b.name!=null)z.name=String(b.name).trim().slice(0,50);if(b.area!=null)z.area=String(b.area).trim().slice(0,80);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
 app.delete('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});if(ROSTER.some(r=>r.zone===req.params.id))return res.status(409).json({error:'이 구역에 등록된 집배원을 먼저 이동 또는 삭제하세요.'});ZONES=ZONES.filter(z=>z.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
 function saveRosterConfig(res, mutate){
-  const previousRoster=structuredClone(ROSTER),previousSafe=structuredClone(SAFE);
+  const previousRoster=structuredClone(ROSTER),previousZones=structuredClone(ZONES),previousSafe=structuredClone(SAFE);
   try{mutate();ensureSafetyCollections();saveSafety({strict:true});}
-  catch(error){ROSTER=previousRoster;SAFE=previousSafe;return res.status(500).json({error:'집배원 명부 저장에 실패했습니다. 서버 저장공간을 확인한 뒤 다시 시도하세요.'});}
+  catch(error){ROSTER=previousRoster;ZONES=previousZones;SAFE=previousSafe;return res.status(500).json({error:'집배원 명부 저장에 실패했습니다. 서버 저장공간을 확인한 뒤 다시 시도하세요.'});}
   broadcastSafety();res.json({ok:true,roster:ROSTER});
 }
+app.post('/api/safety/config/prototype-layout',(req,res)=>{
+ const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+ saveRosterConfig(res,()=>{ZONES=structuredClone(POSTAL_PROTOTYPE.zones);ROSTER=structuredClone(POSTAL_PROTOTYPE.roster);SAFE.prototypeLayoutVersion=1;});
+});
 app.post('/api/safety/config/roster',(req,res)=>{
  const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
  const b=req.body||{},id=String(b.id||'').trim(),name=String(b.name||'').trim().slice(0,50);
