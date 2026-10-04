@@ -40,6 +40,8 @@ async function main(){
   assert.match(item.referenceText,/산업안전보건법 제36조/);assert.ok(!item.referenceText.includes('https://'));
   assert.equal(item.aiAdvice.answers.length,1);
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),false);
+  assert.equal(await page.locator('#modalCard h3').innerText(),'위험성평가표');
+  const fontSizes=await page.evaluate(()=>[getComputedStyle(document.querySelector('.process-name-edit')).fontSize,getComputedStyle(document.querySelector('.process-evaluator')).fontSize]);assert.equal(fontSizes[0],fontSizes[1]);
   const previous=item.reduction;
   const inputBox=await page.locator('#risk-chat-input').boundingBox(),buttonBox=await page.locator('#risk-chat-send').boundingBox();assert.ok(buttonBox.x>=inputBox.x+inputBox.width);assert.ok(Math.abs(inputBox.y+inputBox.height/2-buttonBox.y-buttonBox.height/2)<2);
   await page.locator('#risk-chat-input').fill('차량이 아니라 수작업입니다. 다른 대책을 제안해주세요.');

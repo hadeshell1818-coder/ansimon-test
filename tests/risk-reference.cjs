@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const {legalReferences,conciseReferences,searchableEvidence}=require('../public/risk-reference.js');
 const evidence=[
- {ref:'external:0',title:'산업안전보건법 시행규칙',locator:'제37조 제2항',sourceUrl:'https://www.law.go.kr/법령/산업안전보건법시행규칙'},
+ {ref:'external:0',status:'pending',title:'산업안전보건법 시행규칙',locator:'제37조 제2항',sourceUrl:'https://www.law.go.kr/법령/산업안전보건법시행규칙'},
  {ref:'external:1',title:'검색 불가 법령',locator:'제3조'},
  {ref:'external:2',title:'작업 지침',sourceUrl:'https://www.kosha.or.kr/guide'},
  {ref:'doc:one',title:'산업안전보건법',locator:'제36조',status:'approved'},
