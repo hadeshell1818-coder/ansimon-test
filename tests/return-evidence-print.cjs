@@ -27,7 +27,7 @@ const context = vm.createContext({
 });
 vm.runInContext(html.slice(html.indexOf('function evidenceReturnRow('), html.indexOf('function evidenceReturnTable(')), context);
 context.printReturnEvidence();
-for (const text of ['2026-09-01', '2026-09-30', '근무일', '미보고 직원', '미보고', '결원 직원', '휴가', '발목 통증', '브레이크 이상', '진료 안내', '정비 의뢰', '정정 전 보고', '가상 운영 기록', '인원·일']) assert.ok(output.includes(text), text);
+for (const text of ['2026-09-01', '2026-09-30', '근무일', '미보고 직원', '미보고', '결원 직원', '휴가', '발목 통증', '브레이크 이상', '진료 안내', '정비 의뢰', '정정 전 보고', '인원·일']) assert.ok(output.includes(text), text);
 assert.ok(output.includes('&lt;김집배&gt;'));
 assert.ok(!output.includes('<김집배>'));
 const staffTable=output.slice(output.indexOf('<h2>직원별'));
@@ -43,3 +43,6 @@ blocked = true; context.printReturnEvidence();
 assert.ok(notice.includes('출력 창이 차단'));
 assert.ok(html.includes('onclick="printReturnEvidence()">귀국보고 출력'));
 console.log('PASS: inline syntax, return print summaries/details, missing/absence, both actions, history, demo, escaping, empty results and blocked popup');
+
+assert.ok(!output.includes('가상 운영 기록'));
+assert.ok(!output.includes('샘플 자료'));
