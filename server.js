@@ -1097,7 +1097,7 @@ function saveSafety({ strict = false } = {}) {
 }
 function loadSafety() {
   if (!fs.existsSync(SAFETY_FILE)) return false;
-  try { SAFE = Object.assign(SAFE, JSON.parse(fs.readFileSync(SAFETY_FILE, 'utf8'))); if (Array.isArray(SAFE.zones) && SAFE.zones.length) ZONES = SAFE.zones; if (Array.isArray(SAFE.roster) && SAFE.roster.length) ROSTER = SAFE.roster; return true; }
+  try { SAFE = Object.assign(SAFE, JSON.parse(fs.readFileSync(SAFETY_FILE, 'utf8'))); if (Array.isArray(SAFE.zones)) ZONES = SAFE.zones; if (Array.isArray(SAFE.roster)) ROSTER = SAFE.roster; return true; }
   catch (e) { console.error('safety load fail', e); return false; }
 }
 const nextSafeId = p => p + (SAFE.seq++);
@@ -1829,9 +1829,31 @@ app.post('/api/safety/config/zones',(req,res)=>{
 });
 app.patch('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const z=zoneById(req.params.id);if(!z)return res.status(404).json({error:'not found'});const b=req.body||{};if(b.name!=null)z.name=String(b.name).trim().slice(0,50);if(b.area!=null)z.area=String(b.area).trim().slice(0,80);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
 app.delete('/api/safety/config/zones/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});if(ROSTER.some(r=>r.zone===req.params.id))return res.status(409).json({error:'이 구역에 등록된 집배원을 먼저 이동 또는 삭제하세요.'});ZONES=ZONES.filter(z=>z.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
-app.post('/api/safety/config/roster',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const b=req.body||{},id=String(b.id||'').trim(),name=String(b.name||'').trim();if(!id||!name||!zoneById(b.zone))return res.status(400).json({error:'계정 ID·이름·구역을 확인하세요.'});if(rosterById(id))return res.status(409).json({error:'이미 등록된 계정 ID입니다.'});ROSTER.push({id,name,zone:b.zone,phone:String(b.phone||'').trim().slice(0,30)});ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
-app.patch('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});const r=rosterById(req.params.id);if(!r)return res.status(404).json({error:'not found'});const b=req.body||{};if(b.name!=null)r.name=String(b.name).trim().slice(0,50);if(b.phone!=null)r.phone=String(b.phone).trim().slice(0,30);if(b.zone&&zoneById(b.zone))r.zone=b.zone;ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
-app.delete('/api/safety/config/roster/:id',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});ROSTER=ROSTER.filter(r=>r.id!==req.params.id);ensureSafetyCollections();saveSafety();broadcastSafety();res.json({ok:true});});
+function saveRosterConfig(res, mutate){
+  const previousRoster=structuredClone(ROSTER),previousSafe=structuredClone(SAFE);
+  try{mutate();ensureSafetyCollections();saveSafety({strict:true});}
+  catch(error){ROSTER=previousRoster;SAFE=previousSafe;return res.status(500).json({error:'집배원 명부 저장에 실패했습니다. 서버 저장공간을 확인한 뒤 다시 시도하세요.'});}
+  broadcastSafety();res.json({ok:true,roster:ROSTER});
+}
+app.post('/api/safety/config/roster',(req,res)=>{
+ const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+ const b=req.body||{},id=String(b.id||'').trim(),name=String(b.name||'').trim().slice(0,50);
+ if(!/^[a-zA-Z0-9_-]{1,80}$/.test(id)||!name||!zoneById(b.zone))return res.status(400).json({error:'로그인 계정 ID(영문·숫자·밑줄·하이픈), 이름, 집배구를 확인하세요.'});
+ if(rosterById(id))return res.status(409).json({error:'이미 등록된 계정 ID입니다.'});
+ saveRosterConfig(res,()=>ROSTER.push({id,name,zone:b.zone,phone:String(b.phone||'').trim().slice(0,30)}));
+});
+app.patch('/api/safety/config/roster/:id',(req,res)=>{
+ const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+ const r=rosterById(req.params.id);if(!r)return res.status(404).json({error:'등록된 집배원을 찾을 수 없습니다.'});
+ const b=req.body||{};
+ if(b.name!=null&&!String(b.name).trim()||b.zone!=null&&!zoneById(b.zone))return res.status(400).json({error:'이름과 집배구를 확인하세요.'});
+ saveRosterConfig(res,()=>{if(b.name!=null)r.name=String(b.name).trim().slice(0,50);if(b.phone!=null)r.phone=String(b.phone).trim().slice(0,30);if(b.zone!=null)r.zone=b.zone;});
+});
+app.delete('/api/safety/config/roster/:id',(req,res)=>{
+ const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
+ if(!rosterById(req.params.id))return res.status(404).json({error:'등록된 집배원을 찾을 수 없습니다.'});
+ saveRosterConfig(res,()=>{ROSTER=ROSTER.filter(r=>r.id!==req.params.id);});
+});
 
 loadSafety();
 setInterval(() => resendUnacknowledged().catch(e => console.error('push reminder', e)), 15000).unref();
