@@ -173,8 +173,8 @@ setInterval(() => {
   for (const [token, session] of sessions) if (session.expiresAt <= now) sessions.delete(token);
 }, 10 * 60 * 1000).unref();
 
-// ⚠️ 데모/시연 기간 한정: 로그인 IP 제한 비활성화. 같은 네트워크·같은 IP에서
-//    여러 계정으로 연달아 시연할 수 있도록 임시로 풀어둔 것.
+// ⚠️ 테스트 기간 한정: 로그인 IP 제한 비활성화. 같은 네트워크·같은 IP에서
+//    여러 계정으로 연달아 사용할 수 있도록 임시로 풀어둔 것.
 //    실서비스 전환 시 아래 주석 처리된 rateLimit으로 반드시 복구할 것.
 // const loginLimiter = rateLimit({
 //   windowMs: 10 * 60 * 1000,
@@ -294,7 +294,7 @@ function ensureSamplePhotos() {
 }
 function samplePhoto(key) { return { photo: true, photoUrl: '/uploads/' + SAMPLE_PHOTOS[key].file }; }
 
-/* ---- 광주광역시: 교통과·환경과·복지과 시연용 샘플 ----
+/* ---- 광주광역시: 교통과·환경과·복지과 예시 샘플 ----
  * seed()에서 최초 씨딩 시 포함되고, 기존 데이터가 있는데 광주 샘플만 없는
  * 경우(운영 중 별도 추가)에도 이 함수를 그대로 재사용한다. */
 function gwangjuSeed() {
@@ -332,7 +332,7 @@ function gwangjuSeed() {
   ];
 }
 
-/* ---- 보성군: 교통과·환경과·복지과 시연용 샘플 ---- */
+/* ---- 보성군: 교통과·환경과·복지과 예시 샘플 ---- */
 function boseongSeed() {
   return [
     newReport({ region: '보성군', type: 'safe', item: '도로위험', subtype: '파임', addr: '전남 보성군 보성읍 송재로 24', status: 'received', age: 1, memo: '보성읍 진입로 중앙에 파임 발생, 야간 시야 확보 어려움.', carrierId: null, carrier: '문보성(보성읍1구)', reporterOrg: '보성우체국', ...samplePhoto('road2') }),
@@ -485,7 +485,7 @@ else {
       added = true;
     }
   }
-  // 낙하물 실제 사진 시연용으로, 보성 벌교로 88 신고를 상황관제 목록 맨 위(긴급·최신순)로
+  // 낙하물 실제 사진 예시으로, 보성 벌교로 88 신고를 상황관제 목록 맨 위(긴급·최신순)로
   // 끌어올린다. 이미 배포된 데이터도 동일하게 승격시킨다.
   const boseongDrop = reports.find(r => r.addr === '전남 보성군 벌교읍 벌교로 88');
   if (boseongDrop && !boseongDrop.urgent) {
@@ -1065,7 +1065,7 @@ const SAFETY_CALL_NUMBER = process.env.SAFETY_CALL_NUMBER || '061-000-0000'; // 
 const LEVELS = { urgent: '긴급', caution: '주의', notice: '전달말씀' };
 const kstDate = (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice(0, 10);
 
-/* 집배 구역·명부 — ⚠️ 시연용 예시 데이터. 실제 집배구·인원·PDA 번호로 교체할 것.
+/* 집배 구역·명부 — ⚠️ 예시 예시 데이터. 실제 집배구·인원·PDA 번호로 교체할 것.
  * places: 음성 속 지명을 구역으로 매칭할 때 쓰는 키워드 / near: 인접 구역 */
 const POSTAL_PROTOTYPE = require('./seed-assets/postal-prototype.json');
 let ZONES = structuredClone(POSTAL_PROTOTYPE.zones);
@@ -1094,7 +1094,7 @@ const nextSafeId = p => p + (SAFE.seq++);
 const encMemo = t => (t && String(t).trim()) ? encryptPrivate(String(t).trim().slice(0, 200)) : null;
 const decMemo = b => b ? (decryptPrivate(b) || '') : '';
 
-/* 시연용: 오늘 날짜 보고가 비어 있으면 일부 집배원 보고를 채워 집계 화면이 비지 않게 한다.
+/* 예시: 오늘 날짜 보고가 비어 있으면 일부 집배원 보고를 채워 집계 화면이 비지 않게 한다.
  * 실제 운영 시 SAFETY_DEMO=off 로 끈다. */
 function ensureDemoDay() {
   if (process.env.SAFETY_DEMO !== 'on') return;
@@ -1904,7 +1904,7 @@ const nextRiskId = () => 'RA' + (RISK.seq++);
 /* ---------- 누적 데이터 (빈도 산정 근거) ----------
  * 지금은 앱에 심은 샘플 + 실제 접수분으로 계산한다. 추후 Supabase로 교체:
  *   RA_SOURCE=supabase 이면 fetchFreqHistory()가 Supabase REST를 호출(SUPABASE_URL/KEY 필요).
- * 아래 RA_HISTORY_SEED는 "과거 유사 신고" 시연용 씨앗(공정·위험유형·발생일). */
+ * 아래 RA_HISTORY_SEED는 "과거 유사 신고" 예시 씨앗(공정·위험유형·발생일). */
 const RA_HISTORY_SEED = (() => {
   const rows = []; const now = Date.now(); const D = 864e5;
   const add = (proc, hz, ago, n = 1) => { for (let i = 0; i < n; i++) rows.push({ proc, hazard: hz, at: new Date(now - (ago + i * 3) * D).toISOString() }); };
@@ -1949,7 +1949,7 @@ async function classifyHazardPhoto(item, photoBase64) {
   let hazard = null, aiMode;
   if (!key || !photoBase64) {
     aiMode = key ? 'no-photo' : 'stub';
-    hazard = item.hazard || 'cut'; // 시연 기본값
+    hazard = item.hazard || 'cut'; // 기본값
   } else {
     try {
       const prompt = `우체국 물류 현장에서 근로자가 신고한 "구조적 안전위험" 사진입니다. 사진에서 확인되는 구체적인 위험 상황을 유해·위험요인 문장으로도 정리하세요. 다음 중 가장 맞는 위험유형 하나로 분류하세요.
@@ -2395,7 +2395,7 @@ function isStaffLike(u) { return u && (u.kind === 'carrier' || (u.org && String(
 /* itemForMgr는 signedSafetyUrl을 쓰지 않고 risk 전용 URL을 쓰도록 교정 */
 function fixRiskUrls(it) {}
 
-/* 시연용 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건 */
+/* 예시 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건 */
 function ensureRiskDemo() {
   if (process.env.RA_DEMO === 'off') return;
   if (RISK.items.length) return;
@@ -2415,7 +2415,7 @@ function ensureRiskDemo() {
     workContent: '롤파렛 취급', factor: HAZARD_TYPES.pinch.factor, currentControl: '- 안전화 지급 착용\n- 안전교육',
     aiDraft: { factor: HAZARD_TYPES.pinch.factor, severity: 4, severityText: SEV_TEXT[4], controls: HAZARD_TYPES.pinch.controls, hazardLabel: '끼임',
       frequency: 3, frequencyReason: '최근 6개월 소포 공정 \'끼임\' 유사 신고 4건 → 빈도 3', frequencyHasData: true } });
-  // 완료 — 개선 전/후 있음(이행결과서 시연)
+  // 완료 — 개선 전/후 있음(이행결과서 예시)
   const c = mk({ status: 'done', source: 'staff', reporter: '박영희·영업과', ago: 20, proc: 'parcel', hazard: 'msds',
     workContent: '슈트작업', factor: '평파렛에 랩을 싸는 과정에서 허리·어깨 등에 근골격계 질환 위험',
     currentControl: '- 안전교육\n- 작업 전 스트레칭', frequency: 4, severity: 3,
