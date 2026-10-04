@@ -17,7 +17,7 @@ const PILOT_DEMO = (() => {
   '배달을 마치면 귀국보고를 제출해 주세요. 건강·장비 이상은 각각 확인하고, 이상이 있으면 소통실에 알려주세요.'
  ];
  const recipients=(date,time)=>people.map(p=>({...p,ackAt:at(date,time),phoneAck:null,followups:[]}));
- const notices=dates.map((date,i)=>({id:'prototype-notice-'+i,demo:true,title:titles[i],body:bodies[i],sender:'상황실',createdAt:at(date,'08:30'),targets:people.map(p=>p.id),recipients:recipients(date,'08:40'),acks:Object.fromEntries(people.map(p=>[p.id,at(date,'08:40')])),edits:[],followups:[]}));
- const alerts=dates.map((date,i)=>({id:'prototype-alert-'+i,demo:true,text:texts[i],sender:'상황실',level:'caution',createdAt:at(date,'09:00'),targets:people.map(p=>p.id),recipients:recipients(date,'09:10'),acks:Object.fromEntries(people.map(p=>[p.id,at(date,'09:10')])),edits:[],followups:[]}));
+ const notices=dates.map((date,i)=>({id:'prototype-notice-'+i,demo:true,title:titles[i],body:bodies[i],sender:'상황실',createdAt:at(date,['08:23','08:37','08:18'][i]),targets:people.map(p=>p.id),recipients:recipients(date,['08:31','08:44','08:27'][i]),acks:Object.fromEntries(people.map(p=>[p.id,at(date,['08:31','08:44','08:27'][i])])),edits:[],followups:[]}));
+ const alerts=dates.map((date,i)=>({id:'prototype-alert-'+i,demo:true,text:texts[i],sender:'상황실',level:'caution',createdAt:at(date,['09:12','10:26','14:43'][i]),targets:people.map(p=>p.id),recipients:recipients(date,['09:19','10:34','14:51'][i]),acks:Object.fromEntries(people.map(p=>[p.id,at(date,['09:19','10:34','14:51'][i])])),edits:[],followups:[]}));
  return {people,days,notices,alerts,hazards:[],calls:[]};
 })();
