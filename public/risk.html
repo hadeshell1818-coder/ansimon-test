@@ -177,8 +177,14 @@ async function api(path,opts={}){
   opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
   if(token) opts.headers.Authorization='Bearer '+token;
   const r=await fetch(path,opts);
-  if(r.status===401){ logout(); throw new Error('다시 로그인하세요'); }
   const d=await r.json().catch(()=>({}));
+  if(r.status===401){ const message=d.error||'로그인이 만료되었습니다. 다시 로그인해 주세요.'; logout(); $('lerr').textContent=message; throw new Error(message); }
+  // 이전 서버 버전의 만료 세션 응답(403)도 재로그인으로 복구한다.
+  if(r.status===403 && d.error==='forbidden'){
+    const session=await fetch('/api/me',{headers:{Authorization:'Bearer '+(token||'')}});
+    if(session.status===401){ const message='로그인이 만료되었습니다. 다시 로그인해 주세요.'; logout(); $('lerr').textContent=message; throw new Error(message); }
+    throw new Error('안전관리 담당자 계정으로 로그인해 주세요.');
+  }
   if(!r.ok) throw new Error(d.error||'요청 실패');
   return d;
 }
@@ -190,6 +196,7 @@ async function boot(){
   $('login').classList.remove('hidden');
 }
 async function doLogin(){
+  $('lerr').textContent='';
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:$('lid').value.trim(),pw:$('lpw').value})});
     const d=await r.json();
@@ -201,6 +208,7 @@ async function doLogin(){
 function logout(){
   if(token) fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{});
   token=null; me=null; sessionStorage.removeItem('cv_risk_token');
+  R=null; closeModal();
   if(ws){ ws.onclose=null; try{ws.close();}catch(e){} } clearInterval(poll);
   $('app').classList.add('hidden'); $('login').classList.remove('hidden');
 }
@@ -217,9 +225,10 @@ function enter(){
 function setTab(t){ tab=t; document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id==='tab-'+t)); render(); }
 
 async function load(){
-  try{ R=await api('/api/risk/state'); }catch(e){ return; }
+  try{ R=await api('/api/risk/state'); }catch(e){ toast(e.message); return false; }
   $('inboxN').textContent=R.inbox.length; $('inboxN').classList.toggle('hidden',!R.inbox.length);
   if(['inbox','table','report','actions'].includes(tab)) render();
+  return true;
 }
 const procName=id=>R.processes.find(p=>p.id===id)?.name||'-';
 function riskLevelOptions(value){return '<option value="">선택</option>'+['상','중','하'].map(x=>'<option value="'+x+'" '+(x===value?'selected':'')+'>'+x+'</option>').join('')}
@@ -279,8 +288,8 @@ async function triage(id,decision){
   if(decision!=='promote' && !confirm('오신고로 폐기할까요?')) return;
   try{ await api('/api/risk/items/'+id+'/triage',{method:'POST',body:JSON.stringify({decision})});
     toast(decision==='promote'?'위험성평가표에 등록했습니다':'처리했습니다');
-    await load();
-    if(decision==='promote') { setTab('table'); editRow(id); }
+    const loaded=await load();
+    if(loaded && decision==='promote') { setTab('table'); editRow(id); }
   }catch(e){ toast(e.message); }
 }
 /* ---------- 위험성평가표 (교재 서식) ---------- */

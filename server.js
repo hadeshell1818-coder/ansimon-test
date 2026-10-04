@@ -2033,6 +2033,13 @@ function signedRiskUrl(id, kind) {
 }
 
 /* ---------- 라우트 ---------- */
+// 세션 만료와 담당자 권한 부족을 구분한다. 서명형 사진 URL은 기존 검증을 유지한다.
+app.use(['/api/risk/state', '/api/risk/items'], (req, res, next) => {
+  const user = userFromReq(req);
+  if (!user) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(user)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  next();
+});
 app.get('/api/risk/state', async (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   ensureRiskDemo();
