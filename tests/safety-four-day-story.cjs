@@ -22,21 +22,31 @@ async function main(){
    if(url.pathname==='/api/me')data={user:{kind:'safety',name:'소통실',org:'장흥우체국'}};
    if(url.pathname==='/api/safety/state')data={today:'2026-10-02',hazards:[],calls:[],alerts:[],zones:[],roster:[],levels:{caution:'주의',notice:'전달말씀'}};
    if(url.pathname==='/api/on/returns')data={summary:{total:0,absent:0,target:0,reported:0,selfReported:0,controlConfirmed:0,missing:0,ok:0,healthOnly:0,equipmentOnly:0,both:0},rows:[]};
-   if(url.pathname==='/api/safety/evidence'){queries.push(url.searchParams);data={start:url.searchParams.get('start'),end:url.searchParams.get('end'),returns:[],daily:[],notices:[],alerts:[],hazards:[],calls:[],healthLedger:[],equipmentLedger:[],summary:{notices:0,voice:0,calls:0,alerts:0,alertBroadcasts:0,returnTarget:0,returnMissing:0,returnReports:0,normalReturns:0,bodyIssues:0,equipmentIssues:0,bothIssues:0}};}
-   if(url.pathname==='/api/safety/ledger')data={rows:[]};
+   if(url.pathname==='/api/safety/evidence'){queries.push(url.searchParams);data={start:url.searchParams.get('start'),end:url.searchParams.get('end'),returns:[],daily:[],notices:[],alerts:[],hazards:[{id:'live-voice',carrier:'집배원4',createdAt:url.searchParams.get('start')+'T09:45:00+09:00',status:'pending',transcript:'방금 접수된 음성신고'}],calls:[],healthLedger:[],equipmentLedger:[],summary:{notices:0,voice:1,calls:0,alerts:0,alertBroadcasts:0,returnTarget:0,returnMissing:0,returnReports:0,normalReturns:0,bodyIssues:0,equipmentIssues:0,bothIssues:0}};}
+   if(url.pathname==='/api/safety/ledger')data={rows:[{id:'live-carrier',date:'2026-10-02',name:'실제 접수 직원',zoneName:'용산면',report:{at:'2026-10-02T15:30:00+09:00',bodyIssue:false,equipmentIssue:false}}]};
    await route.fulfill({json:data});
   });
   await page.addInitScript(()=>sessionStorage.setItem('cv_safe_token','test'));
   await page.goto(`http://127.0.0.1:${server.address().port}/safety.html`);await page.locator('#app').waitFor({state:'visible'});
-  await page.evaluate(()=>showTab('stats'));await page.waitForFunction(()=>typeof evidenceData!=='undefined'&&evidenceData?.returns.length===24);
+  await page.evaluate(()=>showTab('stats'));await page.waitForFunction(()=>evidenceData?.hazards.some(h=>h.id==='live-voice'));
+  const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
+  assert.equal(queries.at(-1).get('start'),today);assert.equal(queries.at(-1).get('end'),today);
+  await page.locator('.situation-evidence > summary').click();
+  assert.match(await page.locator('.situation-table').innerText(),/방금 접수된 음성신고/);
+  const queryCount=queries.length;
+  await page.evaluate(()=>{showTab('today');showTab('stats')});await page.waitForFunction(()=>!document.querySelector('#evResult').textContent.includes('조회 중'));
+  await page.waitForTimeout(100);assert.ok(queries.length>queryCount,'Reopening evidence refreshes live records');
+  await page.evaluate(()=>{setStatsMode('september');showTab('stats')});await page.waitForFunction(()=>typeof evidenceData!=='undefined'&&evidenceData?.returns.length===24);
   assert.equal(queries.at(-1).get('start'),'2026-09-29');assert.equal(queries.at(-1).get('end'),'2026-10-02');
   const result=await page.evaluate(()=>({daily:evidenceData.daily,summary:evidenceData.summary}));
   assert.equal(result.daily.length,4);assert.equal(result.summary.bodyIssues,1);assert.equal(result.summary.normalReturns,23);
-  assert.match(await page.locator('.situation-table').innerText(),/용산교도소/);assert.equal(await page.locator('.situation-table tbody tr').count(),16);
+  assert.equal(result.summary.voice,3);assert.match(await page.locator('.situation-table').innerText(),/방금 접수된 음성신고/);
+  assert.match(await page.locator('.situation-table').innerText(),/용산교도소/);assert.equal(await page.locator('.situation-table tbody tr').count(),17);
   await page.evaluate(()=>{const open=window.open;window.open=(...args)=>{const w=open(...args);w.print=()=>{};return w}});
   let promise=page.waitForEvent('popup');await page.evaluate(()=>printReturnEvidence());let popup=await promise;await popup.waitForLoadState();
   let printed=await popup.locator('body').innerText();for(const term of ['2026-09-29','2026-10-02','허리 근육통 호소','파스 지급','다행히 큰 문제 없다고 함.'])assert.ok(printed.includes(term),term);await popup.close();
-  await page.evaluate(()=>showTab('health'));await page.waitForFunction(()=>managementLedgerData.health?.length===24);
+  await page.evaluate(()=>showTab('health'));await page.waitForFunction(()=>managementLedgerData.health?.length===25);
+  assert.ok(await page.evaluate(()=>managementLedgerData.health.some(r=>r.id==='live-carrier')),'Actual ledger records survive configured records');
   promise=page.waitForEvent('popup');await page.evaluate(()=>printManagementLedger('health','prototype-jip14'));popup=await promise;await popup.waitForLoadState();
   printed=await popup.locator('body').innerText();assert.equal(await popup.locator('tbody tr').count(),4);assert.match(printed,/파스 지급/);assert.match(printed,/다행히 큰 문제 없다고 함/);await popup.close();
   assert.deepEqual(errors,[]);console.log('PASS: 4-day cross-month period, 24 returns, scoped risk recipients, linked next-day health result, situation and ledger/return prints');
