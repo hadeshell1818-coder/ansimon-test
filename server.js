@@ -557,6 +557,8 @@ function routeReport(r) {
     r.externalTransfer = { ...r.externalTransfer, status: 'withdrawn', withdrawnAt: new Date().toISOString() };
   }
   const existing = RISK.items.find(it => it.fromReport === r.id);
+  // Prevent an intentionally deleted assessment from being silently recreated from its report.
+  if (r.riskAssessmentDeletedAt && !existing) return;
   if (routing !== 'internal') {
     if (existing) { existing.routingInactive = true; saveRisk(); broadcastRisk(); }
     return;
@@ -1894,7 +1896,7 @@ const RISK_CRITERIA = {
 };
 
 let RISK = { seq: 1, items: [] };
-function saveRisk() { try { fs.writeFileSync(RISK_FILE, JSON.stringify(RISK)); } catch (e) { console.error('risk save fail', e); } }
+function saveRisk({ strict = false } = {}) { try { fs.writeFileSync(RISK_FILE, JSON.stringify(RISK)); } catch (e) { console.error('risk save fail', e); if (strict) throw e; } }
 function loadRisk() { if (!fs.existsSync(RISK_FILE)) return false;
   try { RISK = Object.assign(RISK, JSON.parse(fs.readFileSync(RISK_FILE, 'utf8'))); return true; } catch (e) { console.error('risk load fail', e); return false; } }
 const nextRiskId = () => 'RA' + (RISK.seq++);
@@ -2236,15 +2238,48 @@ app.post('/api/risk/items/manual', async (req, res) => {
   res.json({ ok: true, id: it.id, item: itemForMgr(it) });
 });
 
+/* One-item deletion: only safety managers. Do not delete originating reports or Supabase material. */
 app.delete('/api/risk/items/:id', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const index = RISK.items.findIndex(it => it.id === req.params.id);
-  if (index < 0) return res.status(404).json({ error: 'not found' });
+  if (index < 0) return res.status(404).json({ error: '위험성평가 항목을 찾을 수 없습니다.' });
   const it = RISK.items[index];
-  if (it.source !== 'safety_mgr' || it.fromReport) return res.status(409).json({ error: '직접 추가한 위험성평가만 삭제할 수 있습니다.' });
+  const now = new Date().toISOString();
+  const report = it.fromReport ? reports.find(r => r.id === it.fromReport) : null;
+  const voice = it.fromHazard ? SAFE.hazards.find(h => h.id === it.fromHazard) : null;
+
+  // Save the risk record before touching its source report, and roll back on write failure.
+  const originalDemoSetting = RISK.demoDisabled;
   RISK.items.splice(index, 1);
-  saveRisk(); broadcastRisk();
-  res.json({ ok: true });
+  RISK.demoDisabled = true;
+  try { saveRisk({ strict: true }); }
+  catch (error) {
+    RISK.items.splice(index, 0, it);
+    RISK.demoDisabled = originalDemoSetting;
+    return res.status(500).json({ error: '삭제 사항을 저장하지 못했습니다. 원본은 유지됩니다.' });
+  }
+
+  // Source incidents are retained with a deletion audit marker and cleared cross-reference.
+  if (report) {
+    if (report.riskId === it.id) report.riskId = null;
+    report.riskAssessmentDeletedAt = now;
+    report.riskAssessmentDeletedBy = u.name;
+    report.riskAssessmentDeletedId = it.id;
+    report.riskHandling = { status: '위험성평가 항목 삭제', riskId: null, updatedAt: now,
+      by: u.name, reporterResult: '', reporterResultPublished: false };
+    save();
+    broadcast();
+  }
+  if (voice) {
+    if (voice.toRisk === it.id) voice.toRisk = null;
+    voice.riskAssessmentDeletedAt = now;
+    voice.riskAssessmentDeletedBy = u.name;
+    voice.deletedRiskAssessmentId = it.id;
+    saveSafety();
+    broadcastSafety();
+  }
+  broadcastRisk();
+  return res.json({ ok: true, id: it.id, originalReportPreserved: !!report, originalVoiceReportPreserved: !!voice });
 });
 
 /* 위험성평가 저장(담당자 확정) */
@@ -2396,7 +2431,7 @@ function fixRiskUrls(it) {}
 
 /* 예시 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건 */
 function ensureRiskDemo() {
-  if (process.env.RA_DEMO === 'off') return;
+  if (process.env.RA_DEMO === 'off' || RISK.demoDisabled) return;
   if (RISK.items.length) return;
   const now = Date.now();
   const mk = o => Object.assign({ id: nextRiskId(), createdAt: new Date(now - (o.ago || 0) * 864e5).toISOString(),
