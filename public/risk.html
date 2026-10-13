@@ -473,7 +473,14 @@ async function requestRiskAdvice(id,answerQuestions=false){
     const body={reduction:numberedText((d.measures||[]).join('\n')),referenceText:numberedText(references.join('\n')),evidenceIds:evidence.map(item=>item.id),fieldReview:[d.rationale,...(review.additionalChecks||[])].filter(Boolean).join('\n'),aiAdvice:{description,answers:session.answers,rationale:d.rationale,limitations:d.limitations,evidence:d.evidence||[],review,sourceOrigin:d.sourceOrigin}};
     // Preserve the entered hazard description; AI suggestions never replace it automatically.
     const explanation='<p><b>현장 적용 판단</b><br>'+esc(d.rationale||'현장 확인 필요')+'</p><p>'+esc(d.limitations||'')+'</p>'+((review.additionalChecks||[]).length?'<p><b>추가 확인사항</b><br>'+esc(review.additionalChecks.join('\n'))+'</p>':'')+riskAdviceSources(d);
-    if(review.needsAttention||!review.passed){host.innerHTML='<div class="ai-box"><b>'+esc(d.status==='search_failed'?'근거 검색 장애':d.status==='evidence_unavailable'?'확인된 근거 없음':'담당자 검토 필요')+'</b><p>'+esc(d.noEvidence?'근거자료를 확보하지 못해 초안 작성을 중단했습니다. 기존 내용은 유지됩니다. '+(d.externalSearch?.error||d.externalSearch?.limitations||'내부·외부 자료 검색 결과가 없습니다.'):(review.summary||'근거와 대책의 연결성을 확인해 주세요.'))+'</p><p>'+esc((d.measures||[]).join('\n'))+'</p>'+explanation+'</div>';return}
+    if(review.needsAttention||!review.passed){
+      const hasMeasures=Array.isArray(d.measures)&&d.measures.length>0;
+      const notice=d.noEvidence?'공식 근거 검색 결과가 없어 자동 반영을 보류했습니다. 아래 내용은 확인되지 않은 AI 제안입니다.':(review.summary||'근거와 대책의 연결성을 확인해 주세요.');
+      const measures=hasMeasures?'<p style="white-space:pre-wrap"><b>개선대책 초안</b>\n'+esc(d.measures.map((m,i)=>(i+1)+'. '+m).join('\n'))+'</p>':'<p>검토 가능한 개선대책이 생성되지 않았습니다. 서버 AI 오류 여부를 확인해 주세요.</p>';
+      const action=hasMeasures?'<button type="button" class="btn primary" onclick="applyRiskAdviceDraft(\''+esc(id)+'\')">담당자 검토 후 초안 반영</button>':'';
+      host.innerHTML='<div class="ai-box"><b>AI 제안 · 검토 필요</b><p>'+esc(notice)+'</p>'+measures+explanation+action+'</div>';
+      return;
+    }
     const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)});
     if(riskAdviceSession!==session||$('risk-advice-result')!==host)return;
     selectedEvidence=evidence;Object.assign(it,saved.item);session.description=it.factor||description;if($('e-factor'))$('e-factor').value=it.factor||description;
@@ -481,6 +488,25 @@ async function requestRiskAdvice(id,answerQuestions=false){
     host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거 초안</b><small>근거 구분: '+esc(origin)+' · 최종 평가는 담당자가 확인해 주세요.</small><div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(body.reduction)+'</div></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(body.referenceText)+'</div></div>'+explanation+approval+'</div>';
   }catch(error){if(riskAdviceSession===session&&$('risk-advice-result')===host)host.innerHTML='<small class="workspace-error">'+esc(error.message)+'</small>';}
   finally{if(button){button.disabled=false;button.textContent='AI로 초안 작성'}}
+}
+async function applyRiskAdviceDraft(id){
+  const d=riskAdviceDraft,it=R.registered.find(item=>item.id===id);
+  if(!it||!d||!Array.isArray(d.measures)||!d.measures.length){toast('반영할 초안이 없습니다.');return}
+  if(!confirm('AI 초안은 법적 근거와 현장 적합성이 확인되지 않았습니다. 내용을 검토하고 평가표에 임시 반영하시겠습니까?'))return;
+  const references=RiskReferences.legalReferences(d),session=riskAdviceSession||{};
+  const payload={
+    reduction:numberedText(d.measures.join('\n')),
+    referenceText:numberedText(references.join('\n')),
+    fieldReview:[d.rationale,d.limitations,...(d.review?.additionalChecks||[])].filter(Boolean).join('\n'),
+    aiAdvice:{description:$('e-factor')?.value.trim()||'',answers:session.answers||[],rationale:d.rationale,limitations:d.limitations,evidence:d.evidence||[],review:d.review||{},sourceOrigin:d.sourceOrigin}
+  };
+  try{
+    const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(payload)});
+    Object.assign(it,saved.item);
+    toast('검토 필요 초안을 반영했습니다. 위험성 등급과 근거를 현장에서 확정해 주세요.');
+    const host=$('risk-advice-result');
+    if(host)host.innerHTML='<div class="ai-box"><b>임시 초안 반영 완료 · 담당자 확인 필수</b><p style="white-space:pre-wrap">'+esc(payload.reduction)+'</p><p>'+esc(d.limitations||'적용 근거 확인이 필요합니다.')+'</p></div>';
+  }catch(error){toast(error.message)}
 }
 function riskChatPanel(id){return '<section class="ai-box"><b>AI 초안 검토 대화</b><p>잘못 이해한 부분을 알려주거나 다른 대책을 요청하세요. 수정 제안은 확인 후 반영할 수 있습니다.</p><div id="risk-chat-messages" style="white-space:pre-wrap"></div><label for="risk-chat-input">검토 질문·현장 정정</label><div class="risk-chat-row"><textarea id="risk-chat-input" maxlength="1500" placeholder="예: 차량 작업이 아니라 수작업 운반입니다. 공간을 넓힐 수 없는데 다른 대책은?"></textarea><button id="risk-chat-send" class="btn" type="button" onclick="sendRiskChat(\''+esc(id)+'\')">AI와 검토</button></div><label><input type="checkbox" id="risk-chat-refresh"> 새로운 근거를 다시 검색</label><div id="risk-chat-proposal" style="white-space:pre-wrap"></div></section>'}
 function renderRiskChat(){const session=riskAdviceSession;if(!session||!$('risk-chat-messages'))return;$('risk-chat-messages').innerHTML=(session.conversation||[]).map(turn=>'<p><b>'+(turn.role==='user'?'담당자':'AI 검토')+'</b><br>'+esc(turn.text)+'</p>').join('')}
