@@ -20,6 +20,7 @@ async function main() {
       assert.match(body.input, /근골격계 부담작업/);
       assert.equal(body.tool_choice, 'required');
       assert.equal(body.model, 'gpt-4.1-mini');
+      assert.equal(body.tools[0].filters, undefined, '기본 모델에 미지원 filters를 전송하지 않음');
       if(searchFail) return {ok:false,status:503};
       const source = {title:'공식 작업 지침',publisher:'안전보건공단',url:'https://www.kosha.or.kr/guide',excerpt:'작업 동선을 분리',measure:'통행로 분리'};
       return {ok:true,json:async()=>({output:[{type:'web_search_call',action:{sources:[{url:source.url}]}},{type:'message',content:[{type:'output_text',text:JSON.stringify({sources:[source,{...source,url:'https://www.kosha.or.kr/invented'}],limitations:'내부 업무편람 원문 제공 필요'})}]}]})};
@@ -63,10 +64,10 @@ async function main() {
   assert.equal(fallback.sourceOrigin,'external');assert.ok(fallback.internalSearch.errors.length);
   internalMode=true;
   failingRepo.search=async()=>({cases:[{id:'case',review_status:'approved',reduction_measures:'운반 동선 분리'}],results:[{title:'운반 작업',kind:'guideline',review_status:'approved',sections:[{id:'section',body:'운반 보조기구 사용'}]}]});
-  const mixed=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
+  const mixed=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',refreshSources:true});
   assert.equal(mixed.sourceOrigin,'mixed');assert.equal(mixed.externalSearch.attempted,true);
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
-  assert.equal(enough.sourceOrigin,'mixed');assert.equal(enough.externalSearch.attempted,true);
+  assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
   const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
   assert.ok(draftCall,'단계별 근거·해결책 설계 지시');
   const draftContext=JSON.parse(draftCall.body.messages.at(-1).content);

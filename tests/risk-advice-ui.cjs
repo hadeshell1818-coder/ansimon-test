@@ -20,7 +20,7 @@ async function main(){
    if(url.pathname==='/api/safety-knowledge/recommend'){
     const body=route.request().postDataJSON();requests.push(body);recommendCount++;
     if(recommendCount===1){await pending;data={needsClarification:true,questions:[{question:'운반물 무게와 하루 횟수는?',reason:'노출 부하 확인'}]};}
-    else data={factor:item.factor,measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'산업안전보건법',locator:'제36조',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
+    else data={factor:'AI가 다르게 표현한 위험요인',evidenceSession:'test-evidence-session',measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'산업안전보건법',locator:'제36조',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
    }
    if(url.pathname==='/api/risk/items/K1'){const body=route.request().postDataJSON();Object.assign(item,body);data={item};}
    await route.fulfill({json:data});
@@ -37,6 +37,7 @@ async function main(){
   await page.getByRole('button',{name:'초안 작성 계속'}).click();
   await page.getByText('개선대책과 관련근거 초안',{exact:true}).waitFor();
   assert.equal(requests[1].answers[0].answer,'한 개 10kg, 하루 20회');
+  assert.equal(item.factor,'소포 운반 작업 중 통로 충돌 위험','AI가 원본 위험요인을 덮어쓰지 않음');
   assert.match(item.referenceText,/산업안전보건법 제36조/);assert.ok(!item.referenceText.includes('https://'));
   assert.equal(item.aiAdvice.answers.length,1);
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),false);
@@ -48,6 +49,8 @@ async function main(){
   await page.locator('#risk-chat-send').click();
   await page.locator('#risk-chat-apply').waitFor();
   assert.match(requests[2].feedback,/수작업/);
+  assert.equal(requests[2].evidenceSession,'test-evidence-session');
+  assert.equal(requests[2].refreshSources,false);
   assert.equal(item.reduction,previous,'대화 제안은 자동 저장하지 않음');
   await page.locator('#risk-chat-apply').click();
   await page.getByText('수정 대책과 검토 대화를 저장했습니다.',{exact:true}).waitFor();

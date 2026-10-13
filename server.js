@@ -19,6 +19,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const webpush = require('web-push');
 const XLSXStyle = require('xlsx-js-style');
+const { requestAiJson } = require('./ai-json.cjs');
 const { WIDTHS: RISK_EXPORT_WIDTHS, exportRows: riskExportRows, configureExport: configureRiskExport } = require('./risk-export-layout.cjs');
 
 const app = express();
@@ -1206,29 +1207,26 @@ ${zoneList}
 - level: 사고·결빙·낙석·침수처럼 즉시 부상 위험이면 "urgent", 그 밖에는 "caution".
 - zones: 위험 장소가 속한 구역과 그 인접 구역의 id 배열. 말 속 지명을 우선하고, 지명이 없으면 신고자 구역 기준.
 JSON만 답하세요: {"text":"...","level":"urgent|caution","zones":["..."]}`;
-  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' }, max_tokens: 200 }),
-    });
-    const j = await r.json();
-    if (!r.ok || !j.choices?.[0]) { console.error('draft error', r.status, j.error?.message); return null; }
-    const p = JSON.parse(j.choices[0].message.content);
-    const zones = Array.isArray(p.zones) ? p.zones.filter(id => zoneById(id)) : [];
-    if (!p.text || !zones.length) return null;
-    return { text: String(p.text).slice(0, 120), level: p.level === 'urgent' ? 'urgent' : 'caution', zones, mode: 'openai' };
-  } catch (e) { console.error('draft fail', e.message); return null; }
-  finally { clearTimeout(timer); }
+    const p = await requestAiJson({ key, messages: [{ role: 'user', content: prompt }], maxTokens: 500, stage: '안전알림 초안', timeoutMs: 12000 });
+    const zones = Array.isArray(p.zones) ? [...new Set(p.zones.filter(id => zoneById(id)))] : [];
+    if (typeof p.text !== 'string' || !p.text.trim() || !zones.length) throw new Error('알림 문구 또는 대상 구역을 확인하지 못했습니다.');
+    return { text: p.text.trim().slice(0, 120), level: p.level === 'urgent' ? 'urgent' : 'caution', zones, mode: 'openai' };
+  } catch (e) {
+    console.error('draft fail', e.code || e.message);
+    return { ...stubDraft(text, h), mode: 'rule', aiError: 'AI 알림 초안을 작성하지 못했습니다. 원본을 확인하고 문구·대상 구역을 직접 검토해 주세요.' };
+  }
 }
+
 async function processVoice(hid, audio) {
   const h = SAFE.hazards.find(x => x.id === hid); if (!h) return;
+  h.processing = true;
   let text = null;
   if (audio) text = await openaiTranscribe(audio.buf, audio.mime, audio.ext);
   if (text) { h.transcript = text; h.sttMode = 'openai'; }
   else h.sttMode = h.transcript ? 'device' : 'none'; // device = PDA 브라우저 음성인식 결과
   h.draft = (await openaiDraft(h.transcript, h)) || stubDraft(h.transcript, h);
+  h.processing = false;
   saveSafety(); broadcastSafety();
 }
 
@@ -1318,7 +1316,7 @@ app.post('/api/safety/voice', reportLimiter, (req, res) => {
     id, carrierId: me.id, createdAt: new Date().toISOString(),
     lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null,
     audioFile: audio ? saveSafetyFile(id, audio.ext, audio.buf) : null, photoFile,
-    transcript: String(b.clientText || '').trim().slice(0, 500), sttMode: 'pending', draft: null, status: 'pending',
+    transcript: String(b.clientText || '').trim().slice(0, 500), sttMode: 'pending', processing: true, draft: null, status: 'pending',
   };
   SAFE.hazards.unshift(h); saveSafety(); broadcastSafety();
   res.json({ ok: true, id });
@@ -1955,15 +1953,9 @@ async function classifyHazardPhoto(item, photoBase64) {
       const prompt = `우체국 물류 현장에서 근로자가 신고한 "구조적 안전위험" 사진입니다. 사진에서 확인되는 구체적인 위험 상황을 유해·위험요인 문장으로도 정리하세요. 다음 중 가장 맞는 위험유형 하나로 분류하세요.
 ${Object.entries(HAZARD_TYPES).map(([k, v]) => `- ${k}: ${v.label} (${v.factor})`).join('\n')}
 JSON만: {"hazard":"pinch|cut|fall|msds|elec|collision|slip|other","factor":"사진에서 확인되는 구체적인 유해·위험요인"}`;
-      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000);
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST', signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-        body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, max_tokens: 30,
-          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: photoBase64 } }] }] }),
-      }).finally(() => clearTimeout(timer));
-      const j = await r.json();
-      const p = JSON.parse(j.choices[0].message.content);
+      const p = await requestAiJson({ key, maxTokens: 500, stage: '신고 사진 해석', timeoutMs: 12000,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: photoBase64 } }] }] });
+      if (!types.includes(p.hazard)) throw new Error('위험유형 응답을 확인하지 못했습니다.');
       hazard = types.includes(p.hazard) ? p.hazard : 'other'; aiMode = 'openai';
       item.photoFactor = typeof p.factor === 'string' ? p.factor.trim().slice(0, 500) : '';
     } catch (e) { console.error('hazard classify fail', e.message); hazard = item.hazard || 'other'; aiMode = 'error'; }
