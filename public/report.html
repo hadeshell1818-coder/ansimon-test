@@ -40,18 +40,9 @@
   .install-banner{display:flex;align-items:center;gap:10px;background:#10141A;color:#fff;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
   .ib-text{flex:1;font-size:12px;line-height:1.5;color:#C6CDD4;} .ib-text b{color:#fff;font-size:12.5px;}
   .ib-close{flex:0 0 auto;background:transparent;border:none;color:#8A94A0;font-size:16px;font-weight:800;padding:2px 6px;}
-  .prof{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 15px;margin-bottom:16px;}
-  .prof .av{width:44px;height:44px;border-radius:11px;background:#3A434E;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;}
-  .prof .nm{font-size:16px;font-weight:800;} .prof .og{font-size:12px;color:var(--ink-2);font-weight:600;margin-top:2px;}
-
-  .lead{font-size:12px;font-weight:800;color:var(--ink-2);margin:2px 0 3px;}
   .h{font-size:20px;font-weight:800;margin:0 0 13px;}
-  .cats{display:flex;flex-direction:column;gap:11px;}
   .cat{border:none;text-align:left;border-radius:16px;padding:18px 16px;display:flex;align-items:center;gap:14px;color:#fff;box-shadow:0 5px 14px rgba(14,18,22,.14);}
   .cat:active{transform:scale(.98);}
-  .cat .ci{font-size:30px;width:46px;text-align:center;}
-  .cat .ctwrap{display:flex;flex-direction:column;}
-  .cat .ct{font-size:18px;font-weight:800;display:block;} .cat .cs{font-size:11.5px;opacity:.92;margin-top:2px;display:block;}
   .cat.safe{background:linear-gradient(135deg,#F0324F,#C70026);}
   .cat.env{background:linear-gradient(135deg,#10A56E,#087349);}
   .cat.welfare{background:linear-gradient(135deg,#2E6BE0,#0E44A8);}
@@ -67,7 +58,6 @@
   .card{background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden;}
   .card-h{padding:11px 13px;font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px;}
   .card-h .opt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--ink-2);background:#EFF2F5;padding:2px 8px;border-radius:999px;}
-  .locbtn{width:100%;border:1.5px solid var(--gps);background:#E9F7F0;color:var(--gps);font-weight:800;font-size:14px;padding:13px;border-radius:11px;}
   .locmodes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
   .lmode{border:1.5px solid var(--line);background:#fff;color:var(--ink);border-radius:11px;padding:11px 6px;font-size:12.5px;font-weight:800;line-height:1.25;}
   .lmode:active{background:#F3F5F7;transform:scale(.97);}
@@ -95,7 +85,6 @@
   .done{text-align:center;padding:40px 10px;}
   .done .st{width:104px;height:104px;margin:0 auto 10px;border-radius:50%;border:3.5px solid var(--gps);display:flex;align-items:center;justify-content:center;background:rgba(11,138,91,.06);font-size:48px;color:var(--gps);}
   .done .dt{font-size:20px;font-weight:800;margin:6px 0 4px;} .done .ds{font-size:13px;color:var(--ink-2);}
-  .mine-h{font-size:12px;font-weight:800;color:var(--ink-2);margin:20px 0 9px;}
   .mine{display:flex;flex-direction:column;gap:7px;}
   .mrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;}
   .mrow.clickable{cursor:pointer;}
@@ -144,10 +133,6 @@
   .sf-overlay button{width:100%;flex:0 0 auto;border:none;background:#fff;color:var(--urgent);font-size:19px;font-weight:800;padding:20px;border-radius:16px;}
   .sf-overlay.caution button{color:#835500;}.sf-overlay.notice button{color:#0E5E66;}
   .sf-overlay .ohint{text-align:center;font-size:12.5px;margin-top:10px;opacity:.9;}
-  .sf-banner{position:fixed;left:10px;right:10px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:2500;background:#1F2A36;color:#fff;border-radius:14px;padding:13px 14px;display:none;gap:10px;align-items:flex-start;box-shadow:0 10px 30px rgba(0,0,0,.3);max-width:440px;margin:0 auto;}
-  .sf-banner.on{display:flex;}
-  .sf-banner .lv{font-size:11px;font-weight:800;border-radius:5px;padding:2px 6px;flex:0 0 auto;margin-top:2px;}
-  .sf-banner .tx{font-size:14.5px;font-weight:700;line-height:1.45;}
   .sf-modal{position:fixed;inset:0;background:rgba(10,14,18,.55);z-index:2800;display:none;align-items:flex-end;justify-content:center;}
   .sf-modal.on{display:flex;}
   .sf-sheet{background:#fff;width:100%;max-width:460px;border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom,0px) + 18px);max-height:80vh;overflow:auto;}
@@ -161,8 +146,6 @@
 
   /* 안심ON 홈: 부드러운 색면 + 또렷한 기능 버튼 (동작 로직 변경 없음) */
   .wrap{padding:15px 16px 26px;background:linear-gradient(180deg,#f5f8fc 0%,#fbfcfe 68%);}
-  .home-welcome{font-size:13px;color:#64748b;margin:4px 2px 17px;line-height:1.5;}
-  .home-welcome b{color:#1e293b}.home-welcome span{display:block;font-size:11.5px;margin-top:3px}
   .home-section{position:relative;overflow:hidden;border:1px solid transparent;border-radius:19px;padding:16px;margin-bottom:14px;box-shadow:0 4px 16px rgba(35,55,80,.055);}
   .home-section::before{content:'';position:absolute;inset:0 auto 0 0;width:4px;background:var(--section-accent);}
   .home-section-title{font-size:15px;font-weight:850;color:var(--section-ink);margin:0 0 13px;letter-spacing:-.3px;}
@@ -236,7 +219,6 @@
   <div class="wrap" id="cw"></div>
 </div>
 
-
 <div class="sf-overlay" id="sfOverlay" role="alertdialog" aria-live="assertive" aria-labelledby="sfOText">
   <div class="ohead"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z"/></svg><span id="sfOHead">안전 알림</span></div>
   <div class="ometa" id="sfOMeta"></div>
@@ -245,7 +227,6 @@
   <button onclick="sfAck()" id="sfAckBtn">확인했습니다</button>
   <div class="ohint">운행 중이면 안전한 곳에 정차한 뒤 눌러주세요</div>
 </div>
-<div class="sf-banner" id="sfBanner" onclick="sfHideBanner();sfOpenAlerts()"><span class="lv" id="sfBLv"></span><span class="tx" id="sfBTx"></span></div>
 <div class="sf-modal" id="sfModal" onclick="if(event.target===this&&!sfActiveAlert)this.classList.remove('on')"><div class="sf-sheet" id="sfSheet"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -409,7 +390,6 @@ function pickCat(cat){ cur.cat=cat; if(cat==='welfare') return welfareForm();
     <div class="h" style="font-size:17px">어떤 상황인가요?</div>
     <div class="subgrid">${c.items.map((it,i)=>`<button class="sub ${i===c.items.length-1?'etc':''}" onclick="pickItem('${it[1]}')"><span class="si">${it[0]}</span><span class="sl">${it[1]}${it[2]?`<br><small style="font-weight:600;color:var(--ink-2);font-size:10.5px">${it[2]}</small>`:''}</span></button>`).join('')}</div>`;
 }
-
 
 
 /* ===== 안전·환경 상세 ===== */
@@ -642,7 +622,6 @@ async function submitAutoLocation(auto=false){
     await reportRoutingScreen(result.report.id);
   }catch(e){ cur.submitting=false; if(button){button.disabled=false;button.textContent='접수 ›';} toast('전송 실패 · 다시 시도해 주세요'); }
 }
-
 
 let routingView=0;
 async function reportRoutingScreen(id){
@@ -1329,14 +1308,6 @@ async function sfAck(){
     sfRenderTicker();
   }catch(e){ b.disabled=false; if(inline) inline.disabled=false; toast(e.message||'전송 실패 · 다시 눌러주세요'); await sfLoad(); }
 }
-let sfBannerTimer=null;
-function sfShowBanner(a){
-  const [lb,col]=SF_LV[a.level];
-  $('sfBLv').textContent=lb; $('sfBLv').style.background=col; $('sfBTx').textContent=a.text;
-  $('sfBanner').classList.add('on'); clearTimeout(sfBannerTimer);
-  sfBannerTimer=setTimeout(sfHideBanner,8000);   // 8초 뒤 상단 흐르는 글자로만 남는다
-}
-function sfHideBanner(){ $('sfBanner').classList.remove('on'); }
 function sfRenderTicker(){
   const t=$('sfTicker'); const list=[...(SF?.alerts||[])]
     .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).slice(0,5);

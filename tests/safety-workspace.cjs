@@ -56,9 +56,11 @@ async function main() {
     connected = true;
     await page.getByRole('button', { name: '새로고침', exact: true }).click();
     await page.locator('#import-official-laws').click();
-    await page.waitForFunction(() => document.querySelector('#library-result')?.textContent.includes('공식 법령 1종'));
+    // The library re-renders after import, so wait for the stored law row rather than the transient status text.
+    await page.waitForFunction(() => document.querySelector('#source-rows')?.textContent.includes('산업안전보건법'));
     await page.locator('#import-official-laws').click();
     await page.waitForFunction(() => document.querySelector('#import-official-laws')?.disabled === false);
+    await page.waitForFunction(() => document.querySelector('#source-rows')?.textContent.includes('산업안전보건법'));
     assert.equal(lawImports, 2); assert.equal(documents.length, 1);
     assert.match(await page.locator('#source-rows').innerText(), /산업안전보건법[\s\S]*본문 3개 저장/);
     await page.locator('#source-form [name=title]').fill('테스트 자료');

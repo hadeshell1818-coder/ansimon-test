@@ -1094,8 +1094,6 @@ function loadSafety() {
 const nextSafeId = p => p + (SAFE.seq++);
 
 /* 업무종료 보고의 통증·부상 메모는 건강정보라 복지 정보와 같은 AES-256-GCM으로 암호화 저장 */
-const encMemo = t => (t && String(t).trim()) ? encryptPrivate(String(t).trim().slice(0, 200)) : null;
-const decMemo = b => b ? (decryptPrivate(b) || '') : '';
 
 /* 예시: SAFETY_DEMO=on 이고 오늘 음성 위험신고가 없으면 예시 신고 1건을 넣어 관제 화면이 비지 않게 한다. */
 function ensureDemoDay() {
@@ -1938,11 +1936,6 @@ function riskBand(risk) {
   if (risk <= 15) return { key: 'high', label: '높음' };
   return { key: 'very-high', label: '매우 높음' };
 }
-function riskCalc(freq, sev) {
-  if (freq == null || sev == null) return { risk: null, allow: null, band: null };
-  const risk = freq * sev;
-  return { risk, allow: risk < RISK_THRESHOLD, band: riskBand(risk) };
-}
 function itemForMgr(it) {
   const level = RISK_CRITERIA.levels.find(x => x.value === it.riskLevel);
   const source = it.fromReport ? reports.find(r => r.id === it.fromReport) : null;
@@ -2371,9 +2364,6 @@ app.get('/api/risk/files/:id/:kind', (req, res) => {
 
 /* 내근직원 판정 헬퍼: carrier 외 우체국 소속 계정(jip2=영업과 직원 등)도 사진신고 허용 */
 function isStaffLike(u) { return u && (u.kind === 'carrier' || (u.org && String(u.org).includes(SAFETY_OFFICE))); }
-
-/* itemForMgr는 signedSafetyUrl을 쓰지 않고 risk 전용 URL을 쓰도록 교정 */
-function fixRiskUrls(it) {}
 
 /* 예시 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건 */
 function ensureRiskDemo() {
