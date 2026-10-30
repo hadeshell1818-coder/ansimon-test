@@ -3,7 +3,6 @@ const path = require('node:path');
 const os = require('node:os');
 const express = require('express');
 const { chromium } = require('playwright');
-const candidates = require('../seed-assets/safety-sources.json');
 async function main() {
   const app = express();
   app.use(express.static(path.join(__dirname, '../public')));
@@ -15,7 +14,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    let connected = false, documents = [];
+    let connected = false, documents = [], lawImports = 0;
     await page.route('**/api/**', async route => {
       const request = route.request();
       const url = new URL(request.url());
@@ -27,11 +26,12 @@ async function main() {
         if (request.method() === 'POST') {
           documents.push({ ...request.postDataJSON(), review_status: 'pending', jurisdiction: '미확인', rights_note: '이용조건 확인 필요' });
           data = { added: [documents.at(-1)] };
-        } else data = { connected, documents, candidates, message: connected ? 'Supabase 연결됨 (테스트 응답)' : 'Supabase 미연결 · 출처 후보만 준비됨' };
+        } else data = { connected, documents, message: connected ? 'Supabase 연결됨 (테스트 응답)' : 'Supabase 미연결' };
       }
-      if (url.pathname.endsWith('/seed')) {
-        const added = candidates.filter(item => !documents.some(doc => doc.source_url === item.source_url));
-        documents.push(...added); data = { added };
+      if (url.pathname.endsWith('/import-official-laws')) {
+        lawImports++;
+        if (!documents.some(doc => doc.title === '산업안전보건법')) documents.push({ title: '산업안전보건법', publisher: '국가법령정보센터', source_url: 'https://www.law.go.kr/', review_status: 'approved', section_count: 3 });
+        data = { imported: [{ title: '산업안전보건법', sections: 3 }] };
       }
       await route.fulfill({ json: data });
     });
@@ -46,28 +46,29 @@ async function main() {
         assert(await page.locator('#content').innerText());
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Overflow at ${id}, ${viewport.width}`);
       }
-      assert.equal(await page.locator('#seed-sources').isDisabled(), true);
-      await page.locator('#source-search').fill('롤파렛트');
-      assert.equal(await page.locator('#source-rows tr').count(), 4);
+      // Offline: nothing can be saved and no unregistered candidates are shown as evidence.
+      assert.equal(await page.locator('#import-official-laws').isDisabled(), true);
+      assert.equal(await page.locator('#source-form [name=title]').isDisabled(), true);
+      assert.equal(await page.locator('#source-rows').innerText(), '검색 결과 없음');
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.screenshot({ path: path.join(os.tmpdir(), `safety-workspace-${viewport.width}.png`), fullPage: true });
     }
     connected = true;
     await page.getByRole('button', { name: '새로고침', exact: true }).click();
-    await page.locator('#seed-sources').click();
-    await page.waitForFunction(() => document.querySelector('#seed-sources')?.disabled === false);
-    assert.equal(documents.length, 7);
-    await page.locator('#seed-sources').click();
-    await page.waitForFunction(() => document.querySelector('#seed-sources')?.disabled === false);
-    assert.equal(documents.length, 7);
+    await page.locator('#import-official-laws').click();
+    await page.waitForFunction(() => document.querySelector('#library-result')?.textContent.includes('공식 법령 1종'));
+    await page.locator('#import-official-laws').click();
+    await page.waitForFunction(() => document.querySelector('#import-official-laws')?.disabled === false);
+    assert.equal(lawImports, 2); assert.equal(documents.length, 1);
+    assert.match(await page.locator('#source-rows').innerText(), /산업안전보건법[\s\S]*본문 3개 저장/);
     await page.locator('#source-form [name=title]').fill('테스트 자료');
     await page.locator('#source-form [name=publisher]').fill('테스트 기관');
     await page.locator('#source-form [name=source_url]').fill('https://example.com/test');
     await page.getByRole('button', { name: '출처 등록', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('#source-form [name=title]')?.value === '');
-    assert.equal(documents.length, 8);
+    assert.equal(documents.length, 2);
     assert.deepEqual(errors, []);
-    console.log('PASS: 3 safety tabs, desktop/mobile, no page overflow, source search, offline controls, seed idempotency, source registration (mock API)');
+    console.log('PASS: 3 safety tabs, desktop/mobile, no page overflow, offline controls, official law import, source registration (mock API)');
     console.log('Screenshots:', path.join(os.tmpdir(), 'safety-workspace-1440.png'), path.join(os.tmpdir(), 'safety-workspace-390.png'));
   } finally {
     if (browser) await browser.close();

@@ -16,7 +16,7 @@ async function main(){
  assert.equal(fixture.days[2].returns[3].report.bodyIssue,false);
  const app=express();app.use(express.static(path.join(__dirname,'../public')));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));let browser;
  try{
-  browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],queries=[];
+  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],queries=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/**',async route=>{const url=new URL(route.request().url());let data={};
    if(url.pathname==='/api/me')data={user:{kind:'safety',name:'소통실',org:'장흥우체국'}};

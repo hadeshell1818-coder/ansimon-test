@@ -7,7 +7,7 @@ async function main(){
  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
  let browser;
  try{
-  browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'});
+  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
   const page=await browser.newPage({viewport:{width:1366,height:900}}),errors=[],requests=[];
   page.on('pageerror',e=>errors.push(e.message));
   const date=new Date().toISOString().slice(0,10),item={id:'K1',status:'assessing',factor:'소포 운반 작업 중 통로 충돌 위험',customProcess:'소포',createdAt:date,assessmentStartedAt:date};

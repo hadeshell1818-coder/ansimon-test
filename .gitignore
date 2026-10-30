@@ -3,3 +3,12 @@ node_modules/
 *.log
 local-import/
 outputs/postal-hazard-controls/
+
+# Runtime data written by server.js (reports, personal data, uploads)
+/data.json
+/safety.json
+/risk.json
+/uploads/
+
+# Screenshots written by UI tests
+/*-preview.png

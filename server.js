@@ -1097,20 +1097,11 @@ const nextSafeId = p => p + (SAFE.seq++);
 const encMemo = t => (t && String(t).trim()) ? encryptPrivate(String(t).trim().slice(0, 200)) : null;
 const decMemo = b => b ? (decryptPrivate(b) || '') : '';
 
-/* 예시: 오늘 날짜 보고가 비어 있으면 일부 집배원 보고를 채워 집계 화면이 비지 않게 한다.
- * 실제 운영 시 SAFETY_DEMO=off 로 끈다. */
+/* 예시: SAFETY_DEMO=on 이고 오늘 음성 위험신고가 없으면 예시 신고 1건을 넣어 관제 화면이 비지 않게 한다. */
 function ensureDemoDay() {
   if (process.env.SAFETY_DEMO !== 'on') return;
   const d = kstDate();
-  if (SAFE.shifts[d]) return;
   const at = new Date().toISOString();
-  SAFE.shifts[d] = {
-    c01: { status: 'ok', memo: null, source: 'self', at, history: [] },
-    c02: { status: 'ok', memo: null, source: 'self', at, history: [] },
-    c03: { status: 'ok', memo: null, source: 'self', at, history: [] },
-    c05: { status: 'pain', memo: encMemo('오른쪽 무릎 시큰거림, 계단 배달 많았음'), source: 'self', at, history: [] },
-    c06: { status: 'ok', memo: null, source: 'self', at, history: [] },
-  };
   if (!SAFE.hazards.some(h => kstDate(new Date(h.createdAt).getTime()) === d)) {
     const h = {
       id: nextSafeId('S'), carrierId: 'c05', createdAt: at, lat: 34.592, lng: 126.958,
@@ -1120,8 +1111,8 @@ function ensureDemoDay() {
     };
     h.draft = stubDraft(h.transcript, h);
     SAFE.hazards.unshift(h);
+    saveSafety();
   }
-  saveSafety();
 }
 
 /* ---------- 파일(녹음·사진) 저장과 서명 URL ---------- */
@@ -1255,17 +1246,6 @@ function hazardForCtl(h) {
 function alertTargets(zones) {
   return ROSTER.filter(r => zones === 'all' || (Array.isArray(zones) && zones.includes(r.zone))).map(r => r.id);
 }
-function shiftRows(d) {
-  const day = SAFE.shifts[d] || {};
-  return ROSTER.map(r => {
-    const s = day[r.id];
-    return {
-      id: r.id, name: r.name, zone: r.zone, zoneName: zoneById(r.zone)?.name, phone: r.phone,
-      status: s ? s.status : 'none', memo: s ? decMemo(s.memo) : '', source: s ? s.source : null,
-      at: s ? s.at : null, by: s ? s.by || null : null, note: s ? s.note || '' : '', history: s ? s.history || [] : [],
-    };
-  });
-}
 const isToday = iso => kstDate(new Date(iso).getTime()) === kstDate();
 
 function broadcastSafety() {
@@ -1285,12 +1265,10 @@ app.get('/api/safety/state', (req, res) => {
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
       calls: SAFE.calls.filter(c => isToday(c.at)).map(callForCtl),
       alerts: SAFE.alerts.filter(a => !a.deletedAt && isToday(a.createdAt)),
-      shifts: shiftRows(today),
     });
   }
   const me = safetyCarrier(u);
   if (!me) return res.json({ role: 'none' });
-  const day = (SAFE.shifts[today] || {})[me.id];
   res.json({
     role: 'carrier', today, callNumber: SAFETY_CALL_NUMBER, me: { id: me.id, name: me.name, zone: me.zone, zoneName: zoneById(me.zone)?.name },
     alerts: SAFE.alerts.filter(a => !a.deletedAt && a.targets.includes(me.id) &&
@@ -1300,7 +1278,6 @@ app.get('/api/safety/state', (req, res) => {
         acked: !!(a.acks || {})[me.id] })),
     myHazards: SAFE.hazards.filter(h => h.carrierId === me.id && isToday(h.createdAt))
       .map(h => ({ id: h.id, createdAt: h.createdAt, transcript: h.transcript, status: h.status })),
-    shift: day ? { status: day.status, source: day.source, at: day.at } : null,
   });
 });
 
@@ -1571,37 +1548,6 @@ app.post('/api/safety/calls/:id/note', (req, res) => {
   saveSafety(); broadcastSafety();
   res.json({ ok: true });
 });
-const SHIFT_ST = ['ok', 'pain', 'injury'];
-app.post('/api/safety/shift', (req, res) => {
-  const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
-  const b = req.body || {};
-  if (!SHIFT_ST.includes(b.status)) return res.status(400).json({ error: '보고 항목을 선택하세요.' });
-  const d = kstDate(); SAFE.shifts[d] = SAFE.shifts[d] || {};
-  const prev = SAFE.shifts[d][me.id];
-  SAFE.shifts[d][me.id] = {
-    status: b.status, memo: b.status === 'ok' ? null : encMemo(b.memo), source: 'self', at: new Date().toISOString(),
-    history: prev ? [...(prev.history || []), { status: prev.status, source: prev.source, by: prev.by || null, at: prev.at }] : [],
-  };
-  saveSafety(); broadcastSafety();
-  res.json({ ok: true });
-});
-/* 관제 확인 수정: 본인 보고를 지우지 않고 이력으로 남긴 뒤 "관제 확인" 상태로 덮어쓴다 */
-app.patch('/api/safety/shift/:cid', (req, res) => {
-  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
-  const r = rosterById(req.params.cid); if (!r) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  if (!SHIFT_ST.includes(b.status)) return res.status(400).json({ error: '상태를 선택하세요.' });
-  const d = kstDate(); SAFE.shifts[d] = SAFE.shifts[d] || {};
-  const prev = SAFE.shifts[d][r.id];
-  SAFE.shifts[d][r.id] = {
-    status: b.status, memo: prev ? prev.memo : null, source: 'control', by: u.name,
-    note: String(b.note || '전화 확인').trim().slice(0, 100), at: new Date().toISOString(),
-    history: prev ? [...(prev.history || []), { status: prev.status, source: prev.source, by: prev.by || null, at: prev.at }] : [],
-  };
-  saveSafety(); broadcastSafety();
-  res.json({ ok: true });
-});
-
 app.get('/api/safety/files/:hid/:kind', (req, res) => {
   const { hid, kind } = req.params;
   if (!['audio', 'photo'].includes(kind) || !validSafetySig(hid, kind, req.query.exp, req.query.sig)) {

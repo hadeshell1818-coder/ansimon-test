@@ -8,7 +8,7 @@ async function main() {
   const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, channel: 'msedge' });
+    browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
     const page = await browser.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const item = { id: 'K1', factor: '정문 출입문이 바람에 날려 통행인과 충돌 위험', reduction: '기존 담당자 대책', status: 'assessing', customProcess: '시설물', createdAt: new Date().toISOString(), assessmentStartedAt: new Date().toISOString() };
@@ -21,19 +21,26 @@ async function main() {
       if (url.pathname === '/api/risk/items/K1') writes++;
       if (url.pathname === '/api/safety-knowledge/recommend') {
         if (mode === 'service') return route.fulfill({ status: 503, json: { code: 'ai_invalid_response', stage: '초안 재검토', error: '초안 재검토: AI 응답 형식 오류. 입력 내용은 유지됩니다.' } });
-        data = { status: 'search_failed', noEvidence: true, externalSearch: { error: '외부 검색 설정 오류' }, measures: [], citations: [], evidence: [], review: { passed: false, needsAttention: true } };
+        data = { status: 'review_required', noEvidence: true, externalSearch: { error: '외부 검색 설정 오류' }, measures: mode === 'empty' ? [] : ['출입문 고정 장치를 설치한다.'], citations: [], evidence: [], review: { passed: false, needsAttention: true } };
       }
       await route.fulfill({ json: data });
     });
     await page.addInitScript(() => sessionStorage.setItem('cv_risk_token', 'test'));
     await page.goto(`http://127.0.0.1:${server.address().port}/risk.html`);
-    await page.waitForFunction(() => typeof R !== 'undefined' && R.registered?.length);
+    await page.waitForFunction(() => typeof R !== 'undefined' && R?.registered?.length);
     await page.evaluate(() => editRow('K1'));
     await page.locator('#risk-advice-button').click();
-    await page.getByText('근거 검색 장애', { exact: true }).waitFor();
+    // Without evidence the draft is shown as unverified and is never saved automatically.
+    await page.getByText(/공식 근거 검색 결과가 없어 자동 반영을 보류했습니다/).waitFor();
+    assert.ok(await page.getByText('출입문 고정 장치를 설치한다.', { exact: false }).isVisible());
+    assert.equal(await page.getByRole('button', { name: '담당자 검토 후 초안 반영' }).count(), 1);
     assert.equal(await page.locator('#e-factor').inputValue(), item.factor);
     assert.equal(writes, 0); assert.equal(JSON.stringify(item), original);
     assert.equal(await page.locator('#risk-advice-button').isDisabled(), false);
+    mode = 'empty'; await page.locator('#risk-advice-button').click();
+    await page.getByText(/검토 가능한 개선대책이 생성되지 않았습니다/).waitFor();
+    assert.equal(await page.getByRole('button', { name: '담당자 검토 후 초안 반영' }).count(), 0);
+    assert.equal(writes, 0);
     mode = 'service'; await page.locator('#risk-advice-button').click();
     await page.getByText(/초안 재검토: AI 응답 형식 오류/).waitFor();
     assert.equal(writes, 0); assert.equal(await page.locator('#e-factor').inputValue(), item.factor);
@@ -51,7 +58,7 @@ async function main() {
     });
     await page.addInitScript(() => sessionStorage.setItem('cv_safe_token', 'test'));
     await page.goto(`http://127.0.0.1:${server.address().port}/safety.html`);
-    await page.waitForFunction(() => typeof S !== 'undefined' && S.hazards?.length);
+    await page.waitForFunction(() => typeof S !== 'undefined' && S?.hazards?.length);
     await page.evaluate(() => voiceDetail('H1'));
     await page.getByText(/AI 알림 초안을 작성하지 못했습니다/).waitFor();
     await page.locator('#vtext').fill('담당자가 수정한 문구');
@@ -61,7 +68,7 @@ async function main() {
     assert.equal(await page.locator('#voice-dispatch-button').isDisabled(), false);
     assert.equal(dispatches, 1); assert.equal(hazard.status, 'pending'); assert.equal(hazard.transcript, '원본 신고 내용');
     assert.deepEqual(errors, []);
-    console.log('PASS: risk search/review errors preserve fields and prevent saves; control-room AI failure warning and failed dispatch preserve input and original report');
+    console.log('PASS: unverified no-evidence drafts need explicit acceptance, review errors preserve fields and prevent saves; control-room AI failure warning and failed dispatch preserve input and original report');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

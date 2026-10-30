@@ -17,6 +17,7 @@ const context = vm.createContext({
     post(path, handler) { routes[`POST ${path}`] = handler; },
     patch(path, handler) { routes[`PATCH ${path}`] = handler; },
     delete(path, handler) { routes[`DELETE ${path}`] = handler; },
+    get(path, handler) { routes[`GET ${path}`] = handler; },
   },
   userFromReq: req => req.user, isSafetyCtl: () => true,
   safetyCarrier: user => user?.id === 'jip' ? { id: 'jip' } : null,
@@ -27,7 +28,7 @@ const context = vm.createContext({
 vm.runInContext(source.slice(source.indexOf('async function sendPush('), source.indexOf("app.post('/api/safety/alerts'")), context);
 vm.runInContext(source.slice(source.indexOf("app.patch('/api/safety/alerts/:id'"), source.indexOf("app.get('/api/push/config'")), context);
 vm.runInContext(source.slice(source.indexOf("app.post('/api/on/notices'"), source.indexOf("app.post('/api/on/notices/:id/ack'")), context);
-vm.runInContext(source.slice(source.indexOf("app.post('/api/safety/alerts/:id/ack'"), source.indexOf('/* Call audio stays')), context);
+vm.runInContext(source.slice(source.indexOf("app.post('/api/safety/alerts/:id/ack'"), source.indexOf('/* Legacy call recordings')), context);
 vm.runInContext(source.slice(source.indexOf("app.post('/api/on/notices/:id/ack'"), source.indexOf("app.get('/api/safety/history'")), context);
 
 (async () => {
