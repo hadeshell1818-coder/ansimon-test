@@ -117,10 +117,10 @@ assert.equal(SAFE.alerts.at(-1).fromCall, SAFE.calls[0].id);
 
 const elements = {
   statsMonthField: { classList: { contains: name => name === 'hidden' } },
-  statsDay: { value: '2026-09-27' }, statsMonth: { value: '2026-09' },
+  statsDay: { value: '2026-09-27' }, statsMonth: { value: '2026-09' }, includePilotDemo: { checked: false },
   evResult: { textContent: '', innerHTML: '' },
 };
-const element = () => ({ value: '', textContent: '', innerHTML: '',
+const element = () => ({ value: '', textContent: '', innerHTML: '', getAttribute: () => null,
   classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
 });
 const ui = vm.createContext({
@@ -130,7 +130,7 @@ const ui = vm.createContext({
 });
 vm.runInContext(html.slice(html.indexOf('function openEvidence(){'), html.lastIndexOf('</script>')), ui);
 ui.runEvidence().then(() => {
-  assert.match(elements.evResult.innerHTML, /공지사항.*안전교육/s);
+  assert.match(elements.evResult.innerHTML, /공지<\/td>.*안전교육/s);
   assert.match(elements.evResult.innerHTML, /결빙 주의/);
   assert.match(elements.evResult.innerHTML, /전화로 결빙 구간 우회 안내/);
   assert.match(elements.evResult.innerHTML, /김집배.*발목 통증.*브레이크 이상.*점검 의뢰/s);

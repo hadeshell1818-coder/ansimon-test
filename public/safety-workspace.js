@@ -223,14 +223,6 @@ async function importOfficialLaws() {
   } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
   finally { button.disabled = false; }
 }
-async function seedSources() {
-  $('seed-sources').disabled = true;
-  try {
-    const result = await api('/api/safety-knowledge/seed', { method: 'POST' });
-    await reloadLibrary(); toast(`출처 ${result.added.length}건 등록 · 본문 적재 전`);
-  } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
-  finally { if ($('seed-sources')) $('seed-sources').disabled = !knowledgeState?.connected; }
-}
 async function saveSource(event) {
   event.preventDefault();
   const form = event.target;

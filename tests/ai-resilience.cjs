@@ -59,8 +59,13 @@ async function main() {
   broken = true;
   const beforeDrafts = drafts;
   const failed = await repo.recommendRisk(input);
-  assert.equal(failed.status, 'search_failed');
-  assert.equal(drafts, beforeDrafts, 'no draft or review after an evidence search failure');
+  // A failed evidence search still yields an unverified draft that the manager must accept explicitly.
+  assert.equal(failed.status, 'review_required');
+  assert.equal(failed.noEvidence, true);
+  assert.equal(failed.review.passed, false);
+  assert.deepEqual(failed.citations, [], 'no citations are invented without evidence');
+  assert.match(failed.externalSearch.error, /400/);
+  assert.equal(drafts, beforeDrafts + 1, 'an unverified draft is still prepared for manual review');
   const beforeSearches = searches;
   await repo.recommendRisk(input);
   assert.equal(searches, beforeSearches, 'configuration failures do not repeatedly call the same broken endpoint');
@@ -78,6 +83,6 @@ async function main() {
   for (const path of ['public/safety.html', 'public/risk.html']) {
     for (const match of fs.readFileSync(path, 'utf8').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) if (match[1].trim()) new vm.Script(match[1]);
   }
-  console.log('PASS: bounded JSON recovery, search compatibility, verified sources, isolated evidence cache, no draft on search failure, original reports preserved, both page scripts valid');
+  console.log('PASS: bounded JSON recovery, search compatibility, verified sources, isolated evidence cache, unverified draft on search failure, original reports preserved, both page scripts valid');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

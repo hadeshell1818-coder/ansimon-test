@@ -8,10 +8,10 @@ const routes = {};
 const legacy = { id: 'RA1', status: 'assessed', frequency: 4, severity: 3, afterRisk: 4, factor: '계단 파손으로 넘어짐 위험', createdAt: new Date().toISOString() };
 const RISK = { items: [legacy] };
 const ctx = vm.createContext({ RISK, Date, process, console,
-  app: { patch: (p,h) => routes[p] = h, post: (p,h) => routes[p] = h, get: (p,h) => routes[p] = h },
+  app: { patch: (p,h) => routes[p] = h, post: (p,h) => routes[p] = h, get: (p,h) => routes[p] = h, delete: (p,h) => routes['DELETE '+p] = h },
   userFromReq: req => req.user, isSafetyMgr: u => u?.kind === 'safety_mgr',
   procById: () => ({ name: '시설물' }), PROCESSES: [], HAZARD_TYPES: {}, SAFETY_OFFICE: '시험 우체국',
-  saveRisk() {}, broadcastRisk() {}, signedRiskUrl: () => '/photo', nextRiskId: () => 'RA2',
+  saveRisk() {}, broadcastRisk() {}, syncRiskSource() {}, reports: [], SAFE: { hazards: [] }, save() {}, broadcast() {}, saveSafety() {}, broadcastSafety() {}, signedRiskUrl: () => '/photo', nextRiskId: () => 'RA2',
 });
 function load(start,end){ const i=source.indexOf(start); assert.ok(i>=0); const j=source.indexOf(end,i); assert.ok(j>i); vm.runInContext(source.slice(i,j),ctx); }
 load('const RISK_CRITERIA =', 'let RISK =');
@@ -50,5 +50,14 @@ assert.equal(legacy.improvementHistory.at(-1).afterRiskLevel,'중');
 const summary=call('/api/risk/report-summary').body;
 assert.equal(summary.highRisk,1);assert.equal(summary.highRiskDone,1);
 assert.equal(summary.improved[0].before,'상');assert.equal(summary.improved[0].after,'하');
-console.log('PASS: three-step levels, legacy preservation, dates, residual risk and summary');
+// Deleting one assessment keeps the original report and records who removed it.
+const report={id:'R9',riskId:'RA9'};ctx.reports.push(report);
+const linked={id:'RA9',fromReport:'R9',status:'assessed',factor:'바닥 파손',createdAt:new Date().toISOString()};RISK.items.push(linked);
+const del=(id,actor=user)=>{const res={code:200,status(c){this.code=c;return this},json(b){this.body=b;return this}};routes['DELETE /api/risk/items/:id']({user:actor,params:{id},body:{},query:{}},res);return res};
+assert.equal(del('RA9',null).code,403);
+assert.equal(del('RA9').code,200);
+assert.equal(RISK.items.some(it=>it.id==='RA9'),false);
+assert.equal(ctx.reports[0],report);assert.equal(report.riskId,null);assert.equal(report.riskAssessmentDeletedId,'RA9');
+assert.equal(del('RA9').code,404);
+console.log('PASS: three-step levels, legacy preservation, dates, residual risk, summary and single assessment deletion');
 module.exports={criteria,item:ctx.itemForMgr(legacy)};

@@ -16,16 +16,26 @@ const printing=vm.createContext({evidenceData:{period:'기간'},situationRows:()
 vm.runInContext(html.slice(html.indexOf('function printSituationEvidence('),html.indexOf('\n',html.indexOf('function printSituationEvidence('))),printing);
 printing.printSituationEvidence();assert.ok(!printed.includes('DETAIL_0'));assert.ok(!printed.includes('/audio0'));assert.ok(printed.includes('DETAIL_1'));assert.ok(printed.includes('/audio1'));
 const examples=vm.createContext({});vm.runInContext(fs.readFileSync('public/safety-pilot-demo.js','utf8')+'\nglobalThis.fixture=PILOT_DEMO;',examples);
-assert.equal(examples.fixture.notices.length,3);assert.equal(examples.fixture.alerts.length,3);
-assert.equal(examples.fixture.days[0].date,'2026-09-28');assert.equal(examples.fixture.days[2].date,'2026-09-30');
+const dates=['2026-09-29','2026-09-30','2026-10-01','2026-10-02'];
+assert.equal(examples.fixture.notices.length,4);assert.equal(examples.fixture.alerts.length,10);
+assert.equal(examples.fixture.days.map(day=>day.date).join(),dates.join());
 assert.ok(examples.fixture.people.every(p=>p.id.startsWith('prototype-')));
-for(const day of examples.fixture.days){assert.equal(day.returns.length,6);for(const row of day.returns){assert.equal(row.report.bodyIssue,false);assert.equal(row.report.equipmentIssue,false);const hour=new Date(row.report.at).getUTCHours()+9;assert.equal(hour,15);}}
+// One health issue on 9/30 with a completed action; every other return is normal and in the afternoon.
+for(const [index,day] of examples.fixture.days.entries()){assert.equal(day.returns.length,6);for(const [person,row] of day.returns.entries()){const issue=index===1&&person===3;assert.equal(row.report.bodyIssue,issue);assert.equal(row.report.equipmentIssue,false);const hour=new Date(row.report.at).getUTCHours()+9;assert.equal(hour,15);if(issue){assert.equal(row.report.actions.health.status,'done');assert.ok(row.report.actions.health.detail);}}}
 let exampleOnly=true;
 const evidence=vm.createContext({PILOT_DEMO:examples.fixture,$:()=>({checked:exampleOnly}),evidenceDate:s=>String(s).slice(0,10)});
 vm.runInContext(html.slice(html.indexOf('function pilotRosterPerson('),html.indexOf('function pilotRecipients(')),evidence);
 vm.runInContext(html.slice(html.indexOf('function pilotRecipients('),html.indexOf('\n',html.indexOf('function pilotMessage('))),evidence);
 vm.runInContext(html.slice(html.indexOf('function mergePilotEvidence('),html.indexOf('async function togglePilotDemo(')),evidence);
-const actual={summary:{notices:2,voice:1},returns:[{id:'actual',date:'2026-09-28',name:'실제 직원'}],daily:[],notices:[],alerts:[],hazards:[{id:'real-hazard'}],calls:[],healthLedger:[],equipmentLedger:[]};
-const report=evidence.mergePilotEvidence(actual,'2026-09-28','2026-09-30');assert.equal(report.returns.length,18);assert.equal(report.daily.length,3);assert.equal(report.hazards.length,0);assert.equal(report.calls.length,0);assert.equal(report.notices.length,3);assert.equal(report.alerts.length,3);assert.ok(report.returns.every(r=>/^집배원[1-6]$/.test(r.name)));assert.equal(actual.returns[0].name,'실제 직원');
-exampleOnly=false;assert.equal(evidence.mergePilotEvidence(actual,'2026-09-28','2026-09-30'),actual);
-console.log('PASS: township groups, six anonymous assignments, dependent town selection, collapsed print exclusion, isolated September examples');
+const summary={notices:2,voice:1,calls:0,alerts:0,alertBroadcasts:0,returnTarget:1,returnMissing:1,returnReports:0,normalReturns:0,bodyIssues:0,equipmentIssues:0,bothIssues:0};
+const actual={summary,returns:[{id:'actual',date:'2026-09-29',name:'실제 직원'}],daily:[],notices:[],alerts:[],hazards:[{id:'real-hazard'}],calls:[],healthLedger:[],equipmentLedger:[]};
+// Examples are added next to actual records and never replace or rename them.
+const report=evidence.mergePilotEvidence(actual,dates[0],dates[3]);
+assert.equal(report.returns.length,25);assert.equal(report.daily.length,4);assert.equal(report.notices.length,4);assert.equal(report.alerts.length,10);
+assert.equal(report.hazards[0].id,'real-hazard');assert.equal(report.hazards.length,3);
+assert.ok(report.returns.filter(r=>r.id!=='actual').every(r=>/^집배원[1-6]$/.test(r.name)));
+assert.equal(actual.returns[0].name,'실제 직원');assert.equal(actual.returns.length,1);
+assert.ok(Object.values(report.summary).every(Number.isFinite));
+assert.equal(evidence.mergePilotEvidence(actual,dates[0],dates[0]).daily.length,1);
+exampleOnly=false;assert.equal(evidence.mergePilotEvidence(actual,dates[0],dates[3]),actual);
+console.log('PASS: township groups, six anonymous assignments, dependent town selection, collapsed print exclusion, four-day examples added beside actual records');

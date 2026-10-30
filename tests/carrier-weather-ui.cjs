@@ -3,7 +3,7 @@ const {chromium}=require('playwright');
 async function main(){
  const app=express();app.use(express.static(path.join(__dirname,'../public')));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));let browser;
  try{
-  browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   const weather={locationLabel:'장흥군 중심부 기준',date:'2026-10-04',current:{time:'2026-10-04T10:00',temperature:22,feelsLike:24,humidity:72,wind:2.3,code:2},hourly:Array.from({length:24},(_,i)=>({time:'2026-10-04T'+String(i).padStart(2,'0')+':00',temperature:18+Math.sin(i/24*Math.PI)*8,feelsLike:19+Math.sin(i/24*Math.PI)*9,humidity:60+i,rainChance:i>=14?70:10})),fetchedAt:'2026-10-04T01:00:00Z'};
   let fail=false;
   await page.route('**/api/**',async route=>{const url=new URL(route.request().url());let data={};if(url.pathname==='/api/me')data={user:{name:'김철수',kind:'carrier',org:'장흥우체국',region:'장흥군'}};if(url.pathname==='/api/on/notices')data={notices:[]};if(url.pathname==='/api/carrier/weather'){if(fail){await route.fulfill({status:503,json:{error:'날씨 연결 실패'}});return}data=weather}await route.fulfill({json:data});});

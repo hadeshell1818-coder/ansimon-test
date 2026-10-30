@@ -5,7 +5,10 @@ const path=require('node:path');
 const source=fs.readFileSync('server.js','utf8');
 const routes={};
 let seq=0;
-const context=vm.createContext({path, RISK:{items:[]}, reports:[],
+const UP_DIR=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'ansimon-routing-'));
+fs.writeFileSync(path.join(UP_DIR,'photo.jpg'),'jpg');
+process.on('exit',()=>fs.rmSync(UP_DIR,{recursive:true,force:true}));
+const context=vm.createContext({path, fs, UP_DIR, RISK:{items:[]}, reports:[],
   nextRiskId:()=>`K${++seq}`, saveRisk(){},broadcastRisk(){},save(){},broadcast(){},
   app:{get:(p,fn)=>routes['GET '+p]=fn,post:(p,fn)=>routes['POST '+p]=fn},
   userFromReq:req=>req.user
@@ -50,4 +53,8 @@ assert.equal(context.RISK.items[0].routingInactive,true);
 report.type='env';report.routeChoice='internal';context.routeReport(report);
 assert.equal(report.routing,'external');
 assert.equal(context.RISK.items[0].routingInactive,true);
-console.log('PASS: routing matrix, recipient visibility, owner authorization, linked photo, idempotency, reclassification');
+// An assessment deleted by the safety manager is not recreated by re-routing the report.
+const deleted={...base,id:'R2',routeChoice:'internal',riskAssessmentDeletedAt:new Date().toISOString()};context.reports.push(deleted);
+context.routeReport(deleted);
+assert.equal(context.RISK.items.some(it=>it.fromReport==='R2'),false);
+console.log('PASS: routing matrix, recipient visibility, owner authorization, linked photo, idempotency, reclassification, deleted assessment not recreated');

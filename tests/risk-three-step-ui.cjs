@@ -30,12 +30,12 @@ async function main(){
   assert.equal(await page.getByRole('button',{name:'3개월',exact:true}).count(),1);
   assert.equal(await page.getByRole('button',{name:'공정별 출력',exact:true}).count(),1);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-desktop.png'),fullPage:true});
-  await page.getByRole('button',{name:/평가 (작성|수정)/}).click();
+  await page.getByRole('button',{name:/^(작성|평가·처리결과)$/}).click();
   assert.equal(await page.locator('#e-level').count(),0);
   assert.equal(await page.locator('#e-red').count(),0);
   assert.equal(await page.getByRole('button',{name:'AI로 초안 작성',exact:true}).count(),1);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
-  await page.getByRole('button',{name:'보기·수정',exact:true}).click();
+  await page.getByRole('button',{name:'이행결과서 열기',exact:true}).click();
   assert.equal(await page.locator('.result-photo').count(),2);
   assert.match(await page.locator('.result-plan').innerText(),/담당자\(관리감독자\)/);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-result.png'),fullPage:true});
@@ -50,7 +50,7 @@ async function main(){
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflow');
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-mobile.png'),fullPage:true});
-  await page.getByRole('button',{name:'이행결과서',exact:true}).click();
+  await page.getByRole('button',{name:'이행결과서 열기',exact:true}).click();
   assert.ok(await page.locator('#modalCard').evaluate(el=>el.scrollWidth<=el.clientWidth),'mobile result overflow');
   assert.deepEqual(errors,[]);
   console.log('PASS: desktop/mobile, period filters, compact editor, 10-column form and isolated result printing');

@@ -4,7 +4,8 @@
   "private": true,
   "description": "안심ON 테스트 서버",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 \"tests/*.cjs\""
   },
   "engines": {
     "node": ">=20"

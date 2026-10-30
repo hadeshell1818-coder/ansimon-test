@@ -25,7 +25,7 @@ async function main(){
   sessions.set('expired',{uid:'manager',expiresAt:Date.now()-1});assert.equal((await post('expired')).status,401);assert.equal(writes,0);
   sessions.set('wrong',{uid:'other',expiresAt:Date.now()+60000});assert.equal((await post('wrong')).status,403);assert.equal(writes,0);
   sessions.set('fresh',{uid:'manager',expiresAt:Date.now()+60000});
-  browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>sessionStorage.setItem('cv_risk_token','fresh'));
   await page.goto(base+'/risk.html');const button=page.getByRole('button',{name:'위험성평가로 등록',exact:true});await button.waitFor();
   sessions.get('fresh').expiresAt=Date.now()-1;

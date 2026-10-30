@@ -1,4 +1,3 @@
-const seeds = require('./seed-assets/safety-sources.json');
 const { parseSifWorkbook, SIF_SOURCE_URL, SIF_TITLE, SIF_PUBLISHER } = require('./sif-import.cjs');
 const { fetchOfficialSafetySources } = require('./official-law-import.cjs');
 const crypto = require('crypto');
@@ -158,13 +157,13 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     async list() {
       const externalSearchEnabled = Boolean(env.OPENAI_API_KEY && env.SAFETY_EXTERNAL_SEARCH !== 'off');
       const external = { externalSearchEnabled, referenceCatalog };
-      if (!configured) return { ...external, connected: false, documents: [], candidates: seeds, message: `Supabase 미연결 · AI 외부 공식자료 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
+      if (!configured) return { ...external, connected: false, documents: [], message: `Supabase 미연결 · AI 외부 공식자료 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
       const documents = await call('?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,created_at,original_file_name,storage_path,mime_type,file_size,safety_import_rows(count),safety_document_sections(count)&order=created_at.desc&limit=500');
       documents.forEach(doc => {
         doc.case_count = doc.safety_import_rows?.[0]?.count || 0;
         doc.section_count = doc.safety_document_sections?.[0]?.count || 0;
       });
-      return { ...external, connected: true, documents, candidates: seeds, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
+      return { ...external, connected: true, documents, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
     },
     async search(query) {
       const q = String(query || '').trim().replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9\s-]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
@@ -188,11 +187,6 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         const { body_text, ...safeDoc } = doc;
         return { ...safeDoc, sections: hits };
       }), cases };
-    },
-    async seed(actor) {
-      // Seed metadata only; never overwrite a reviewed record or upload source content.
-      return call('?on_conflict=source_url', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
-        body: JSON.stringify(seeds.map(item => ({ ...item, created_by: actor, review_status: 'pending' }))) });
     },
     async importOfficialLaws(actor) {
       if (!configured) throw new Error('Supabase 미연결: 저장하지 않았습니다.');
@@ -567,10 +561,6 @@ function mountKnowledge(app, authorize, env) {
   });
   app.get('/api/safety-knowledge/:id/file', async (req, res) => {
     try { res.json(await repository.signedFile(req.params.id)); }
-    catch (error) { res.status(503).json({ error: error.message }); }
-  });
-  app.post('/api/safety-knowledge/seed', async (req, res) => {
-    try { res.json({ added: await repository.seed(req.knowledgeUser.id) }); }
     catch (error) { res.status(503).json({ error: error.message }); }
   });
   app.post('/api/safety-knowledge/import-official-laws', async (req, res) => {
