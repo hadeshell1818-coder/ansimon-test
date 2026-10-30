@@ -91,7 +91,21 @@ async function main() {
     assert.equal((await fetch(base, { method: 'POST', headers: { Authorization: 'manager' } })).status, 503);
     assert.equal((await fetch(base + '/import-official-laws', { method: 'POST', headers: { Authorization: 'manager' } })).status, 503);
   } finally { await new Promise(resolve => server.close(resolve)); }
-  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures');
+  // A Supabase project that cannot be reached must explain the cause instead of a bare "fetch failed".
+  const unreachable = createKnowledgeRepository(configured, async () => { throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }); });
+  await assert.rejects(unreachable.list(), error => {
+    assert.doesNotMatch(error.message, /^fetch failed$/);
+    assert.match(error.message, /Supabase 자료실 연결 실패.*주소를 찾을 수 없습니다.*ENOTFOUND.*일시중지/);
+    return true;
+  });
+  const slow = createKnowledgeRepository(configured, async () => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }); });
+  await assert.rejects(slow.list(), /Supabase 자료실 연결 실패 · 응답 시간이 초과되었습니다/);
+  const real = createKnowledgeRepository({ ...configured, SAFETY_SUPABASE_URL: 'https://ansimon-test.invalid' });
+  await assert.rejects(real.list(), error => { assert.match(error.message, /^Supabase 자료실 연결 실패 · /); return true; });
+  const { fetchOfficialSafetySources } = require('../official-law-import.cjs');
+  await assert.rejects(fetchOfficialSafetySources({ LAW_OPEN_API_OC: 'test' }, async () => { throw new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } }); }),
+    /국가법령정보센터 연결 실패 · 서버가 연결을 거부하거나 끊었습니다/);
+  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
 

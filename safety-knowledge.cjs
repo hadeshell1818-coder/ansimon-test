@@ -2,6 +2,7 @@ const { parseSifWorkbook, SIF_SOURCE_URL, SIF_TITLE, SIF_PUBLISHER } = require('
 const { fetchOfficialSafetySources } = require('./official-law-import.cjs');
 const crypto = require('crypto');
 const { requestAiJson, aiFailure } = require('./ai-json.cjs');
+const { connectionFailure } = require('./connection-error.cjs');
 const referenceCatalog = require('./seed-assets/safety-reference-catalog.json');
 
 const DEFAULT_EXTERNAL_DOMAINS = [
@@ -38,6 +39,8 @@ function jsonFromResponse(result) {
   throw aiFailure('search_invalid_response', '외부 검색', '검색 응답 형식을 확인하지 못했습니다. 확인된 공식 근거로 사용하지 않습니다.');
 }
 
+const SUPABASE_HINT = 'Supabase 대시보드에서 프로젝트가 일시중지(Paused)되지 않았는지, 서버의 SAFETY_SUPABASE_URL 값이 맞는지 확인하세요.';
+
 function createKnowledgeRepository(env = process.env, request = fetch) {
   const url = env.SAFETY_SUPABASE_URL;
   const key = env.SAFETY_SUPABASE_SERVICE_KEY;
@@ -45,15 +48,19 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   const allowedExternalDomains = externalDomains(env);
   const evidenceSessions = new Map();
   let externalConfigurationFailure = null;
+  async function send(service, target, options, hint) {
+    try { return await request(target, options); }
+    catch (error) { throw connectionFailure(service, error, hint); }
+  }
   async function callResource(resource, query, options = {}) {
     if (!configured) throw new Error('Supabase 연결 설정이 필요합니다.');
     const base = new URL(url);
     if (base.protocol !== 'https:') throw new Error('HTTPS 프로젝트 URL이 필요합니다.');
-    const response = await request(new URL(`/rest/v1/${resource}${query}`, base), {
+    const response = await send('Supabase 자료실', new URL(`/rest/v1/${resource}${query}`, base), {
       ...options,
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...options.headers },
       signal: AbortSignal.timeout(10000),
-    });
+    }, SUPABASE_HINT);
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       const message = detail ? detail.replace(/\s+/g, ' ').slice(0, 240) : '프로젝트 설정과 SQL 적용 여부를 확인하세요.';
@@ -83,7 +90,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     // GPT-4.1 rejects domain filters. Official URL validation below remains mandatory.
     if (!/^gpt-4\.1(?:-|$)/.test(model)) tool.filters = { allowed_domains: allowedExternalDomains };
     if (externalConfigurationFailure && externalConfigurationFailure.until > Date.now()) throw externalConfigurationFailure.error;
-    const response = await request('https://api.openai.com/v1/responses', {
+    const response = await send('외부 검색(OpenAI)', 'https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
       body: JSON.stringify({
@@ -316,7 +323,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const objectPath = `${crypto.randomUUID()}/${name}`;
       const base = new URL(url);
       const storageUrl = new URL(`/storage/v1/object/safety-documents/${objectPath.split('/').map(encodeURIComponent).join('/')}`, base);
-      const uploaded = await request(storageUrl, { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': mime, 'x-upsert': 'false' }, body: buffer, signal: AbortSignal.timeout(20000) });
+      const uploaded = await send('Supabase 파일 저장소', storageUrl, { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': mime, 'x-upsert': 'false' }, body: buffer, signal: AbortSignal.timeout(20000) }, SUPABASE_HINT);
       if (!uploaded.ok) throw new Error(`파일 저장 실패 (${uploaded.status}). Supabase SQL 004 적용 여부를 확인하세요.`);
       try {
         const record = await call('', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({
@@ -334,10 +341,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     async signedFile(documentId) {
       const rows = await call(`?select=storage_path,original_file_name&id=eq.${eq(documentId)}&limit=1`);
       if (!rows[0]?.storage_path) throw new Error('업로드 파일이 없습니다.');
-      const signed = await request(new URL(`/storage/v1/object/sign/safety-documents/${rows[0].storage_path.split('/').map(encodeURIComponent).join('/')}`, new URL(url)), {
+      const signed = await send('Supabase 파일 저장소', new URL(`/storage/v1/object/sign/safety-documents/${rows[0].storage_path.split('/').map(encodeURIComponent).join('/')}`, new URL(url)), {
         method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ expiresIn: 300 }), signal: AbortSignal.timeout(10000),
-      });
+      }, SUPABASE_HINT);
       if (!signed.ok) throw new Error(`파일 열기 실패 (${signed.status}).`);
       const result = await signed.json();
       const signedPath = String(result.signedURL || '');
