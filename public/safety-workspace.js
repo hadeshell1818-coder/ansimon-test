@@ -9,8 +9,6 @@ const safetyCategories = {
 };
 let knowledgeState = null;
 let libraryQuery = '';
-let evidenceResults = [];
-let evidenceCases = [];
 let selectedEvidence = [];
 let librarySearchTimer = null;
 async function refreshKnowledge() {
@@ -42,47 +40,6 @@ function renderSafetyWorkspace(selected) {
     ${section.rows.map(row => `<tr><td>${esc(row)}</td><td>기관 검토 대기</td><td>미구축</td></tr>`).join('')}</tbody></table></div>
     <p class="workspace-note">필요 자료: ${esc(section.needed)}</p>
     <button class="btn" onclick="openCategoryLibrary('${selected}')">관련 근거자료</button>`;
-}
-function beginEvidenceEdit(item) {
-  selectedEvidence = (item.evidenceIds || []).map(id => ({ id, title: `연결된 근거 ${id}` }));
-  evidenceResults = [];
-  evidenceCases = [];
-}
-function evidenceEditorHtml(item) {
-  return `<div class="evidence-box"><b>관련 법령·사례 검토</b>
-    <small>신고 사진의 위험요인과 작업내용을 기준으로 Supabase 사례를 검색합니다. 선택한 사례는 유사사고·유발요인·대책을 평가표에 남겨 담당자의 점수와 개선대책 검토를 돕습니다. 사례 건수 자체가 현장 빈도 점수는 아닙니다.</small>
-    <div class="row-btns"><input id="evidence-query" class="workspace-search" style="margin:0;flex:1" value="${esc(item.factor || item.workContent || item.note || '')}" placeholder="예: 롤파렛트 끼임"><button class="btn" onclick="searchEvidence()">근거 검색</button></div>
-    <div id="evidence-results" class="evidence-list"></div>
-    <small id="evidence-selected">연결된 근거 ${selectedEvidence.length}건</small></div>`;
-}
-async function searchEvidence() {
-  const query = $('evidence-query')?.value.trim();
-  if (!query) return;
-  try {
-    const result = await api('/api/safety-knowledge/search?q=' + encodeURIComponent(query));
-    evidenceResults = result.results || [];
-    evidenceCases = result.cases || [];
-    renderEvidenceResults();
-    if (!evidenceResults.length && !evidenceCases.length) $('evidence-results').innerHTML = '<small>등록·검토대기 검색 결과가 없습니다. 자료실에 출처와 원문을 먼저 등록하세요.</small>';
-  } catch (error) {
-    if ($('evidence-results')) $('evidence-results').innerHTML = `<small class="workspace-error">${esc(error.message)}</small>`;
-  }
-}
-function renderEvidenceResults() {
-  const selectedIds = new Set(selectedEvidence.map(item => item.id));
-  const documents = evidenceResults.map(doc => {
-    const sections = doc.sections || [];
-    const choices = sections.length ? sections : [{ id: doc.id, locator: '문서', body: '' }];
-    return `<div><b>${esc(doc.title || '자료')}</b> · ${esc(doc.publisher || '')} · ${esc(doc.review_status || '검토 대기')}
-      ${choices.map(section => { const id = section.id || doc.id; return `<label class="evidence-item"><input type="checkbox" ${selectedIds.has(id) ? 'checked' : ''} onchange="toggleEvidence(this, '${esc(id)}', '${esc(doc.title || '자료')}')"><span>${esc(section.locator || '본문')}<small>${esc(String(section.body || '').slice(0, 180))}</small></span></label>`; }).join('')}</div>`;
-  }).join('');
-  const cases = evidenceCases.length ? `<div class="case-results"><b>SIF 유사사례 ${evidenceCases.length}건 · 선택한 사례만 평가표에 연결</b>${evidenceCases.map(item => { const id='sif:'+item.id; return `<article class="case-result"><label class="evidence-item"><input type="checkbox" ${selectedIds.has(id)?'checked':''} onchange="toggleEvidence(this, '${esc(id)}', 'SIF ${esc(item.source_sheet||'사례')} ${esc(item.source_row||'')}행')"><span><strong>${esc(item.hazard_object || item.high_risk_situation || '유해위험요인')}</strong><small>${esc(item.domain === 'construction' ? [item.work_category, item.work_name, item.unit_work].filter(Boolean).join(' · ') : [item.industry_large, item.industry_medium, item.industry_small].filter(Boolean).join(' · '))}</small><p>${esc(item.incident_summary || item.causal_factors || '')}</p><small>유발요인: ${esc(item.causal_factors || '-')}<br>감소대책 예시: ${esc(item.reduction_measures || '-')}<br>출처: ${esc(item.source_sheet)} ${esc(item.source_row)}행 · 검토 전</small></span></label></article>`; }).join('')}</div>` : '';
-  $('evidence-results').innerHTML = documents + cases;
-}
-function toggleEvidence(control, id, title) {
-  if (control.checked) selectedEvidence.push({ id, title });
-  else selectedEvidence = selectedEvidence.filter(item => item.id !== id);
-  const el = $('evidence-selected'); if (el) el.textContent = `연결된 근거 ${selectedEvidence.length}건`;
 }
 function openCategoryLibrary(category) { libraryQuery = category; setTab('library'); }
 function sourceRows() {

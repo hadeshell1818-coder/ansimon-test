@@ -2,7 +2,6 @@ node_modules/
 .env
 *.log
 local-import/
-outputs/postal-hazard-controls/
 
 # Runtime data written by server.js (reports, personal data, uploads)
 /data.json

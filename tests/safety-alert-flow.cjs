@@ -35,7 +35,7 @@ const context = vm.createContext({
   navigator: { vibrate() {} }, speechSynthesis: { cancel() {} },
   sfRenderTicker() {}, sfLoad() {}, toast() {},
 });
-vm.runInContext(script.slice(script.indexOf('const sfAlertKey='), script.indexOf('let sfBannerTimer=')), context);
+vm.runInContext(script.slice(script.indexOf('const sfAlertKey='), script.indexOf('function sfRenderTicker(')), context);
 
 (async () => {
   context.sfHandleAlerts();

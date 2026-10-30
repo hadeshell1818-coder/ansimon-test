@@ -128,7 +128,7 @@ const ui = vm.createContext({
   esc: value => String(value ?? '').replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char])),
   followupLabel: status => status, api: async () => evidence,
 });
-vm.runInContext(html.slice(html.indexOf('function openEvidence(){'), html.lastIndexOf('</script>')), ui);
+vm.runInContext(html.slice(html.indexOf('function setStatsMode('), html.lastIndexOf('</script>')), ui);
 ui.runEvidence().then(() => {
   assert.match(elements.evResult.innerHTML, /공지<\/td>.*안전교육/s);
   assert.match(elements.evResult.innerHTML, /결빙 주의/);
