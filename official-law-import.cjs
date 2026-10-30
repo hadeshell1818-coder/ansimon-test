@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { connectionFailure } = require('./connection-error.cjs');
 
 const LAW_API_BASE = 'https://www.law.go.kr/DRF/';
 
@@ -125,7 +126,9 @@ function uniqueSectionLocators(sections) {
 async function fetchJson(request, pathname, params, apiCode) {
   const url = new URL(pathname, LAW_API_BASE);
   url.search = new URLSearchParams({ OC: apiCode, type: 'JSON', ...params }).toString();
-  const response = await request(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
+  let response;
+  try { response = await request(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(30000) }); }
+  catch (error) { throw connectionFailure('국가법령정보센터', error, '잠시 후 다시 시도하세요.'); }
   if (!response.ok) throw new Error(`국가법령정보센터 조회 실패 (${response.status})`);
   const data = await response.json();
   const envelope = data.LawSearch || data.AdmRulSearch || data.법령 || data.AdmRulService;
