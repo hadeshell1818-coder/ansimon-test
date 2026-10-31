@@ -27,9 +27,13 @@ AGENTS.md와 함께 적용한다. 사용자와 합의한 운영 규칙이며, �
 
 ## 4. 진행 방식 (사용자 합의)
 
+**원칙: 모든 작업은 에이전트가 끝까지 한다. 사용자는 전 과정이 끝난 뒤 제대로 했는지 검토만 한다.** 중간에 사용자에게 실행·확인·선택을 넘기지 않는다. 판단이 필요한 선택은 합리적인 기본값으로 진행하고 보고에 근거를 남긴다.
+
 - 한국어로 답한다. 변경은 `claude/dreamy-feynman-3jnbrc` 브랜치에서 하고, `npm test` 통과 후 PR을 만들어 squash 병합한다.
-- Supabase에는 직접 접속하지 않는다. SQL은 300KB 이하 파일로 만들어 `SendUserFile`(display `render`)로 우측 미리보기에 보내고 사용자가 SQL Editor에서 실행한다.
-- 비밀번호·서비스 키를 대화로 받지 않는다. 키는 서버(Railway) 환경변수에만 둔다.
-- `local-import/`는 git에 없다. 적재한 자료의 버전은 `supabase/loaded-sources.json`에 기록하고, 사용자가 실행을 확인한 뒤 갱신한다.
+- **Supabase**: 이 환경에 `SUPABASE_DB_URL`(PostgreSQL 연결 문자열)이 있고 해당 DB 호스트가 허용되어 있으면 SQL 적재·마이그레이션·적재 확인을 에이전트가 직접 실행하고 `supabase/loaded-sources.json`도 바로 갱신한다. 없을 때만 300KB 이하 SQL 파일을 `SendUserFile`(display `render`)로 보내고, 무엇이 막혔는지 함께 알린다.
+- **AI 검색어·의미 검색 시뮬레이션**: `OPENAI_API_KEY`가 있고 `api.openai.com`이 허용되어 있으면 실제 AI 흐름으로 로컬에서 직접 돌린다. 없으면 운영 「검색 정확도 점검」에서 돌도록 코드를 준비하고 그 한계를 보고한다.
+- **운영 확인**: 운영 주소(`ansimon-test-production.up.railway.app`)에 접근할 수 있으면 배포 반영을 직접 확인한다. 접근할 수 없으면 확인하지 못했다고 보고한다.
+- 비밀번호·키·연결 문자열은 대화로 받지 않는다. 환경 설정(네트워크 비밀값 또는 환경변수)으로만 받는다.
+- `local-import/`는 git에 없다. 적재한 자료의 버전은 `supabase/loaded-sources.json`에 기록한다.
 - 그림으로만 된 PDF·별표는 자동 OCR로 넣지 않고 화면을 보고 옮겨 적으며 "원문 확인" 안내를 붙인다.
-- 확인하지 않은 것(운영 반영, 실기기 설치, 실제 AI 응답)은 완료라고 말하지 않는다.
+- 확인하지 않은 것(운영 반영, 실기기 설치, 실제 AI 응답, Supabase 적재)은 완료라고 말하지 않는다.
