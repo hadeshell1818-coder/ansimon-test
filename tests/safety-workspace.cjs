@@ -32,7 +32,7 @@ async function main() {
       if (url.pathname.endsWith('/index-embeddings')) { indexCalls++; const indexed = Math.min(32, missing); missing -= indexed; data = { indexed, sections: { total: 70, missing }, cases: { total: 0, missing: 0 } }; }
       if (url.pathname.endsWith('/evaluate-search')) {
         const { offset } = request.postDataJSON();
-        data = { total: 16, offset, semantic: { used: true, error: '' }, results: Array.from({ length: 8 }, (_, i) => ({ id: `C${offset + i}`, desc: '사례', expect: [{ label: '규칙 / 조문', words: i % 2 === 0, add: i % 2 === 0 || i < 5, rrf: i !== 7 }] })) };
+        data = { total: 16, offset, semantic: { used: true, error: '' }, results: Array.from({ length: 8 }, (_, i) => ({ id: `C${offset + i}`, desc: '사례', area: i < 4 ? '발착' : '시설물', expect: [{ label: '규칙 / 조문', words: i % 2 === 0, add: i % 2 === 0 || i < 5, rrf: i !== 7 }] })) };
       }
       if (url.pathname.endsWith('/import-official-laws')) {
         lawImports++;
@@ -80,6 +80,7 @@ async function main() {
     await page.locator('#evaluate-search').click();
     await page.waitForFunction(() => document.querySelector('#semantic-result')?.textContent.includes('기대 근거 16개'));
     assert.match(await page.locator('#semantic-result').innerText(), /단어 검색만\s*8개[\s\S]*의미 검색 추가\(현재 방식\)\s*12개 · 새로 찾음 4 · 밀려남 0[\s\S]*순위 섞기\(이전 방식, 비교용\)\s*14개[\s\S]*새로 찾은 근거 4개[\s\S]*놓친 근거 4개/);
+    assert.match(await page.locator('#semantic-result').innerText(), /업무 구역별 결과/);
     await page.locator('#source-form [name=title]').fill('테스트 자료');
     await page.locator('#source-form [name=publisher]').fill('테스트 기관');
     await page.locator('#source-form [name=source_url]').fill('https://example.com/test');

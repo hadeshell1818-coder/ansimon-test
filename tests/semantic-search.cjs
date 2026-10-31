@@ -64,7 +64,7 @@ async function main() {
   assert.equal(indexed.indexed, 1); assert.equal(indexed.ready, true);
 
   const evaluation = await repo.evaluateSearch({ offset: 0, limit: 2 });
-  assert.equal(evaluation.total, 64); assert.equal(evaluation.results.length, 2);
+  assert.equal(evaluation.total, 175); assert.equal(evaluation.results.length, 2);
   assert.ok(evaluation.results.every(item => item.expect.every(expect => ['words', 'add', 'rrf'].every(key => typeof expect[key] === 'boolean'))));
   const evalEmbed = calls.filter(call => call.href.endsWith('/v1/embeddings')).at(-1).body.input[0];
   assert.match(evalEmbed, /\n/, 'evaluation embeds the report text together with the search words, like a real draft');

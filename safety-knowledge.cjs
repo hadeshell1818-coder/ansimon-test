@@ -76,14 +76,15 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // fusion 'add' (default): every word-search pick stays and meaning-only matches are appended, so adding
   // semantic search can never drop evidence the word search found. 'rrf' mixes both rankings (measured worse
   // on the 64 post-office cases: word 84/95, rrf 74/95) and is kept only for comparison in the accuracy check.
-  async function searchApprovedSections(queries, semanticSections = [], { fusion = env.SAFETY_EVIDENCE_FUSION || 'add' } = {}) {
+  // Word-search candidates for the given queries: by article title, body and word pairs (Supabase ilike
+  // returns matches unordered, so candidates are ranked afterwards). Reused when one query set is ranked
+  // several ways, as in the accuracy check.
+  async function gatherSections(queries) {
     const words = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
       .filter(term => term.length >= 2).slice(0, 12);
-    if (!words.length && !semanticSections.length) return { laws: [], guides: [] };
     const phrases = queries.map(query => String(query).trim()).filter(query => /\s/.test(query));
     const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&limit=1000');
-    const approved = new Map(documents.map(doc => [doc.id, doc]));
     const select = '?select=id,document_id,version,locator,body';
     const like = term => `*${encodeURIComponent(term)}*`;
     const requests = words.flatMap(term => [`${select}&locator=ilike.${like(term)}&limit=30`, `${select}&body=ilike.${like(term)}&limit=30`]);
@@ -94,6 +95,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     for (let index = 0; index < requests.length; index += 8) {
       found.push(...(await Promise.all(requests.slice(index, index + 8).map(query => callResource('safety_document_sections', query).catch(() => [])))).flat());
     }
+    return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found };
+  }
+  async function searchApprovedSections(queries, semanticSections = [], { fusion = env.SAFETY_EVIDENCE_FUSION || 'add', gathered = null } = {}) {
+    const { words, phrases, approved, found } = gathered || await gatherSections(queries);
+    if (!words.length && !semanticSections.length) return { laws: [], guides: [] };
     const candidates = new Map();
     for (const section of [...found, ...semanticSections]) {
       const doc = approved.get(section.document_id);
@@ -104,6 +110,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       let total = 0;
       for (const term of words) { if (item.body.includes(term)) total += 1; if (String(item.locator || '').includes(term)) total += 3; if (String(item.title || '').includes(term)) total += 1; }
       for (const phrase of phrases) if (item.body.includes(phrase)) total += 2;
+      // General provisions of the safety rules (제1~53조: workplace, passages, PPE, falls) apply to every workplace
+      // and tend to lose to same-word articles of construction or mining chapters; +1 measured best on 175 cases.
+      const article = Number((String(item.locator || '').match(/^제(\d+)조/) || [])[1]);
+      if (total && item.title === '산업안전보건기준에 관한 규칙' && article && article <= 53) total += 1;
       return total;
     };
     const byWords = [...candidates.values()].filter(item => score(item) > 0).map(item => ({ item, score: score(item) }))
@@ -309,12 +319,13 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       let semanticError = '';
       for (const item of cases) {
         const queries = [...item.q, ...(item.lq || [])];
-        const words = await searchApprovedSections(queries);
+        const gathered = await gatherSections(queries);
+        const words = await searchApprovedSections(queries, [], { gathered });
         // Same semantic input as a real draft: the report text plus the search words.
         const semantic = semanticEnabled() ? await semanticSearch([item.desc, ...queries].join('\n')).catch(error => { semanticError = error.message; return null; }) : null;
         const lists = { words: [...words.laws, ...words.guides] };
         if (semantic) for (const fusion of ['add', 'rrf']) {
-          const found = await searchApprovedSections(queries, semantic.sections, { fusion });
+          const found = await searchApprovedSections(queries, semantic.sections, { fusion, gathered });
           lists[fusion] = [...found.laws, ...found.guides];
         }
         results.push({ id: item.id, area: item.area, desc: item.desc, expect: item.expect.map(expect => ({

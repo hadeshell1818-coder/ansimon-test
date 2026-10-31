@@ -198,19 +198,23 @@ async function indexEmbeddings() {
 async function evaluateSearch() {
   const button = $('evaluate-search'); button.disabled = true;
   const host = $('semantic-result'), rows = [];
-  let total = 64, semantic = null;
+  let total = Infinity, semantic = null;
   try {
     for (let offset = 0; offset < total; offset += 8) {
-      host.textContent = `우체국 사례 ${offset}/${total}건 점검 중`;
+      host.textContent = `우체국 사례 ${offset}/${Number.isFinite(total) ? total : '…'}건 점검 중`;
       const result = await api('/api/safety-knowledge/evaluate-search', { method: 'POST', body: JSON.stringify({ offset, limit: 8 }) });
       total = result.total; semantic = result.semantic; rows.push(...result.results);
     }
     const expects = rows.flatMap(row => row.expect.map(expect => ({ ...expect, row })));
     const count = key => expects.filter(item => item[key]).length;
     const list = items => `<ul>${items.map(item => `<li>${esc(item.row.id)} ${esc(item.row.desc)} — <small>${esc(item.label)}</small></li>`).join('')}</ul>`;
+    // Per work area (접수·발착·시설물 …) so weak areas show where evidence or search needs work.
+    const byArea = key => { const areas = new Map();
+      for (const item of expects) { const area = item.row.area || '기타', entry = areas.get(area) || { hit: 0, all: 0 }; entry.all++; if (item[key]) entry.hit++; areas.set(area, entry); }
+      return `<details><summary>업무 구역별 결과</summary><table class="mini-table"><tbody>${[...areas].map(([area, entry]) => `<tr><td>${esc(area)}</td><td>${entry.hit}/${entry.all}</td></tr>`).join('')}</tbody></table></details>`; };
     if (!semantic?.used) {
       host.innerHTML = `<p><b>기대 근거 ${expects.length}개 중 단어 검색 ${count('words')}개가 AI에 전달됩니다.</b> 의미 검색 미사용: ${esc(semantic?.error || '')}</p>
-        <details><summary>놓친 근거 ${expects.filter(item => !item.words).length}개</summary>${list(expects.filter(item => !item.words))}</details>`;
+        ${byArea('words')}<details><summary>놓친 근거 ${expects.filter(item => !item.words).length}개</summary>${list(expects.filter(item => !item.words))}</details>`;
       return;
     }
     // Gained: found only with meaning added. Lost: the word search found it but the combined list dropped it.
@@ -221,6 +225,7 @@ async function evaluateSearch() {
         <tr><td>단어 검색 + 의미 검색 추가(현재 방식)</td><td>${count('add')}개 · 새로 찾음 ${gained.length} · 밀려남 ${lost.length}</td></tr>
         <tr><td>순위 섞기(이전 방식, 비교용)</td><td>${count('rrf')}개</td></tr>
       </tbody></table>
+      ${byArea('add')}
       <details><summary>의미 검색으로 새로 찾은 근거 ${gained.length}개</summary>${list(gained)}</details>
       <details><summary>현재 방식으로도 놓친 근거 ${expects.filter(item => !item.add).length}개</summary>${list(expects.filter(item => !item.add))}</details>`;
   } catch (error) { host.textContent = error.message; }
