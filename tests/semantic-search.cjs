@@ -35,7 +35,7 @@ async function main() {
     }
     return json([]);
   };
-  const env = { SAFETY_SUPABASE_URL: 'https://test.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'key', OPENAI_API_KEY: 'k', SAFETY_EXTERNAL_SEARCH: 'off' };
+  const env = { SAFETY_SUPABASE_URL: 'https://test.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'key', OPENAI_API_KEY: 'k', SAFETY_EXTERNAL_SEARCH: 'off', SAFETY_SEMANTIC_SEARCH: 'on' };
   const repo = createKnowledgeRepository(env, request);
 
   const advice = await repo.recommendRisk({ description: '출입구 바닥이 젖어 미끄러움' });

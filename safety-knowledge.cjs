@@ -140,7 +140,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // Semantic search (supabase/006_semantic_search.sql): reports and statutes rarely share words, so the
   // meaning of the report is compared with the stored meaning of every approved section and case.
   const embeddingModel = env.SAFETY_EMBEDDING_MODEL || 'text-embedding-3-small';
-  const semanticEnabled = () => Boolean(configured && env.OPENAI_API_KEY && env.SAFETY_SEMANTIC_SEARCH !== 'off');
+  // Semantic search can append look-alike but irrelevant sections; until the accuracy check shows it raises
+  // correct citations without adding wrong ones, drafts use it only when SAFETY_SEMANTIC_SEARCH=on.
+  // The accuracy check and indexing still measure it whenever an OpenAI key is configured.
+  const semanticAvailable = () => Boolean(configured && env.OPENAI_API_KEY && env.SAFETY_SEMANTIC_SEARCH !== 'off');
+  const semanticEnabled = () => semanticAvailable() && env.SAFETY_SEMANTIC_SEARCH === 'on';
   async function embed(texts) {
     const response = await send('임베딩(OpenAI)', 'https://api.openai.com/v1/embeddings', {
       method: 'POST',
@@ -322,7 +326,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         const gathered = await gatherSections(queries);
         const words = await searchApprovedSections(queries, [], { gathered });
         // Same semantic input as a real draft: the report text plus the search words.
-        const semantic = semanticEnabled() ? await semanticSearch([item.desc, ...queries].join('\n')).catch(error => { semanticError = error.message; return null; }) : null;
+        const semantic = semanticAvailable() ? await semanticSearch([item.desc, ...queries].join('\n')).catch(error => { semanticError = error.message; return null; }) : null;
         const lists = { words: [...words.laws, ...words.guides] };
         if (semantic) for (const fusion of ['add', 'rrf']) {
           const found = await searchApprovedSections(queries, semantic.sections, { fusion, gathered });
@@ -332,7 +336,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
           label: `${expect.t} / ${expect.b}`, words: hit(lists.words, expect),
           add: lists.add ? hit(lists.add, expect) : null, rrf: lists.rrf ? hit(lists.rrf, expect) : null })) });
       }
-      return { total: all.length, offset: Number(offset) || 0, results, semantic: { used: semanticEnabled() && !semanticError, error: semanticError || (semanticEnabled() ? '' : '의미 검색 미설정') } };
+      return { total: all.length, offset: Number(offset) || 0, results, semantic: { used: semanticAvailable() && !semanticError, error: semanticError || (semanticAvailable() ? '' : '의미 검색 미설정') } };
     },
     async search(query) {
       const q = String(query || '').trim().replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9\s-]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
@@ -699,7 +703,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         noEvidence: evidence.length === 0,
         sourceOrigin,
         answers,
-        internalSearch: { configured, errors: searchErrors, semantic: reused ? { reused: true } : { used: Boolean(semantic), error: semanticError || (semanticEnabled() ? '' : '의미 검색 미설정') } },
+        internalSearch: { configured, errors: searchErrors, semantic: reused ? { reused: true } : { used: Boolean(semantic), error: semanticError || (semanticEnabled() ? '' : (semanticAvailable() ? '초안에는 의미 검색을 쓰지 않음(SAFETY_SEMANTIC_SEARCH=on일 때만)' : '의미 검색 미설정')) } },
         externalSources: externalSearch.sources,
         externalSearch: { configured: externalSearch.configured, attempted: Boolean(externalSearch.attempted), reused: Boolean(reused), used: externalSearch.sources.length > 0, error: externalSearch.error || null, limitations: externalSearch.limitations || '' },
       };
