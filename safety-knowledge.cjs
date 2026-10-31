@@ -75,7 +75,8 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
       .filter(term => term.length >= 2).slice(0, 10);
     if (!terms.length) return [];
-    const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&kind=eq.law&review_status=eq.approved&limit=200');
+    // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
+    const documents = await call(`?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&or=${encodeURIComponent('(kind.eq.law,source_url.like."https://www.law.go.kr/*")')}&limit=200`);
     const approved = new Map(documents.map(doc => [doc.id, doc]));
     const found = await Promise.all(terms.map(term => callResource('safety_document_sections',
       `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(term)}*&limit=12`).catch(() => [])));
@@ -489,7 +490,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const reviewedCitations = (Array.isArray(review.approvedCitations) ? review.approvedCitations : [])
         .filter(ref => draftCitations.includes(ref)).slice(0, 8);
       const citedEvidence = evidence.filter(item => reviewedCitations.includes(item.ref)).slice(0, 8);
-      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || ((item.type === '문서 본문' || item.type === '외부 공식자료') && (item.kind === 'law' || item.title === '사업장 위험성평가에 관한 지침'))).map(item => {
+      const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || ((item.type === '문서 본문' || item.type === '외부 공식자료') && (item.kind === 'law' || String(item.sourceUrl || '').startsWith('https://www.law.go.kr/')))).map(item => {
         const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?/);
         return locator?.[0]?.replace(/\s+/g, ' ').trim() || '';
       }).filter(Boolean);

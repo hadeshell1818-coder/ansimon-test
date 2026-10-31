@@ -5,10 +5,12 @@
   if(/^doc:|^sif:/.test(item.ref||''))return item.status==='approved';
   try{const u=new URL(item.sourceUrl);return /^https?:$/.test(u.protocol)&&/^(?:[^.]+\.)*(?:law\.go\.kr|kosha\.or\.kr|moel\.go\.kr|korea\.kr|koreapost\.go\.kr)$/.test(u.hostname)}catch{return false}
  })}
+ // Notices, guidelines and standards count only when their text comes from the official law service.
+ function officialLawSource(item){try{return /^(?:[^.]+\.)*law\.go\.kr$/.test(new URL(item.sourceUrl).hostname)}catch{return false}}
  function legalReferences(d){return [...new Set(searchableEvidence(d).flatMap(item=>{
   const title=conciseReferences(item.title||''),locator=String(item.locator||'');
   const clause=(title+' '+locator).match(/제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*\([^)]*\))?(?:\s*제\s*\d+\s*항)?(?:\s*제\s*\d+\s*호)?/);
-  if(!clause||!/(?:법|시행령|규칙)/.test(title))return [];
+  if(!clause||!(/(?:법|시행령|규칙)/.test(title)||(officialLawSource(item)&&/(?:고시|지침|기준)/.test(title))))return [];
   return [(title.replace(/\s*제\s*\d+\s*조.*$/,'').trim()+' '+clause[0]).trim()];
  }))]}
  const api={conciseReferences,searchableEvidence,legalReferences};
