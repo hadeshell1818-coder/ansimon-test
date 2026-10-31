@@ -59,6 +59,20 @@ async function main() {
     assert.match(await page.locator('body').innerText(), /인터넷에 연결되어 있지 않습니다[\s\S]*전송되지 않습니다[\s\S]*119/);
     await context.setOffline(false);
     assert.deepEqual(errors, []);
+    // Android app (Trusted Web Activity): asset links only list valid SHA-256 fingerprints; the wrapper opens /report.html.
+    const fs = require('node:fs'), vm = require('node:vm');
+    const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+    const snippet = source.slice(source.indexOf('function androidAssetLinks'), source.indexOf("app.get('/.well-known/assetlinks.json'"));
+    const assetLinks = vm.runInNewContext(`${snippet}; androidAssetLinks`, { String, process: { env: {} } });
+    const fp = Array.from({ length: 32 }, (_, i) => (i * 7 % 256).toString(16).padStart(2, '0')).join(':');
+    const plain = value => JSON.parse(JSON.stringify(value));
+    assert.deepEqual(plain(assetLinks({})), []);
+    assert.deepEqual(plain(assetLinks({ ANDROID_SHA256_FINGERPRINTS: `${fp}, not-a-fingerprint` })[0].target), { namespace: 'android_app', package_name: 'kr.ansimon.app', sha256_cert_fingerprints: [fp.toUpperCase()] });
+    const manifestXml = fs.readFileSync(path.join(__dirname, '../android/app/src/main/AndroidManifest.xml'), 'utf8');
+    const gradle = fs.readFileSync(path.join(__dirname, '../android/app/build.gradle'), 'utf8');
+    assert.match(manifestXml, /trusted\.LauncherActivity[\s\S]*DEFAULT_URL[\s\S]*\$\{defaultUrl\}[\s\S]*DelegationService/);
+    assert.match(gradle, /defaultUrl: siteUrl \+ '\/report\.html'/);
+    assert.ok(fs.existsSync(path.join(__dirname, '../.github/workflows/android-apk.yml')));
     console.log('PASS: installable carrier app, one-tap install prompt, iPhone add-to-home guidance, offline notice');
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }

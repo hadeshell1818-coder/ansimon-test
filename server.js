@@ -2341,6 +2341,15 @@ require('./safety-knowledge.cjs').mountKnowledge(app, req => {
   return isSafetyMgr(user) ? user : null;
 });
 
+// Digital Asset Links for the Android app (android/, Trusted Web Activity): with the signing fingerprint in
+// ANDROID_SHA256_FINGERPRINTS (comma-separated) the app opens /report.html full screen without a URL bar.
+function androidAssetLinks(env = process.env) {
+  const fingerprints = String(env.ANDROID_SHA256_FINGERPRINTS || '').split(',').map(item => item.trim().toUpperCase())
+    .filter(item => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(item));
+  return fingerprints.length ? [{ relation: ['delegate_permission/common.handle_all_urls'],
+    target: { namespace: 'android_app', package_name: env.ANDROID_PACKAGE || 'kr.ansimon.app', sha256_cert_fingerprints: fingerprints } }] : [];
+}
+app.get('/.well-known/assetlinks.json', (_req, res) => res.json(androidAssetLinks()));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.redirect('/dashboard.html'));
 

@@ -27,6 +27,15 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `prepare-kosha-guides.cjs [out.sql]` | 산업안전포털(portal.kosha.or.kr)의 현행 KOSHA GUIDE 목록에서 우체국 시설·작업 관련 60건 PDF를 받아 글을 추출하고 `4.2 제목` 단위로 나눈 SQL 생성 (`curl`, `pdftotext` 필요; `KOSHA_PDF_DIR`로 받은 PDF 재사용). 그림으로만 된 PDF는 건너뛰고 실패로 표시. 월 1회 개정 검토 때 다시 실행 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
 
+## 안드로이드 앱(APK)
+
+`android/`는 집배원 화면(`/report.html`)을 앱으로 여는 Trusted Web Activity입니다. 화면·기능은 웹과 같고 설치 파일만 제공합니다.
+
+1. GitHub Actions의 「안심ON 안드로이드 앱(APK)」이 `android/` 변경 시 또는 수동 실행 시 APK를 만들어 저장소 Releases의 `android-latest`에 `ansimon.apk`로 올립니다(수동 실행 시 운영 주소를 바꿀 수 있음).
+2. 휴대폰에서 Releases 페이지를 열어 `ansimon.apk`를 내려받아 설치합니다(출처를 알 수 없는 앱 설치 허용 필요).
+3. 주소창 없이 전체 화면으로 열리게 하려면 릴리스 설명의 SHA-256 지문을 서버 환경변수 `ANDROID_SHA256_FINGERPRINTS`에 넣습니다(`/.well-known/assetlinks.json`).
+4. 저장소 비밀값 `ANDROID_KEYSTORE_BASE64`·`ANDROID_KEYSTORE_PASSWORD`가 없으면 빌드마다 임시 서명 키를 써서, 새 버전 설치 시 기존 앱을 지우고 다시 설치해야 하고 지문도 바뀝니다. 시범운영 전 고정 키를 비밀값으로 등록하세요.
+
 ## 의미 검색 설정
 
 현장 표현과 법령 표현은 단어가 잘 겹치지 않습니다(예: "바닥이 젖어 미끄러움" ↔ "전도의 방지"). 의미 검색은 조문·사례마다 뜻을 벡터로 저장해 두고 신고 문장과 뜻이 가까운 근거를 찾으며, 단어 검색 결과와 합쳐 AI에 전달합니다.
