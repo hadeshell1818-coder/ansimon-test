@@ -13,7 +13,7 @@ async function main() {
     if (String(url).includes('supabase')) {
       if(!internalMode)throw Error('repository unavailable');
       const parsed=new URL(url),table=parsed.pathname.split('/').pop();
-      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'안전 통로 확보',locator:'제3조'}]:[];
+      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'안전 통로 확보',locator:'제3조'},{id:'law-section-2',document_id:'law',body:'운반 작업 통로 정리',locator:'제22조'}]:[];
       return {ok:true,json:async()=>result};
     }
     if (String(url).endsWith('/responses')) {
@@ -66,9 +66,12 @@ async function main() {
   failingRepo.search=async()=>({cases:[{id:'case',review_status:'approved',reduction_measures:'운반 동선 분리'}],results:[{title:'운반 작업',kind:'guideline',review_status:'approved',sections:[{id:'section',body:'운반 보조기구 사용'}]}]});
   const mixed=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',refreshSources:true});
   assert.equal(mixed.sourceOrigin,'mixed');assert.equal(mixed.externalSearch.attempted,true);
-  // Approved-law search also covers official notices stored as guidelines with a law.go.kr source.
-  const lawQuery=decodeURIComponent(calls.map(call=>call.url).find(url=>url.includes('/rest/v1/safety_documents?')&&decodeURIComponent(url).includes('kind.eq.law'))||'');
-  assert.match(lawQuery,/review_status=eq\.approved/);assert.match(lawQuery,/or=\(kind\.eq\.law,source_url\.like\."https:\/\/www\.law\.go\.kr\/\*"\)/);
+  // Evidence search reads approved documents only and gathers sections by article title, body and word pairs.
+  const docQuery=decodeURIComponent(calls.map(call=>call.url).find(url=>url.includes('/rest/v1/safety_documents?')&&url.includes('limit=1000'))||'');
+  assert.match(docQuery,/review_status=eq\.approved/);
+  const sectionQueries=calls.map(call=>decodeURIComponent(call.url)).filter(url=>url.includes('/rest/v1/safety_document_sections?'));
+  assert.ok(sectionQueries.some(url=>/locator=ilike\.\*운반\*/.test(url)),'조문 제목 검색');
+  assert.ok(sectionQueries.some(url=>/and=\(body\.ilike\.\*운반\*,body\.ilike\.\*작업\*\)/.test(url)),'두 단어 동시 검색');
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
   const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
