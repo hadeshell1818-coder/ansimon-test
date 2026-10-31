@@ -634,30 +634,45 @@ function allStrings(node, output = []) {
   return output;
 }
 
-function articleLocator(article, index) {
-  const heading = compactText(article?.조문내용);
-  if (heading) return heading.slice(0, 180);
+// Same locator format as the web import ("제N조(제목)"), so both paths update the same rows.
+function articleLocator(article) {
+  const heading = compactText(article?.조문내용).match(/^제\d+조(?:의\d+)?\s*\([^)]*\)/);
+  if (heading) return compactText(heading[0]);
   const number = compactText(article?.조문번호);
   const branch = compactText(article?.조문가지번호);
   const title = compactText(article?.조문제목);
-  return number ? `제${number}조${branch && branch !== '0' ? `의${branch}` : ''}${title ? `(${title})` : ''}` : `조문 ${index + 1}`;
+  return number && title ? `제${number}조${branch && branch !== '0' ? `의${branch}` : ''}(${title})` : null;
 }
 
 function lawSections(payload) {
   const articles = arrayOf(payload?.법령?.조문?.조문단위);
-  return articles.map((article, index) => ({
-    locator: articleLocator(article, index),
-    body: uniqueText(provisionText(article)).join('\n'),
-  })).filter(section => section.body);
+  // Chapter headings and deleted articles carry no "제N조(제목)" and are skipped, as in the web import.
+  return articles
+    .filter(article => !article?.조문여부 || article.조문여부 === '조문')
+    .map(article => ({ locator: articleLocator(article), body: uniqueText(provisionText(article)).join('\n') }))
+    .filter(section => section.locator && section.body);
+}
+
+// Technical standards (e.g. NFTC) number sections "2.1", "2.1.1" instead of articles; split at the second level.
+function numberedSections(lines) {
+  const sections = [];
+  let part = '', current = null;
+  for (const line of lines.map(compactText).filter(Boolean)) {
+    const heading = line.match(/^(\d+)\.\s+(\S.*)$/), sub = line.match(/^(\d+\.\d+)\s+(\S.*)$/);
+    if (heading) { part = `${heading[1]}. ${heading[2]}`; continue; }
+    if (sub) { current = { locator: compactText(`${sub[1]} ${sub[2]}`).slice(0, 180), lines: part ? [`[${part}]`, line] : [line] }; sections.push(current); continue; }
+    if (current) current.lines.push(line);
+  }
+  return sections.map(({ locator, lines: body }) => ({ locator, body: body.join('\n') }));
 }
 
 function administrativeRuleSections(payload) {
   const root = payload?.AdmRulService || {};
-  const articles = allStrings(root.조문내용).map(compactText).filter(text => /^제\d+조(?:의\d+)?\s*\(/.test(text));
-  const sections = articles.map((body, index) => ({
-    locator: (body.match(/^제\d+조(?:의\d+)?\s*\([^)]*\)/) || [])[0] || `조문 ${index + 1}`,
-    body,
-  }));
+  const texts = allStrings(root.조문내용);
+  const articles = texts.map(compactText).filter(text => /^제\d+조(?:의\d+)?\s*\(/.test(text));
+  const sections = articles.length
+    ? articles.map((body, index) => ({ locator: (body.match(/^제\d+조(?:의\d+)?\s*\([^)]*\)/) || [])[0] || `조문 ${index + 1}`, body }))
+    : numberedSections(texts.flatMap(text => String(text).split(/\r?\n/)));
   for (const [index, appendix] of arrayOf(root?.별표?.별표단위).entries()) {
     const body = uniqueText(allStrings(appendix?.별표내용)).join('\n');
     if (!body) continue;
@@ -766,4 +781,4 @@ async function fetchOfficialSafetySources(env = process.env, request = fetch, so
   return { documents, failures };
 }
 
-module.exports = { OFFICIAL_SAFETY_SOURCES, fetchOfficialSafetySources };
+module.exports = { OFFICIAL_SAFETY_SOURCES, fetchOfficialSafetySources, lawSections, administrativeRuleSections };

@@ -129,7 +129,34 @@ async function main() {
   // The real response for an unregistered OC (observed from law.go.kr) must name the setting to fix.
   const unverified = async () => ({ ok: true, json: async () => ({ result: '사용자 정보 검증에 실패하였습니다.', msg: 'OPEN API 호출 시 사용자 검증을 위하여 정확한 서버장비의 IP주소 및 도메인주소를 등록해 주세요.' }) });
   await assert.rejects(fetchOfficialSafetySources({}, unverified, pick(['산업안전보건법'])), /Open API 인증 실패.*LAW_API_OC/);
-  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures, partial official import, law API verification failure');
+  // API import uses the web import's "제N조(제목)" locators and skips chapter headings and deleted articles.
+  const { lawSections, administrativeRuleSections } = require('../official-law-import.cjs');
+  const lawRows = lawSections({ 법령: { 조문: { 조문단위: [
+    { 조문여부: '전문', 조문내용: '제1장 총칙' },
+    { 조문여부: '조문', 조문번호: '1', 조문제목: '목적', 조문내용: '제1조(목적) 이 법은 산업재해를 예방한다.' },
+    { 조문여부: '조문', 조문번호: '2', 조문내용: '제2조 삭제 <2020. 1. 16.>' },
+  ] } } });
+  assert.deepEqual(lawRows.map(row => row.locator), ['제1조(목적)']);
+  // Numbered technical standards (NFTC) split at the second level when there are no articles.
+  const nftc = administrativeRuleSections({ AdmRulService: { 조문내용: ['1. 일반사항\n1.1 적용범위\n1.1.1 이 기준은 소화기구에 적용한다.\n2. 기술기준\n2.1 설치기준\n2.1.1 바닥으로부터 1.5m 이하에 설치한다.'] } });
+  assert.deepEqual(nftc.map(row => row.locator), ['1.1 적용범위', '2.1 설치기준']);
+  assert.match(nftc[1].body, /^\[2\. 기술기준\]\n2\.1 설치기준\n2\.1\.1 바닥으로부터 1\.5m/);
+  // The import button removes superseded versions of an imported law but keeps rows cited by assessments.
+  const importCalls = [];
+  const importRepo = createKnowledgeRepository({ ...configured, LAW_API_OC: 'test' }, async (url, options = {}) => {
+    const target = new URL(url);
+    if (target.hostname === 'www.law.go.kr') return lawApi(url);
+    importCalls.push({ method: options.method || 'GET', url: decodeURIComponent(target.pathname + target.search) });
+    if (target.pathname.endsWith('/safety_documents')) return { ok: true, status: 201, json: async () => [{ id: 'doc-1' }] };
+    if (target.pathname.endsWith('/safety_assessment_evidence')) return { ok: true, status: 200, json: async () => [{ section_id: 'cited-1' }] };
+    return { ok: true, status: 204, json: async () => null };
+  });
+  const imported = await importRepo.importOfficialLaws('manager');
+  assert.ok(imported.imported.some(item => item.title === '산업안전보건법'));
+  const removal = importCalls.find(call => call.method === 'DELETE');
+  assert.ok(removal, 'superseded versions are removed');
+  assert.match(removal.url, /safety_document_sections\?document_id=eq\.doc-1&version=neq\..*제1호 · 시행 2025-06-01&id=not\.in\.\(cited-1\)/);
+  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures, partial official import, law API verification failure, API locators and numbered standards, superseded version cleanup');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
 
