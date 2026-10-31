@@ -17,7 +17,7 @@ async function main() {
       return {ok:true,json:async()=>result};
     }
     if (String(url).endsWith('/responses')) {
-      assert.match(body.input, /근골격계 부담작업/);
+      assert.match(body.input, /근골격계부담작업의 범위 및 유해요인조사 방법에 관한 고시/);
       assert.equal(body.tool_choice, 'required');
       assert.equal(body.model, 'gpt-4.1-mini');
       assert.equal(body.tools[0].filters, undefined, '기본 모델에 미지원 filters를 전송하지 않음');
