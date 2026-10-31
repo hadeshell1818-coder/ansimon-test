@@ -463,6 +463,127 @@ const OFFICIAL_SAFETY_SOURCES = [
     category: 'inspections',
     tags: ['승강기', '안전운행', '자체점검', '운행관리'],
   },
+  // Other facilities found in post offices: public-agency fire safety, asbestos, electrical products, gas, building services, accessibility.
+  {
+    type: 'law',
+    title: '공공기관의 소방안전관리에 관한 규정',
+    category: 'inspections',
+    tags: ['공공기관', '소방안전관리', '소방훈련', '우체국'],
+  },
+  {
+    type: 'law',
+    title: '석면안전관리법',
+    category: 'chemicals',
+    tags: ['석면', '천장재', '석면건축물', '해체'],
+  },
+  {
+    type: 'law',
+    title: '석면안전관리법 시행령',
+    category: 'chemicals',
+    tags: ['석면', '천장재', '석면건축물', '해체'],
+  },
+  {
+    type: 'law',
+    title: '석면안전관리법 시행규칙',
+    category: 'chemicals',
+    tags: ['석면', '천장재', '석면건축물', '해체'],
+  },
+  {
+    type: 'law',
+    title: '전기용품 및 생활용품 안전관리법',
+    category: 'inspections',
+    tags: ['전기용품', '멀티탭', '안전인증', 'KC'],
+  },
+  {
+    type: 'law',
+    title: '전기용품 및 생활용품 안전관리법 시행령',
+    category: 'inspections',
+    tags: ['전기용품', '멀티탭', '안전인증', 'KC'],
+  },
+  {
+    type: 'law',
+    title: '전기용품 및 생활용품 안전관리법 시행규칙',
+    category: 'inspections',
+    tags: ['전기용품', '멀티탭', '안전인증', 'KC'],
+  },
+  {
+    type: 'law',
+    title: '유해ㆍ위험작업의 취업 제한에 관한 규칙',
+    category: 'general',
+    tags: ['취업 제한', '지게차', '자격', '면허'],
+  },
+  {
+    type: 'law',
+    title: '기계설비법',
+    category: 'inspections',
+    tags: ['기계설비', '냉난방', '환기', '유지관리'],
+  },
+  {
+    type: 'law',
+    title: '기계설비법 시행령',
+    category: 'inspections',
+    tags: ['기계설비', '냉난방', '환기', '유지관리'],
+  },
+  {
+    type: 'law',
+    title: '기계설비법 시행규칙',
+    category: 'inspections',
+    tags: ['기계설비', '냉난방', '환기', '유지관리'],
+  },
+  {
+    type: 'law',
+    title: '도시가스사업법',
+    category: 'inspections',
+    tags: ['도시가스', '가스설비', '보일러', '가스누설'],
+  },
+  {
+    type: 'law',
+    title: '도시가스사업법 시행령',
+    category: 'inspections',
+    tags: ['도시가스', '가스설비', '보일러', '가스누설'],
+  },
+  {
+    type: 'law',
+    title: '도시가스사업법 시행규칙',
+    category: 'inspections',
+    tags: ['도시가스', '가스설비', '보일러', '가스누설'],
+  },
+  {
+    type: 'law',
+    title: '액화석유가스의 안전관리 및 사업법',
+    category: 'inspections',
+    tags: ['LPG', '액화석유가스', '가스용기', '식당'],
+  },
+  {
+    type: 'law',
+    title: '액화석유가스의 안전관리 및 사업법 시행령',
+    category: 'inspections',
+    tags: ['LPG', '액화석유가스', '가스용기', '식당'],
+  },
+  {
+    type: 'law',
+    title: '액화석유가스의 안전관리 및 사업법 시행규칙',
+    category: 'inspections',
+    tags: ['LPG', '액화석유가스', '가스용기', '식당'],
+  },
+  {
+    type: 'law',
+    title: '장애인ㆍ노인ㆍ임산부 등의 편의증진 보장에 관한 법률',
+    category: 'general',
+    tags: ['편의시설', '경사로', '점자블록', '손잡이', '고객'],
+  },
+  {
+    type: 'law',
+    title: '장애인ㆍ노인ㆍ임산부 등의 편의증진 보장에 관한 법률 시행령',
+    category: 'general',
+    tags: ['편의시설', '경사로', '점자블록', '손잡이', '고객'],
+  },
+  {
+    type: 'law',
+    title: '장애인ㆍ노인ㆍ임산부 등의 편의증진 보장에 관한 법률 시행규칙',
+    category: 'general',
+    tags: ['편의시설', '경사로', '점자블록', '손잡이', '고객'],
+  },
 ];
 
 // Official titles differ only in spacing or middle-dot characters (·, ㆍ, ・) across listings.
