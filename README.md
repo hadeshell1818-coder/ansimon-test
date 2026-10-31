@@ -24,3 +24,9 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `prepare-approved-postal-accident-cases.cjs <xlsx>` | 우체국 사고사례 엑셀(업로드용 시트) → SQL |
 | `prepare-approved-sif.cjs <xlsx>` | 승인된 SIF 아카이브 엑셀 → SQL |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
+
+## 공식 법령 적재 설정
+근거자료실의 「공식 법령 최신본 적재」는 국가법령정보센터 Open API를 씁니다.
+1. open.law.go.kr에서 Open API 사용을 신청해 OC 값(신청 시 정한 아이디)을 받습니다.
+2. 신청 화면에 운영 서버의 IP 주소·도메인을 등록합니다. 등록하지 않은 서버에서 호출하면 "사용자 정보 검증에 실패하였습니다"로 거부됩니다.
+3. 서버 환경변수 `LAW_API_OC`에 OC 값을 넣습니다. 비어 있으면 `test`로 호출되어 실패합니다.

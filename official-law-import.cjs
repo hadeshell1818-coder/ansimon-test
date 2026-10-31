@@ -37,7 +37,7 @@ const OFFICIAL_SAFETY_SOURCES = [
   // Sources below back hazards a carrier can photograph inside a post office.
   {
     type: 'administrative-rule',
-    title: '근골격계부담작업의 범위 및 유해인자조사 방법에 관한 고시',
+    title: '근골격계부담작업의 범위 및 유해요인조사 방법에 관한 고시',
     category: 'musculoskeletal',
     tags: ['근골격계', '중량물', '반복작업', '부담작업', '소포', '작업대'],
   },
@@ -171,6 +171,10 @@ async function fetchJson(request, pathname, params, apiCode) {
   catch (error) { throw connectionFailure('국가법령정보센터', error, '잠시 후 다시 시도하세요.'); }
   if (!response.ok) throw new Error(`국가법령정보센터 조회 실패 (${response.status})`);
   const data = await response.json();
+  // An unregistered OC or server address is answered with 200 and a verification message, not law data.
+  if (data?.result && !data.LawSearch && !data.AdmRulSearch && !data.법령 && !data.AdmRulService) {
+    throw new Error(`국가법령정보센터 Open API 인증 실패 · ${compactText(data.result)} ${compactText(data.msg)} · 서버 환경변수 LAW_API_OC(신청한 OC 값)와 Open API에 등록한 서버 IP·도메인을 확인하세요.`);
+  }
   const envelope = data.LawSearch || data.AdmRulSearch || data.법령 || data.AdmRulService;
   if (!envelope) throw new Error('국가법령정보센터 응답 형식을 확인하지 못했습니다.');
   return data;

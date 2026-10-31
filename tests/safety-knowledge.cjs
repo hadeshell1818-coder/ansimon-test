@@ -126,7 +126,10 @@ async function main() {
   assert.ok(partial.documents.every(doc => doc.sections.every(section => section.content_hash && section.locator)));
   assert.ok(OFFICIAL_SAFETY_SOURCES.every(source => ['inspections','weather','musculoskeletal','stress','chemicals','training','contractors','general'].includes(source.category)));
   assert.equal(new Set(OFFICIAL_SAFETY_SOURCES.map(source => source.title)).size, OFFICIAL_SAFETY_SOURCES.length);
-  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures, partial official import');
+  // The real response for an unregistered OC (observed from law.go.kr) must name the setting to fix.
+  const unverified = async () => ({ ok: true, json: async () => ({ result: '사용자 정보 검증에 실패하였습니다.', msg: 'OPEN API 호출 시 사용자 검증을 위하여 정확한 서버장비의 IP주소 및 도메인주소를 등록해 주세요.' }) });
+  await assert.rejects(fetchOfficialSafetySources({}, unverified, pick(['산업안전보건법'])), /Open API 인증 실패.*LAW_API_OC/);
+  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures, partial official import, law API verification failure');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
 
