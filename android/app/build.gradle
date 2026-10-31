@@ -1,0 +1,32 @@
+// 안심ON Android app: a Trusted Web Activity that opens the carrier PWA (/report.html) full screen.
+// The web app stays the single source of truth; this wrapper only gives an installable app file.
+plugins { id 'com.android.application' }
+
+def siteUrl = (project.findProperty('ansimonUrl') ?: 'https://ansimon-test-production.up.railway.app').toString().replaceAll('/+$', '')
+def siteHost = new URI(siteUrl).host
+
+android {
+    namespace 'kr.ansimon.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'kr.ansimon.app'
+        minSdk 21
+        targetSdk 34
+        versionCode((project.findProperty('versionCode') ?: '1').toString().toInteger())
+        versionName "1.0.${(project.findProperty('versionCode') ?: '1')}"
+        manifestPlaceholders = [hostName: siteHost, defaultUrl: siteUrl + '/report.html', launcherName: '안심ON']
+        resValue 'string', 'assetStatements', "[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://${siteHost}\"}}]"
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('ANSIMON_KEYSTORE') ?: 'missing.jks')
+            storePassword System.getenv('ANSIMON_KEYSTORE_PASSWORD')
+            keyAlias System.getenv('ANSIMON_KEY_ALIAS') ?: 'ansimon'
+            keyPassword System.getenv('ANSIMON_KEY_PASSWORD') ?: System.getenv('ANSIMON_KEYSTORE_PASSWORD')
+        }
+    }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0' }
