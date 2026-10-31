@@ -19,10 +19,10 @@
 3. 프로젝트 SQL Editor에서 `supabase/001_safety_knowledge.sql`을 한 번 실행한다. 기존 프로젝트에 덮어쓰는 마이그레이션이 아니다.
 4. 서버 환경변수에 `SAFETY_SUPABASE_URL`과 `SAFETY_SUPABASE_SERVICE_KEY`를 설정한다. URL은 프로젝트 URL, 키는 서버용 secret/service_role 키다. 공개 anon 키로는 접근할 수 없다. 키를 HTML·Git·대화에 넣지 않는다.
 5. 서버를 재시작하고 안전관리담당자로 /risk.html에 로그인한다.
-6. 근거자료실에서 연결 상태 확인 후 '기본 출처 목록 등록'을 누른다. 공개 출처 7건만 등록한다. 반복 실행은 source_url 기준 중복을 건너뛰며 기존 검토 결과를 덮어쓰지 않는다.
+6. 근거자료실에서 연결 상태를 확인한 뒤 「공식 법령 최신본 적재」를 누른다(`LAW_API_OC` 필요). OC가 없으면 `scripts/prepare-official-laws-from-web.cjs`로 만든 SQL을 SQL Editor에서 순서대로 실행하고 `local-import/check-knowledge.sql`과 같은 확인 쿼리로 적재 결과를 대조한다.
 7. Supabase Table Editor의 safety_documents와 화면에서 등록 여부를 확인한다.
 
-현재 서버는 .env를 자동으로 읽지 않는다. 배포 환경변수를 쓰거나 로컬에서 Node의 `--env-file=.env` 옵션을 사용한다. 기존 SUPABASE_KEY/RA_SOURCE는 과거 빈도 계산용이므로 이번 자료실과 혼용하지 않는다.
+현재 서버는 .env를 자동으로 읽지 않는다. 배포 환경변수를 쓰거나 로컬에서 Node의 `--env-file=.env` 옵션을 사용한다. 과거 빈도 계산용 SUPABASE_KEY/RA_SOURCE 설정은 코드에서 제거되어 더 이상 쓰이지 않는다.
 
 ## 지금 만드는 테이블
 

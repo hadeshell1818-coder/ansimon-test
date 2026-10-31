@@ -1826,9 +1826,6 @@ const HAZARD_TYPES = {
   slip:     { label: '미끄러짐', proc: 'support', factor: '바닥 물기·기름으로 미끄러져 넘어질 위험', severity: 2, controls: ['미끄럼방지 바닥재·즉시 청소(관리적)', '미끄럼방지 안전화(보호구)'] },
   other:    { label: '기타',   proc: 'parcel', factor: '기타 안전보건 위험요인',                 severity: 2, controls: ['현장 점검 후 대책 수립(관리적)'] },
 };
-const SEV_TEXT = { 1: '경미(1일~1주 미만 휴업)', 2: '소(1~4주 휴업)', 3: '중(4~12주 휴업)', 4: '대(12~24주 휴업)', 5: '최대(사망·24주 이상)' };
-const FREQ_TEXT = { 1: '거의 없음', 2: '낮음', 3: '보통', 4: '높음', 5: '매우 높음' };
-const RISK_THRESHOLD = 9; // 위험성 이 값 이상이면 허용불가(교재 예시: 9=허용불가, 6=허용)
 const RISK_CRITERIA = {
   method: 'three-step-v1',
   source: 'riskchecklist3step_guide.pdf 5페이지',
@@ -1844,47 +1841,6 @@ function saveRisk({ strict = false } = {}) { try { fs.writeFileSync(RISK_FILE, J
 function loadRisk() { if (!fs.existsSync(RISK_FILE)) return false;
   try { RISK = Object.assign(RISK, JSON.parse(fs.readFileSync(RISK_FILE, 'utf8'))); return true; } catch (e) { console.error('risk load fail', e); return false; } }
 const nextRiskId = () => 'RA' + (RISK.seq++);
-
-/* ---------- 누적 데이터 (빈도 산정 근거) ----------
- * 지금은 앱에 심은 샘플 + 실제 접수분으로 계산한다. 추후 Supabase로 교체:
- *   RA_SOURCE=supabase 이면 fetchFreqHistory()가 Supabase REST를 호출(SUPABASE_URL/KEY 필요).
- * 아래 RA_HISTORY_SEED는 "과거 유사 신고" 예시 씨앗(공정·위험유형·발생일). */
-const RA_HISTORY_SEED = (() => {
-  const rows = []; const now = Date.now(); const D = 864e5;
-  const add = (proc, hz, ago, n = 1) => { for (let i = 0; i < n; i++) rows.push({ proc, hazard: hz, at: new Date(now - (ago + i * 3) * D).toISOString() }); };
-  add('parcel', 'cut', 12, 9);      // 소포 베임·찔림 최근 3개월 다수 → 빈도 근거
-  add('parcel', 'pinch', 20, 4);
-  add('parcel', 'msds', 8, 6);
-  add('deliv', 'collision', 40, 2);
-  add('support', 'slip', 15, 3);
-  add('parcel', 'fall', 55, 2);
-  return rows;
-})();
-async function fetchFreqHistory() {
-  if (process.env.RA_SOURCE === 'supabase' && process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
-    try {
-      const r = await fetch(`${process.env.SUPABASE_URL}/rest/v1/hazard_history?select=proc,hazard,at`, {
-        headers: { apikey: process.env.SUPABASE_KEY, Authorization: 'Bearer ' + process.env.SUPABASE_KEY },
-      });
-      if (r.ok) return await r.json();
-    } catch (e) { console.error('supabase freq fail', e.message); }
-  }
-  // 폴백: 씨앗 + 실제 등록된 평가항목 이력
-  const live = RISK.items.filter(it => it.proc && it.hazard).map(it => ({ proc: it.proc, hazard: it.hazard, at: it.createdAt }));
-  return RA_HISTORY_SEED.concat(live);
-}
-/* 최근 6개월 같은 공정·같은 위험유형 건수 → 빈도 점수(교재 이미지2 구간 근사) */
-function freqScore(n) { return n >= 24 ? 5 : n >= 12 ? 4 : n >= 4 ? 3 : n >= 1 ? 2 : 1; }
-async function estimateFrequency(proc, hazard) {
-  const hist = await fetchFreqHistory();
-  const since = Date.now() - 182 * 864e5;
-  const n = hist.filter(h => h.proc === proc && h.hazard === hazard && new Date(h.at).getTime() >= since).length;
-  const score = freqScore(n);
-  const reason = n > 0
-    ? `최근 6개월 ${procById(proc)?.name || proc} 공정 '${HAZARD_TYPES[hazard]?.label || hazard}' 유사 신고 ${n}건 → 빈도 ${score}`
-    : `누적 데이터 없음 → 담당자 판단 필요(기본 ${score})`;
-  return { score, count: n, reason, hasData: n > 0 };
-}
 
 /* ---------- AI: 사진 분류 → 위험유형 ---------- */
 async function classifyHazardPhoto(item, photoBase64) {
@@ -1912,12 +1868,8 @@ JSON만: {"hazard":"pinch|cut|fall|msds|elec|collision|slip|other","factor":"사
   if (!live.proc) live.proc = t.proc;
   const photoFactor = live.photoFactor || t.factor;
   live.factor = live.factor || photoFactor;
-  live.aiDraft = {
-    factor: photoFactor, severity: t.severity, severityText: SEV_TEXT[t.severity],
-    controls: t.controls, hazardLabel: t.label,
-  };
-  const f = await estimateFrequency(live.proc, hazard);
-  live.aiDraft.frequency = f.score; live.aiDraft.frequencyReason = f.reason; live.aiDraft.frequencyHasData = f.hasData;
+  // Likelihood and severity are judged by the safety manager; accident counts are not turned into scores.
+  live.aiDraft = { factor: photoFactor, controls: t.controls, hazardLabel: t.label };
   saveRisk(); broadcastRisk();
 }
 
@@ -1927,15 +1879,6 @@ function broadcastRisk() {
 }
 
 /* ---------- 조회 가공 ---------- */
-function riskBand(risk) {
-  if (risk == null) return null;
-  if (risk <= 3) return { key: 'very-low', label: '매우 낮음' };
-  if (risk <= 6) return { key: 'low', label: '낮음' };
-  if (risk <= 8) return { key: 'normal', label: '보통' };
-  if (risk <= 12) return { key: 'slightly-high', label: '약간 높음' };
-  if (risk <= 15) return { key: 'high', label: '높음' };
-  return { key: 'very-high', label: '매우 높음' };
-}
 function itemForMgr(it) {
   const level = RISK_CRITERIA.levels.find(x => x.value === it.riskLevel);
   const source = it.fromReport ? reports.find(r => r.id === it.fromReport) : null;
@@ -1947,7 +1890,7 @@ function itemForMgr(it) {
     beforePhotoUrl: it.beforePhotoFile ? signedRiskUrl(it.id, "before") : null,
     afterPhotoUrl: it.afterPhotoFile ? signedRiskUrl(it.id, "after") : null,
     additionalPhotoUrls: (it.additionalPhotoFiles || []).map((_, i) => signedRiskUrl(it.id, `additional-${i}`)),
-    riskValue: level?.value || null, riskBand: null, allow: level ? level.allow : null,
+    riskValue: level?.value || null, allow: level ? level.allow : null,
     sourceReport: source ? {
       id: source.id, reporter: source.carrier || source.reporter || it.reporter || '-',
       createdAt: source.createdAt, addr: source.addr || '', item: source.item || '우체국 내부 업무위험',
@@ -1978,7 +1921,7 @@ app.get('/api/risk/state', async (req, res) => {
   ensureRiskDemo();
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
-    sevText: SEV_TEXT, freqText: FREQ_TEXT, threshold: RISK_THRESHOLD, criteria: RISK_CRITERIA,
+    criteria: RISK_CRITERIA,
     inbox: RISK.items.filter(it => !it.routingInactive && ['inbox','referred'].includes(it.status)).map(itemForMgr),
     registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
   });
@@ -2105,27 +2048,6 @@ app.post('/api/risk/items/:id/transfer-traffic', (req, res) => {
   it.routingInactive = false;
   saveRisk(); save(); broadcastRisk(); broadcast();
   res.json({ ok: true, reportId: report.id, destination: '장흥군청 교통과' });
-});
-
-/* 소통팀장 → 위험성평가 이관: 음성신고를 구조위험으로 판단해 넘김 */
-app.post('/api/safety/hazards/:id/to-risk', (req, res) => {
-  const u = userFromReq(req); if (!isSafetyCtl(u)) return res.status(403).json({ error: 'forbidden' });
-  const h = SAFE.hazards.find(x => x.id === req.params.id); if (!h) return res.status(404).json({ error: 'not found' });
-  const it = {
-    id: nextRiskId(), status: 'inbox', source: 'transfer',
-    reporter: carrierLabel(rosterById(h.carrierId)), reporterOrg: SAFETY_OFFICE, reporterZone: null,
-    createdAt: new Date().toISOString(), lat: h.lat, lng: h.lng,
-    note: h.transcript || '', photoFile: null, proc: (req.body || {}).proc || null,
-    hazard: null, aiMode: 'pending', aiDraft: null, factor: null, currentControl: null,
-    frequency: null, severity: null, reduction: null, afterRisk: null, dueDate: null, dept: null, owner: null,
-    beforePhotoFile: null, afterPhotoFile: null, doneAt: null,
-    transferNote: `소통팀장 이관: ${(req.body || {}).note || h.transcript || ''}`.slice(0, 300), fromHazard: h.id,
-  };
-  RISK.items.unshift(it);
-  h.status = 'closed'; h.closeReason = '위험성평가로 이관'; h.handledBy = u.name; h.handledAt = it.createdAt; h.toRisk = it.id;
-  saveRisk(); saveSafety(); broadcastRisk(); broadcastSafety();
-  classifyHazardPhoto(it, null).catch(() => {});
-  res.json({ ok: true, id: it.id });
 });
 
 /* 내부위험 접수는 안전관리담당자가 평가하거나 오신고로 정리한다. */
@@ -2340,7 +2262,6 @@ app.get('/api/risk/report-summary', (req, res) => {
     byProc, improved, internalIntakes,
     internalIntakeTotal: internalIntakes.length,
     internalIntakePending: internalIntakes.filter(x => ['inbox', 'assessing'].includes(x.status)).length,
-    dataSource: process.env.RA_SOURCE === 'supabase' ? 'supabase' : 'sample',
   });
 });
 
@@ -2378,13 +2299,11 @@ function ensureRiskDemo() {
   // 대기함(집배원 사진, 판별 전) — AI 초안만 있음
   const a = mk({ status: 'inbox', source: 'carrier', reporter: '김철수(장흥3구)', ago: 0, proc: 'parcel', hazard: 'cut',
     note: '분류장 롤파렛 철망 찢어져 있음', workContent: '롤파렛 취급',
-    aiDraft: { factor: cut.factor, severity: 3, severityText: SEV_TEXT[3], controls: cut.controls, hazardLabel: cut.label,
-      frequency: 3, frequencyReason: '최근 6개월 소포 공정 \'베임·찔림\' 유사 신고 9건 → 빈도 3', frequencyHasData: true } });
+    aiDraft: { factor: cut.factor, controls: cut.controls, hazardLabel: cut.label } });
   // 평가 중(승격됨) — 담당자 입력 대기
   const b = mk({ status: 'assessing', source: 'staff', reporter: '박영희·영업과', ago: 2, proc: 'parcel', hazard: 'pinch',
     workContent: '롤파렛 취급', factor: HAZARD_TYPES.pinch.factor, currentControl: '- 안전화 지급 착용\n- 안전교육',
-    aiDraft: { factor: HAZARD_TYPES.pinch.factor, severity: 4, severityText: SEV_TEXT[4], controls: HAZARD_TYPES.pinch.controls, hazardLabel: '끼임',
-      frequency: 3, frequencyReason: '최근 6개월 소포 공정 \'끼임\' 유사 신고 4건 → 빈도 3', frequencyHasData: true } });
+    aiDraft: { factor: HAZARD_TYPES.pinch.factor, controls: HAZARD_TYPES.pinch.controls, hazardLabel: '끼임' } });
   // 완료 — 개선 전/후 있음(이행결과서 예시)
   const c = mk({ status: 'done', source: 'staff', reporter: '박영희·영업과', ago: 20, proc: 'parcel', hazard: 'msds',
     workContent: '슈트작업', factor: '평파렛에 랩을 싸는 과정에서 허리·어깨 등에 근골격계 질환 위험',
