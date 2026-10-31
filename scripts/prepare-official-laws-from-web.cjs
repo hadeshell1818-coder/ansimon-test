@@ -110,6 +110,11 @@ begin
   select v_document_id, item.version, item.locator, item.body, item.content_hash
   from jsonb_to_recordset(${quote(json)}::jsonb) as item(version text, locator text, body text, content_hash text)
   on conflict (document_id, version, locator) do update set body = excluded.body, content_hash = excluded.content_hash;
+
+  -- Superseded versions would otherwise be searched next to the current text; keep rows cited by assessments.
+  delete from public.safety_document_sections s
+  where s.document_id = v_document_id and s.version <> ${quote(metadata.source_version)}
+    and not exists (select 1 from public.safety_assessment_evidence e where e.section_id = s.id);
 end
 $upload$;
 `;
