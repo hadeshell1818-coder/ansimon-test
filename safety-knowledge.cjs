@@ -70,18 +70,48 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   }
   async function call(query, options = {}) { return callResource('safety_documents', query, options); }
   function eq(value) { return encodeURIComponent(String(value)); }
-  async function searchApprovedLaws(queries) {
-    const terms = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
+  // Ranked evidence search over approved documents. Supabase returns ilike matches in no particular order and
+  // thousands of sections match common words, so candidates are gathered by article title (locator), body and
+  // word pairs, then ranked by how many search words each section contains (article titles weigh most).
+  async function searchApprovedSections(queries) {
+    const words = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
-      .filter(term => term.length >= 2).slice(0, 10);
-    if (!terms.length) return [];
-    // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
-    const documents = await call(`?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&or=${encodeURIComponent('(kind.eq.law,source_url.like."https://www.law.go.kr/*")')}&limit=200`);
+      .filter(term => term.length >= 2).slice(0, 12);
+    if (!words.length) return { laws: [], guides: [] };
+    const phrases = queries.map(query => String(query).trim()).filter(query => /\s/.test(query));
+    const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&limit=1000');
     const approved = new Map(documents.map(doc => [doc.id, doc]));
-    const found = await Promise.all(terms.map(term => callResource('safety_document_sections',
-      `?select=id,document_id,version,locator,body&body=ilike.*${encodeURIComponent(term)}*&limit=12`).catch(() => [])));
-    const unique = new Map(found.flat().filter(section => approved.has(section.document_id)).map(section => [section.id, section]));
-    return [...unique.values()].map(section => ({ ...section, ...approved.get(section.document_id) }));
+    const select = '?select=id,document_id,version,locator,body';
+    const like = term => `*${encodeURIComponent(term)}*`;
+    const requests = words.flatMap(term => [`${select}&locator=ilike.${like(term)}&limit=30`, `${select}&body=ilike.${like(term)}&limit=30`]);
+    for (let i = 0; i < words.length; i++) for (let j = i + 1; j < words.length && j < i + 4; j++) {
+      requests.push(`${select}&and=(body.ilike.${like(words[i])},body.ilike.${like(words[j])})&limit=20`);
+    }
+    const found = [];
+    for (let index = 0; index < requests.length; index += 8) {
+      found.push(...(await Promise.all(requests.slice(index, index + 8).map(query => callResource('safety_document_sections', query).catch(() => [])))).flat());
+    }
+    const candidates = new Map();
+    for (const section of found) {
+      const doc = approved.get(section.document_id);
+      // Older versions stay only because an assessment cites them; search the current text.
+      if (doc && section.body && (!doc.source_version || !section.version || section.version === doc.source_version)) candidates.set(section.id, { ...section, ...doc, id: section.id, document_id: doc.id });
+    }
+    const score = item => {
+      let total = 0;
+      for (const term of words) { if (item.body.includes(term)) total += 1; if (String(item.locator || '').includes(term)) total += 3; if (String(item.title || '').includes(term)) total += 1; }
+      for (const phrase of phrases) if (item.body.includes(phrase)) total += 2;
+      return total;
+    };
+    const ranked = [...candidates.values()].map(item => ({ item, score: score(item) }))
+      .sort((a, b) => b.score - a.score || a.item.body.length - b.item.body.length).map(entry => entry.item);
+    // At most three sections per document so one long act does not crowd out the others.
+    const pick = (list, limit) => { const perDocument = new Map(), picked = [];
+      for (const item of list) { const count = perDocument.get(item.document_id) || 0; if (count >= 3) continue; perDocument.set(item.document_id, count + 1); picked.push(item); if (picked.length >= limit) break; }
+      return picked; };
+    // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
+    const isLaw = item => item.kind === 'law' || String(item.source_url || '').startsWith('https://www.law.go.kr/');
+    return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8) };
   }
   async function searchExternalSources(description, queries) {
     const openAiKey = env.OPENAI_API_KEY;
@@ -384,7 +414,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const correctedContext = /아니라|아니고|정정|잘못|변경|다른\s*(설비|장비|작업)/.test(feedback);
       const reused = feedback && !correctedContext && body.refreshSources !== true && previousSession?.key === evidenceKey && previousSession.expires > Date.now()
         ? previousSession : null;
-      const extracted = reused ? { queries: reused.queries, critical: false } : await callAi([{ role: 'system', content: '산업안전 위험 설명과 사진에서 검색할 한국어 핵심어 3~5개를 JSON으로 뽑으세요. 최우선은 담당자의 응답 부담을 최소화하고 주어진 설명으로 바로 초안을 작성하는 것입니다. 일상적인 표현·오탈자는 문맥으로 해석하세요. 질문은 기본적으로 하지 않습니다. 설명의 의미나 위험 대상 자체를 해석할 수 없거나, 서로 다른 해석에 따라 안전조치가 충돌하여 설비별 적절한 보수·교체·격리 방법을 정하기 어려운 경우에만 재검토가 필요한 모호함과 핵심 질문 후보 1~2개를 제시하세요. 이 단계의 질문을 담당자에게 바로 보내지 말고 별도 재검토를 거칩니다. 무게·횟수·높이·폭·기존 조치 등 세부 수치가 없다는 이유만으로 질문하지 마세요. 대상 설비가 분명하고 안전한 공통 대책이나 조건별 대책으로 작성 가능한 경우 critical은 false, questions는 빈 배열입니다. 질문 이유에는 설비 확인으로 어떤 구체적 조치가 달라지는지 적으세요. 예: 파손된 철망·모서리에 찔림이라는 설명에서 철망이 롤파레트인지 고정 울타리인지 알 수 없으면 종류를 핵심 질문 하나로 확인하세요. 일반적인 점검·교육 문구를 쓸 수 있다는 이유로 설비 종류 확인을 생략하지 마세요. 이미 답변이 있으면 추가 질문 없이 초안을 작성하고 모름·미확인은 한계로 남기세요. 형식: {"queries":["..."],"critical":false,"questions":[]} 또는 {"queries":["..."],"critical":true,"questions":[{"question":"해석에 꼭 필요한 질문","reason":"질문 없이는 안전한 초안 작성이 불가능한 이유"}]}' }, { role: 'user', content: withPhoto(context) }], 700);
+      const extracted = reused ? { queries: reused.queries, critical: false } : await callAi([{ role: 'system', content: '산업안전 위험 설명과 사진에서 검색할 한국어 핵심어 4~8개를 JSON으로 뽑으세요. 현장 표현과 함께 법령·기준에서 쓰는 용어를 넣으세요(예: 넘어짐→전도, 끼임→회전축·덮개, 비상구 막힘→피난시설·폐쇄, 전선 벗겨짐→절연·피복, 무거운 소포→중량물). 한 단어 또는 두 단어로 쓰세요. 최우선은 담당자의 응답 부담을 최소화하고 주어진 설명으로 바로 초안을 작성하는 것입니다. 일상적인 표현·오탈자는 문맥으로 해석하세요. 질문은 기본적으로 하지 않습니다. 설명의 의미나 위험 대상 자체를 해석할 수 없거나, 서로 다른 해석에 따라 안전조치가 충돌하여 설비별 적절한 보수·교체·격리 방법을 정하기 어려운 경우에만 재검토가 필요한 모호함과 핵심 질문 후보 1~2개를 제시하세요. 이 단계의 질문을 담당자에게 바로 보내지 말고 별도 재검토를 거칩니다. 무게·횟수·높이·폭·기존 조치 등 세부 수치가 없다는 이유만으로 질문하지 마세요. 대상 설비가 분명하고 안전한 공통 대책이나 조건별 대책으로 작성 가능한 경우 critical은 false, questions는 빈 배열입니다. 질문 이유에는 설비 확인으로 어떤 구체적 조치가 달라지는지 적으세요. 예: 파손된 철망·모서리에 찔림이라는 설명에서 철망이 롤파레트인지 고정 울타리인지 알 수 없으면 종류를 핵심 질문 하나로 확인하세요. 일반적인 점검·교육 문구를 쓸 수 있다는 이유로 설비 종류 확인을 생략하지 마세요. 이미 답변이 있으면 추가 질문 없이 초안을 작성하고 모름·미확인은 한계로 남기세요. 형식: {"queries":["..."],"critical":false,"questions":[]} 또는 {"queries":["..."],"critical":true,"questions":[{"question":"해석에 꼭 필요한 질문","reason":"질문 없이는 안전한 초안 작성이 불가능한 이유"}]}' }, { role: 'user', content: withPhoto(context) }], 700);
       let clarificationReview = null;
       const ambiguousWireTarget=/철망/.test(description)&&!/(롤\s*파[레렛]트|롤\s*팔[레렛]트|롤테이너|울타리|펜스|방호망|가드|창문|배수구|선반)/.test(description+' '+String(body.process||''));
       if (!feedback && !answers.length && (extracted.critical === true || ambiguousWireTarget)) {
@@ -397,23 +427,22 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const questions = (clarificationReview?.unresolvedMeaning === true && Array.isArray(clarificationReview.questions) ? clarificationReview.questions : []).map(q => ({ question: String(q.question || '').trim().slice(0, 300), reason: String(q.reason || '').trim().slice(0, 300) })).filter((q,index,items) => q.question && q.reason && items.findIndex(other => other.question === q.question) === index).slice(0, 2);
       const recognizablePinchRisk = /(끼임|협착|말림)/.test(description) && /(컨베이어|구동부|벨트|체인|롤러|회전체)/.test(description);
       if (questions.length && !recognizablePinchRisk) return { needsClarification: true, questions, citations: [], measures: [], evidence: [] };
-      const queries = [...new Set((Array.isArray(extracted.queries) ? extracted.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 5);
+      const queries = [...new Set((Array.isArray(extracted.queries) ? extracted.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 8);
       const searchErrors = [];
       const found = configured && !reused ? await Promise.all(queries.map(query => this.search(query).catch(error => { searchErrors.push(error.message); return { results: [], cases: [] }; }))) : [];
-      const lawFound = reused || !configured ? [] : await searchApprovedLaws(queries).catch(error => { searchErrors.push(error.message); return []; });
+      const ranked = reused || !configured ? { laws: [], guides: [] } : await searchApprovedSections(queries).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
       const caseMap = new Map(); const docMap = new Map(); const lawMap = new Map();
+      for (const item of ranked.guides) docMap.set(item.id, item);
       for (const result of found) {
+        // Document sections come from the ranked search (current versions only); this search supplies SIF cases.
         for (const item of result.cases || []) caseMap.set(item.id, item);
-        for (const item of result.results || []) for (const section of item.sections || []) {
-          if (section.body) docMap.set(section.id, { ...section, title: item.title, publisher: item.publisher, kind: item.kind, source_url: item.source_url, review_status: item.review_status });
-        }
       }
-      for (const section of lawFound) {
-        if (section.body) lawMap.set(section.id, { ...section, kind: 'law' });
-      }
+      for (const section of ranked.laws) lawMap.set(section.id, { ...section, kind: 'law' });
+      // Ranked law.go.kr sections are evidence already; do not repeat them as general document text.
+      for (const id of lawMap.keys()) docMap.delete(id);
       const evidence = reused ? structuredClone(reused.evidence) : [
         ...[...caseMap.values()].slice(0, 25).map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
-        ...[...lawMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
+        ...[...lawMap.values()].slice(0, 12).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
         ...[...docMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
       ];
       let sourceOrigin = reused ? reused.sourceOrigin : evidence.length ? 'internal' : 'none';

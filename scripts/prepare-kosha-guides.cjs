@@ -3,7 +3,7 @@
 // 산업안전포털 (portal.kosha.or.kr): current list → PDF download → text → numbered sections.
 // Needs curl and pdftotext (poppler-utils). Node fetch ignores the HTTPS proxy, so downloads use curl.
 //   node scripts/prepare-kosha-guides.cjs [out.sql]        (default local-import/kosha/kosha-guides.sql)
-//   KOSHA_PDF_DIR=folder reuses PDFs already downloaded there.
+//   KOSHA_PDF_DIR=folder reuses PDFs already downloaded there; KOSHA_ONLY=번호,번호 limits the run to those guides.
 // Scanned (image-only) PDFs have no extractable text; they are reported and skipped, never guessed.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -45,6 +45,8 @@ const KOSHA_GUIDES = [
   ['X-44-2016', 'general', ['고소작업대']], ['G-101-2013', 'general', ['차량 적재함', '떨어짐']],
   ['G-67-2011', 'general', ['외벽 청소']], ['A-G-1-2025', 'general', ['추락방호망']],
   ['D-C-14-2026', 'general', ['승강로', '엘리베이터']], ['A-G-19-2026', 'general', ['고시인성', '표시']],
+  ['E-G-18-2026', 'general', ['밀폐공간', '정화조', '맨홀', '산소결핍']], ['X-68-2015', 'general', ['밀폐공간', '위험관리']],
+  ['A-G-10-2025', 'general', ['급식실', '구내식당', '주방']], ['A-G-6-2025', 'general', ['급식실', '조리', '화상', '미끄러짐']],
 ];
 const MAX_FILE_BYTES = 300000, CHUNK = 40, MAX_SECTION = 6000;
 const quote = value => `'${String(value).replace(/'/g, "''")}'`;
@@ -193,7 +195,9 @@ function main() {
   fs.mkdirSync(dir, { recursive: true });
   const list = new Map(guideList().map(item => [item.techGdlnNo, item]));
   const documents = [], failures = [];
-  for (const [number, category, tags] of KOSHA_GUIDES) {
+  // KOSHA_ONLY=A-G-10-2025,E-G-18-2026 builds SQL for just those guides (e.g. newly added or revised ones).
+  const only = new Set(String(process.env.KOSHA_ONLY || '').split(',').map(item => item.trim()).filter(Boolean));
+  for (const [number, category, tags] of KOSHA_GUIDES.filter(([number]) => !only.size || only.has(number))) {
     const guide = list.get(number);
     try {
       if (!guide) throw Error('현행 목록에 없음(개정·폐지 확인)');

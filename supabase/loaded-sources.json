@@ -1088,6 +1088,20 @@
    "source_version": "KOSHA GUIDE A-G-4-2025 · 공표 2025-03-26",
    "sections": 6,
    "transcribed_from_image": true
+  },
+  {
+   "group": "kosha",
+   "title": "KOSHA GUIDE E-G-18-2026 밀폐공간 작업프로그램 수립 및 시행에 관한 기술지원규정",
+   "source_url": "https://portal.kosha.or.kr/api/portal24/bizA/p/files/downloadAtchFile?atcflNo=CTC2026012914540778798257&atcflSeq=1&isDirect=N&taskSeCd=undefined",
+   "source_version": "KOSHA GUIDE E-G-18-2026 · 공표 2026-01-30",
+   "sections": 37
+  },
+  {
+   "group": "kosha",
+   "title": "KOSHA GUIDE X-68-2015 밀폐공간 위험관리에 관한 기술지침",
+   "source_url": "https://portal.kosha.or.kr/api/portal24/bizA/p/files/downloadAtchFile?atcflNo=FL00015884363&atcflSeq=3&isDirect=N&taskSeCd=undefined",
+   "source_version": "KOSHA GUIDE X-68-2015 · 공표 2015-12-07",
+   "sections": 37
   }
  ]
 }
