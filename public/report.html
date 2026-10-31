@@ -39,6 +39,7 @@
 
   .install-banner{display:flex;align-items:center;gap:10px;background:#10141A;color:#fff;border-radius:12px;padding:12px 14px;margin-bottom:14px;}
   .ib-text{flex:1;font-size:12px;line-height:1.5;color:#C6CDD4;} .ib-text b{color:#fff;font-size:12.5px;}
+  .ib-install{margin-top:8px;background:#e5002b;color:#fff;border:none;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:800;font-family:inherit;}
   .ib-close{flex:0 0 auto;background:transparent;border:none;color:#8A94A0;font-size:16px;font-weight:800;padding:2px 6px;}
   .h{font-size:20px;font-weight:800;margin:0 0 13px;}
   .cat{border:none;text-align:left;border-radius:16px;padding:18px 16px;display:flex;align-items:center;gap:14px;color:#fff;box-shadow:0 5px 14px rgba(14,18,22,.14);}
@@ -370,15 +371,35 @@ async function showReportHistory(){
   $('cw').innerHTML=`<div class="backrow"><button class="back" onclick="home()">‹ 홈</button></div>
     <div class="h" style="font-size:19px">내 신고내역 · 처리현황</div><div class="mine">${hist}</div>`;
 }
+// Home-screen install: Android/Chrome/Edge offer a one-tap prompt (beforeinstallprompt); iPhone Safari has
+// no prompt, so it gets the Share → "홈 화면에 추가" steps. iPhone web push works only from the installed app.
+let installPrompt=null;
+const isStandalone=()=>(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
+const isIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;refreshInstallBanner();});
+window.addEventListener('appinstalled',()=>{installPrompt=null;localStorage.setItem('cv_install_dismissed','1');refreshInstallBanner();toast('안심ON이 홈 화면에 설치되었습니다');});
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 function installBanner(){
-  const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
-  if(standalone || localStorage.getItem('cv_install_dismissed')) return '';
-  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  const tip = isIOS ? '하단 공유 버튼 → "홈 화면에 추가"를 누르세요' : '오른쪽 위 메뉴(⋮) → "앱 설치" 또는 "홈 화면에 추가"를 누르세요';
-  return `<div class="install-banner">
-    <div class="ib-text"><b>📲 홈 화면에 추가하면 앱처럼 바로 실행돼요</b><br>${tip}</div>
-    <button class="ib-close" onclick="dismissInstallBanner()">✕</button>
-  </div>`;
+  if(isStandalone() || localStorage.getItem('cv_install_dismissed')) return '';
+  const body = installPrompt
+    ? `<b>📲 안심ON을 앱으로 설치하세요</b><br>홈 화면 아이콘으로 바로 실행되고 관제실 알림을 받을 수 있습니다.<br><button class="ib-install" onclick="installApp()">앱 설치</button>`
+    : isIOS()
+      ? `<b>📲 홈 화면에 추가하면 앱처럼 실행돼요</b><br>Safari 하단 <b>공유 버튼(□↑)</b> → <b>"홈 화면에 추가"</b>를 누르세요. 아이폰은 홈 화면에 추가해야 관제실 알림을 받을 수 있습니다.`
+      : `<b>📲 홈 화면에 추가하면 앱처럼 실행돼요</b><br>오른쪽 위 메뉴(⋮) → <b>"앱 설치"</b> 또는 <b>"홈 화면에 추가"</b>를 누르세요.`;
+  return `<div class="install-banner"><div class="ib-text">${body}</div><button class="ib-close" aria-label="설치 안내 닫기" onclick="dismissInstallBanner()">✕</button></div>`;
+}
+function refreshInstallBanner(){
+  const old=document.querySelector('.install-banner'), html=installBanner();
+  if(old){ if(html) old.outerHTML=html; else old.remove(); }
+  else if(html && $('cw') && $('carrier-weather')) $('cw').insertAdjacentHTML('afterbegin',html);
+}
+async function installApp(){
+  if(!installPrompt) return;
+  const prompt=installPrompt; installPrompt=null;
+  prompt.prompt();
+  const choice=await prompt.userChoice.catch(()=>({outcome:'dismissed'}));
+  if(choice.outcome!=='accepted') toast('설치를 취소했습니다. 메뉴(⋮) → 앱 설치로 언제든 설치할 수 있습니다');
+  refreshInstallBanner();
 }
 function dismissInstallBanner(){
   localStorage.setItem('cv_install_dismissed','1');
@@ -1178,6 +1199,7 @@ function sfRing(level,text){
 
 function sfPushPromptHtml(){
   if(sfPushReady || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return '';
+  if(isIOS() && !isStandalone()) return '';
   return `<button class="history-link" id="sfPushBtn" onclick="sfPushInit(true)">관제실 알림 켜기 <span>›</span></button>`;
 }
 function sfPushKey(value){
