@@ -241,6 +241,12 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
             body: JSON.stringify(sectionRows.slice(index, index + 100)),
           });
         }
+        // Superseded versions would otherwise be searched next to the current text; keep rows cited by assessments.
+        const cited = (await callResource('safety_assessment_evidence', `?select=section_id&document_id=eq.${eq(document.id)}&section_id=not.is.null`) || [])
+          .map(row => row.section_id).filter(Boolean);
+        await callResource('safety_document_sections', `?document_id=eq.${eq(document.id)}&version=neq.${eq(item.metadata.source_version)}${cited.length ? `&id=not.in.(${cited.map(eq).join(',')})` : ''}`, {
+          method: 'DELETE', headers: { Prefer: 'return=minimal' },
+        });
         imported.push({ id: document.id, title: item.metadata.title, version: item.metadata.source_version, sections: sectionRows.length });
       }
       return { imported, failed: failures, checkedAt: new Date().toISOString() };
