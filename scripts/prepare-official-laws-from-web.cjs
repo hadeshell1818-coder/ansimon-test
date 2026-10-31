@@ -60,6 +60,17 @@ async function readDocument(page, source) {
     const body = lines.join('\n');
     sections.push({ locator: compact(locator), body: article.chapter && source.type !== 'law' ? `[${article.chapter}]\n${body}` : body });
   }
+  // Technical standards (e.g. NFTC) number sections "2.1", "2.1.1" instead of articles; split at the second level.
+  if (!sections.length) {
+    let part = '', current = null;
+    for (const line of data.articles.map(article => article.text).join('\n').split('\n').map(compact).filter(Boolean)) {
+      const heading = line.match(/^(\d+)\.\s+(\S.*)$/), sub = line.match(/^(\d+\.\d+)\s+(\S.*)$/);
+      if (heading) { part = `${heading[1]}. ${heading[2]}`; continue; }
+      if (sub) { current = { locator: compact(`${sub[1]} ${sub[2]}`).slice(0, 180), lines: part ? [`[${part}]`, line] : [line] }; sections.push(current); continue; }
+      if (current) current.lines.push(line);
+    }
+    for (const section of sections) { section.body = section.lines.join('\n'); delete section.lines; }
+  }
   // Same locator uniqueness rule as the API importer.
   const counts = new Map();
   for (const section of sections) {
