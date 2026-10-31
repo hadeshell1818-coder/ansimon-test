@@ -12,7 +12,7 @@
 
 이 클라우드 환경에서 OpenAI·Supabase·운영 주소가 모두 막혀 있어(프록시 403) 실제 AI 채점을 돌릴 수 없다. 아래를 설정하면 이후는 에이전트가 직접 돌린다. 설정 후에는 **새 세션**에서 반영된다.
 
-> 2026-10-31 확인: OpenAI·Supabase 연결 정상(Network secrets로 프록시가 키를 붙임, 코드는 `OPENAI_API_KEY=proxy`로 실행). KOSHA SQL 2건 적재 확인(문서 160건, 조문 6,462건 전부 의미 색인 완료). 운영 주소만 아직 차단(403).
+> 2026-10-31 확인: OpenAI·Supabase 연결 정상(Network secrets로 프록시가 키를 붙임, 코드는 `OPENAI_API_KEY=proxy`로 실행). KOSHA SQL 2건 적재 확인(문서 160건, 조문 6,462건 전부 의미 색인 완료). 운영 주소도 접속 확인(화면 파일이 main과 동일).
 
 - [x] **환경 설정 열기**: 세션 제목줄의 클라우드 환경 메뉴 → Edit
 - [x] **비밀값(Network secrets, 없으면 환경변수) 추가**. 대화창에는 붙여넣지 않는다.
@@ -20,7 +20,7 @@
   - `SAFETY_SUPABASE_URL`: Supabase 프로젝트 주소(`https://<프로젝트>.supabase.co`)
   - `SAFETY_SUPABASE_SERVICE_KEY`: Supabase service_role 키(Railway와 같은 값)
   - (선택) `SUPABASE_DB_URL`: Supabase → Connect → 연결 문자열. SQL 적재를 에이전트가 직접 하려면 필요
-- [!] **Network access → Allowed domains 추가** (`ansimon-test-production.up.railway.app`만 아직 막힘) (Allow package managers는 체크 유지)
+- [x] **Network access → Allowed domains 추가** (Allow package managers는 체크 유지)
   - `api.openai.com`
   - `<프로젝트>.supabase.co`
   - `ansimon-test-production.up.railway.app` (운영 반영 확인용)
