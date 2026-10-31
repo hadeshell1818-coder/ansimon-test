@@ -65,11 +65,33 @@ async function main() {
 
   const evaluation = await repo.evaluateSearch({ offset: 0, limit: 2 });
   assert.equal(evaluation.total, 64); assert.equal(evaluation.results.length, 2);
-  assert.ok(evaluation.results.every(item => item.expect.every(expect => typeof expect.words === 'boolean' && typeof expect.hybrid === 'boolean')));
+  assert.ok(evaluation.results.every(item => item.expect.every(expect => ['words', 'add', 'rrf'].every(key => typeof expect[key] === 'boolean'))));
+  const evalEmbed = calls.filter(call => call.href.endsWith('/v1/embeddings')).at(-1).body.input[0];
+  assert.match(evalEmbed, /\n/, 'evaluation embeds the report text together with the search words, like a real draft');
 
   const noKey = createKnowledgeRepository({ ...env, OPENAI_API_KEY: '' }, request);
   assert.equal((await noKey.embeddingStatus()).ready, false);
   await assert.rejects(noKey.indexEmbeddings(), /OPENAI_API_KEY/);
+  // Additive fusion: many meaning-only matches must not push out a section the word search found.
+  const wordHit = { id: 'word-hit', document_id: 'rule', version: 'v1', locator: '제22조(통로의 설치)', body: '통로 미끄러움 출입구 통로 미끄러움' };
+  const flood = Array.from({ length: 30 }, (_, i) => ({ id: `meaning-${i}`, document_id: `doc-${i}`, version: 'v1', locator: `제${i}조(기타)`, body: '기타 조문', similarity: 0.9 - i / 100 }));
+  const floodDocs = [...documents, ...flood.map(item => ({ id: item.document_id, title: `법령 ${item.document_id}`, kind: 'law', review_status: 'approved', source_version: 'v1', source_url: 'https://www.law.go.kr/x' }))];
+  const floodRepo = createKnowledgeRepository(env, async (url, options = {}) => {
+    const href = decodeURIComponent(String(url));
+    if (href.endsWith('/v1/embeddings')) return json({ data: [{ index: 0, embedding: [0.1] }] });
+    if (href.endsWith('match_safety_sections')) return json(flood);
+    if (href.endsWith('match_safety_cases')) return json([]);
+    if (href.includes('/safety_documents?')) return json(floodDocs);
+    if (href.includes('/safety_document_sections?') && /ilike\.\*(통로|미끄러움|출입구)\*/.test(href)) return json([wordHit]);
+    return request(url, options);
+  });
+  const floodEval = await floodRepo.evaluateSearch({ offset: 0, limit: 1 });
+  assert.ok(floodEval.results.length === 1);
+  await floodRepo.recommendRisk({ description: '출입구 통로 미끄러움' });
+  const floodDraft = calls.filter(call => call.body.messages?.some(message => String(message.content).startsWith('당신은 우체국 산업안전'))).at(-1);
+  const floodLaws = JSON.parse(floodDraft.body.messages.at(-1).content).evidence.filter(item => item.type === '승인된 법령');
+  assert.ok(floodLaws.some(item => item.ref === 'doc:word-hit'), 'word-search pick survives a flood of meaning matches');
+  assert.equal(floodLaws.filter(item => item.ref.startsWith('doc:meaning-')).length, 4, 'at most four meaning-only statutes are appended');
   console.log('PASS: meaning-only statute and cases reach the draft, missing migration reported with word-search fallback, batched indexing and status, search evaluation');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

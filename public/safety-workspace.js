@@ -206,10 +206,23 @@ async function evaluateSearch() {
       total = result.total; semantic = result.semantic; rows.push(...result.results);
     }
     const expects = rows.flatMap(row => row.expect.map(expect => ({ ...expect, row })));
-    const words = expects.filter(item => item.words).length, hybrid = expects.filter(item => item.hybrid).length;
-    const misses = expects.filter(item => semantic?.used ? !item.hybrid : !item.words);
-    host.innerHTML = `<p><b>기대 근거 ${expects.length}개 중 단어 검색 ${words}개${semantic?.used ? ` · 단어+의미 검색 ${hybrid}개` : ''}가 AI에 전달됩니다.</b>${semantic?.used ? '' : ` 의미 검색 미사용: ${esc(semantic?.error || '')}`}</p>
-      <details><summary>놓친 근거 ${misses.length}개</summary><ul>${misses.map(item => `<li>${esc(item.row.id)} ${esc(item.row.desc)} — <small>${esc(item.label)}</small></li>`).join('')}</ul></details>`;
+    const count = key => expects.filter(item => item[key]).length;
+    const list = items => `<ul>${items.map(item => `<li>${esc(item.row.id)} ${esc(item.row.desc)} — <small>${esc(item.label)}</small></li>`).join('')}</ul>`;
+    if (!semantic?.used) {
+      host.innerHTML = `<p><b>기대 근거 ${expects.length}개 중 단어 검색 ${count('words')}개가 AI에 전달됩니다.</b> 의미 검색 미사용: ${esc(semantic?.error || '')}</p>
+        <details><summary>놓친 근거 ${expects.filter(item => !item.words).length}개</summary>${list(expects.filter(item => !item.words))}</details>`;
+      return;
+    }
+    // Gained: found only with meaning added. Lost: the word search found it but the combined list dropped it.
+    const gained = expects.filter(item => item.add && !item.words), lost = expects.filter(item => item.words && !item.add);
+    host.innerHTML = `<p><b>기대 근거 ${expects.length}개 중 AI에 전달된 수</b></p>
+      <table class="mini-table"><tbody>
+        <tr><td>단어 검색만</td><td>${count('words')}개</td></tr>
+        <tr><td>단어 검색 + 의미 검색 추가(현재 방식)</td><td>${count('add')}개 · 새로 찾음 ${gained.length} · 밀려남 ${lost.length}</td></tr>
+        <tr><td>순위 섞기(이전 방식, 비교용)</td><td>${count('rrf')}개</td></tr>
+      </tbody></table>
+      <details><summary>의미 검색으로 새로 찾은 근거 ${gained.length}개</summary>${list(gained)}</details>
+      <details><summary>현재 방식으로도 놓친 근거 ${expects.filter(item => !item.add).length}개</summary>${list(expects.filter(item => !item.add))}</details>`;
   } catch (error) { host.textContent = error.message; }
   finally { button.disabled = false; }
 }

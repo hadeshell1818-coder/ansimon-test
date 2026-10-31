@@ -73,7 +73,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // Ranked evidence search over approved documents. Supabase returns ilike matches in no particular order and
   // thousands of sections match common words, so candidates are gathered by article title (locator), body and
   // word pairs, then ranked by how many search words each section contains (article titles weigh most).
-  async function searchApprovedSections(queries, semanticSections = []) {
+  // fusion 'add' (default): every word-search pick stays and meaning-only matches are appended, so adding
+  // semantic search can never drop evidence the word search found. 'rrf' mixes both rankings (measured worse
+  // on the 64 post-office cases: word 84/95, rrf 74/95) and is kept only for comparison in the accuracy check.
+  async function searchApprovedSections(queries, semanticSections = [], { fusion = env.SAFETY_EVIDENCE_FUSION || 'add' } = {}) {
     const words = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
       .filter(term => term.length >= 2).slice(0, 12);
@@ -105,20 +108,24 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     };
     const byWords = [...candidates.values()].filter(item => score(item) > 0).map(item => ({ item, score: score(item) }))
       .sort((a, b) => b.score - a.score || a.item.body.length - b.item.body.length).map(entry => entry.item);
-    // Reciprocal rank fusion: a section near the top of either list (word matches or meaning) ranks high,
-    // so legal wording that shares no word with the report is still found through the semantic list.
-    const fused = new Map();
-    const addRanks = (list, weight) => list.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + weight / (60 + index)));
-    addRanks(byWords, 1);
-    addRanks(semanticSections.map(section => candidates.get(section.id)).filter(Boolean), 1);
-    const ranked = [...fused.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => candidates.get(id));
     // At most three sections per document so one long act does not crowd out the others.
     const pick = (list, limit) => { const perDocument = new Map(), picked = [];
       for (const item of list) { const count = perDocument.get(item.document_id) || 0; if (count >= 3) continue; perDocument.set(item.document_id, count + 1); picked.push(item); if (picked.length >= limit) break; }
       return picked; };
     // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
     const isLaw = item => item.kind === 'law' || String(item.source_url || '').startsWith('https://www.law.go.kr/');
-    return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8) };
+    const semanticItems = semanticSections.map(section => candidates.get(section.id)).filter(Boolean);
+    if (fusion === 'rrf') {
+      const fused = new Map();
+      const addRanks = list => list.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + 1 / (60 + index)));
+      addRanks(byWords); addRanks(semanticItems);
+      const ranked = [...fused.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => candidates.get(id));
+      return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8) };
+    }
+    const laws = pick(byWords.filter(isLaw), 12), guides = pick(byWords.filter(item => !isLaw(item)), 8);
+    const taken = new Set([...laws, ...guides].map(item => item.id));
+    const extra = semanticItems.filter(item => !taken.has(item.id)).map(item => ({ ...item, matchedBy: 'meaning' }));
+    return { laws: [...laws, ...extra.filter(isLaw).slice(0, 4)], guides: [...guides, ...extra.filter(item => !isLaw(item)).slice(0, 3)] };
   }
   // Semantic search (supabase/006_semantic_search.sql): reports and statutes rarely share words, so the
   // meaning of the report is compared with the stored meaning of every approved section and case.
@@ -303,11 +310,16 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       for (const item of cases) {
         const queries = [...item.q, ...(item.lq || [])];
         const words = await searchApprovedSections(queries);
-        const semantic = semanticEnabled() ? await semanticSearch(item.desc).catch(error => { semanticError = error.message; return null; }) : null;
-        const hybrid = semantic ? await searchApprovedSections(queries, semantic.sections) : null;
-        const wordItems = [...words.laws, ...words.guides], hybridItems = hybrid ? [...hybrid.laws, ...hybrid.guides] : null;
+        // Same semantic input as a real draft: the report text plus the search words.
+        const semantic = semanticEnabled() ? await semanticSearch([item.desc, ...queries].join('\n')).catch(error => { semanticError = error.message; return null; }) : null;
+        const lists = { words: [...words.laws, ...words.guides] };
+        if (semantic) for (const fusion of ['add', 'rrf']) {
+          const found = await searchApprovedSections(queries, semantic.sections, { fusion });
+          lists[fusion] = [...found.laws, ...found.guides];
+        }
         results.push({ id: item.id, area: item.area, desc: item.desc, expect: item.expect.map(expect => ({
-          label: `${expect.t} / ${expect.b}`, words: hit(wordItems, expect), hybrid: hybridItems ? hit(hybridItems, expect) : null })) });
+          label: `${expect.t} / ${expect.b}`, words: hit(lists.words, expect),
+          add: lists.add ? hit(lists.add, expect) : null, rrf: lists.rrf ? hit(lists.rrf, expect) : null })) });
       }
       return { total: all.length, offset: Number(offset) || 0, results, semantic: { used: semanticEnabled() && !semanticError, error: semanticError || (semanticEnabled() ? '' : '의미 검색 미설정') } };
     },
@@ -563,8 +575,8 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       for (const id of lawMap.keys()) docMap.delete(id);
       const evidence = reused ? structuredClone(reused.evidence) : [
         ...[...caseMap.values()].slice(0, 25).map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
-        ...[...lawMap.values()].slice(0, 12).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
-        ...[...docMap.values()].slice(0, 10).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
+        ...[...lawMap.values()].slice(0, 16).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
+        ...[...docMap.values()].slice(0, 11).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
       ];
       let sourceOrigin = reused ? reused.sourceOrigin : evidence.length ? 'internal' : 'none';
       let externalSearch = reused ? { ...structuredClone(reused.externalSearch), reused: true } : { configured: Boolean(env.OPENAI_API_KEY && env.SAFETY_EXTERNAL_SEARCH !== 'off'), sources: [], limitations: '', attempted: false };
