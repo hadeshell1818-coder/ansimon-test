@@ -197,7 +197,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     },
     async importOfficialLaws(actor) {
       if (!configured) throw new Error('Supabase 미연결: 저장하지 않았습니다.');
-      const officialDocuments = await fetchOfficialSafetySources(env, request);
+      const { documents: officialDocuments, failures } = await fetchOfficialSafetySources(env, request);
       const imported = [];
       for (const item of officialDocuments) {
         const checkedAt = new Date().toISOString();
@@ -242,7 +242,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         }
         imported.push({ id: document.id, title: item.metadata.title, version: item.metadata.source_version, sections: sectionRows.length });
       }
-      return { imported, checkedAt: new Date().toISOString() };
+      return { imported, failed: failures, checkedAt: new Date().toISOString() };
     },
     async add(body, actor) {
       const title = String(body.title || '').trim();

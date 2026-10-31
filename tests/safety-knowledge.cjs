@@ -105,7 +105,28 @@ async function main() {
   const { fetchOfficialSafetySources } = require('../official-law-import.cjs');
   await assert.rejects(fetchOfficialSafetySources({ LAW_OPEN_API_OC: 'test' }, async () => { throw new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } }); }),
     /국가법령정보센터 연결 실패 · 서버가 연결을 거부하거나 끊었습니다/);
-  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures');
+  // Middle-dot and spacing variants match the official title; one missing source does not block the rest.
+  const lawApi = async url => {
+    const target = new URL(url), query = target.searchParams.get('query'), kind = target.searchParams.get('target');
+    const json = data => ({ ok: true, json: async () => data });
+    if (target.pathname.endsWith('lawSearch.do') && kind === 'admrul') {
+      const rows = query === '위험기계·기구 방호조치 기준' ? [{ 행정규칙명: '위험기계ㆍ기구 방호조치 기준', 현행연혁구분: '현행', 행정규칙일련번호: '9', 시행일자: '20250101', 행정규칙종류: '고시', 발령번호: '2025-1' }] : [];
+      return json({ AdmRulSearch: { admrul: rows } });
+    }
+    if (target.pathname.endsWith('lawService.do') && kind === 'admrul') return json({ AdmRulService: { 조문내용: ['제1조(목적) 방호조치 기준을 정한다.'] } });
+    if (target.pathname.endsWith('lawSearch.do')) return json({ LawSearch: { law: query === '산업안전보건법' ? [{ 법령명한글: '산업안전보건법', 현행연혁코드: '현행', 법령일련번호: '1', 시행일자: '20250601' }] : [] } });
+    return json({ 법령: { 기본정보: { 공포번호: '1' }, 조문: { 조문단위: [{ 조문내용: '제1조(목적) 산업재해를 예방한다.' }] } } });
+  };
+  const { OFFICIAL_SAFETY_SOURCES } = require('../official-law-import.cjs');
+  const pick = titles => OFFICIAL_SAFETY_SOURCES.filter(source => titles.includes(source.title));
+  const partial = await fetchOfficialSafetySources({}, lawApi, pick(['산업안전보건법', '위험기계·기구 방호조치 기준', '안전검사 고시']));
+  assert.deepEqual(partial.documents.map(doc => doc.metadata.title), ['산업안전보건법', '위험기계·기구 방호조치 기준']);
+  assert.equal(partial.failures.length, 1); assert.equal(partial.failures[0].title, '안전검사 고시');
+  assert.match(partial.failures[0].error, /현행본을 찾지 못했습니다/);
+  assert.ok(partial.documents.every(doc => doc.sections.every(section => section.content_hash && section.locator)));
+  assert.ok(OFFICIAL_SAFETY_SOURCES.every(source => ['inspections','weather','musculoskeletal','stress','chemicals','training','contractors','general'].includes(source.category)));
+  assert.equal(new Set(OFFICIAL_SAFETY_SOURCES.map(source => source.title)).size, OFFICIAL_SAFETY_SOURCES.length);
+  console.log('PASS: authorization, offline state, no false persistence, metadata validation, pending-only ingestion, upstream failures, readable connection failures, partial official import');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
 
