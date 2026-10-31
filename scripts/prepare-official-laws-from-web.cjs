@@ -96,42 +96,93 @@ async function readDocument(page, source) {
   };
 }
 
-function documentSql({ metadata, sections }) {
-  const json = JSON.stringify(sections.map(section => ({ version: metadata.source_version, ...section })));
-  return `-- ${metadata.title} · ${metadata.source_version} · 조문 ${sections.length}개
-do $upload$
-declare v_document_id uuid;
-begin
-  insert into public.safety_documents (
-    title, source_url, publisher, category, kind, tags, jurisdiction, rights_note, source_group,
-    review_status, content_use_allowed, effective_from, effective_until, source_version, checked_at, reviewed_by, created_by
-  ) values (
-    ${quote(metadata.title)}, ${quote(metadata.source_url)}, ${quote(metadata.publisher)}, ${quote(metadata.category)}, ${quote(metadata.kind)},
-    array[${metadata.tags.map(quote).join(', ')}]::text[], '대한민국',
-    '국가법령정보센터 공식 공개 원문. 실제 적용 전 시행일과 개정 여부를 공식 원문에서 다시 확인', 'PUBLIC',
-    'approved', true, ${quote(metadata.effective_from)}, null, ${quote(metadata.source_version)}, now(), '공식 원문 확인 · 웹 원문 적재', 'official-law-web-import'
-  )
-  on conflict (source_url) do update set
-    title = excluded.title, publisher = excluded.publisher, category = excluded.category, kind = excluded.kind,
-    tags = excluded.tags, rights_note = excluded.rights_note, review_status = 'approved', content_use_allowed = true,
-    effective_from = excluded.effective_from, source_version = excluded.source_version, checked_at = now(), reviewed_by = excluded.reviewed_by
-  returning id into v_document_id;
-
-  insert into public.safety_document_sections (document_id, version, locator, body, content_hash)
-  select v_document_id, item.version, item.locator, item.body, item.content_hash
-  from jsonb_to_recordset(${quote(json)}::jsonb) as item(version text, locator text, body text, content_hash text)
-  on conflict (document_id, version, locator) do update set body = excluded.body, content_hash = excluded.content_hash;
-
-  -- Superseded versions would otherwise be searched next to the current text; keep rows cited by assessments.
-  delete from public.safety_document_sections s
-  where s.document_id = v_document_id and s.version <> ${quote(metadata.source_version)}
-    and not exists (select 1 from public.safety_assessment_evidence e where e.section_id = s.id);
-end
-$upload$;
+// Plain statements only: the Supabase SQL editor cuts very long pasted lines, which broke dollar-quoted blocks.
+// One article per line, 40 articles per insert, and each output file stays under MAX_FILE_BYTES.
+const MAX_FILE_BYTES = 300000;
+const CHUNK = 40;
+function documentStatements({ metadata, sections }) {
+  const url = quote(metadata.source_url), version = quote(metadata.source_version);
+  const head = `-- ${metadata.title} · ${metadata.source_version} · 조문 ${sections.length}개
+insert into public.safety_documents (
+  title, source_url, publisher, category, kind, tags, jurisdiction, rights_note, source_group,
+  review_status, content_use_allowed, effective_from, effective_until, source_version, checked_at, reviewed_by, created_by
+) values (
+  ${quote(metadata.title)}, ${url}, ${quote(metadata.publisher)}, ${quote(metadata.category)}, ${quote(metadata.kind)},
+  array[${metadata.tags.map(quote).join(', ')}]::text[], '대한민국',
+  '국가법령정보센터 공식 공개 원문. 실제 적용 전 시행일과 개정 여부를 공식 원문에서 다시 확인', 'PUBLIC',
+  'approved', true, ${quote(metadata.effective_from)}, null, ${version}, now(), '공식 원문 확인 · 웹 원문 적재', 'official-law-web-import'
+)
+on conflict (source_url) do update set
+  title = excluded.title, publisher = excluded.publisher, category = excluded.category, kind = excluded.kind,
+  tags = excluded.tags, rights_note = excluded.rights_note, review_status = 'approved', content_use_allowed = true,
+  effective_from = excluded.effective_from, source_version = excluded.source_version, checked_at = now(), reviewed_by = excluded.reviewed_by;
 `;
+  const inserts = [];
+  for (let index = 0; index < sections.length; index += CHUNK) {
+    const rows = sections.slice(index, index + CHUNK).map(section => `  (${quote(section.locator)}, ${quote(section.body)}, ${quote(section.content_hash)})`);
+    inserts.push(`insert into public.safety_document_sections (document_id, version, locator, body, content_hash)
+select d.id, ${version}, item.locator, item.body, item.content_hash
+from public.safety_documents d, (values
+${rows.join(',\n')}
+) as item(locator, body, content_hash)
+where d.source_url = ${url}
+on conflict (document_id, version, locator) do update set body = excluded.body, content_hash = excluded.content_hash;
+`);
+  }
+  // Superseded versions would otherwise be searched next to the current text; keep rows cited by assessments.
+  const cleanup = `delete from public.safety_document_sections s
+using public.safety_documents d
+where d.id = s.document_id and d.source_url = ${url} and s.version <> ${version}
+  and not exists (select 1 from public.safety_assessment_evidence e where e.section_id = s.id);
+`;
+  return [head, ...inserts, cleanup];
+}
+
+// Splits statements into files of at most MAX_FILE_BYTES; a large document continues in the next file.
+function writeSqlFiles(documents, outPath) {
+  const parts = [[]];
+  let size = 0;
+  for (const statement of documents.flatMap(documentStatements)) {
+    const bytes = Buffer.byteLength(statement);
+    if (size + bytes > MAX_FILE_BYTES && parts.at(-1).length) { parts.push([]); size = 0; }
+    parts.at(-1).push(statement); size += bytes;
+  }
+  const base = outPath.replace(/\.sql$/, '');
+  return parts.map((statements, index) => {
+    const file = parts.length === 1 ? outPath : `${base}-${String(index + 1).padStart(2, '0')}.sql`;
+    const note = parts.length === 1 ? '' : ` · ${index + 1}/${parts.length} (번호 순서대로 실행)`;
+    fs.writeFileSync(file, `-- 국가법령정보센터 공개 원문${note}. 다시 실행해도 같은 자료·조문을 갱신합니다.\nbegin;\n\n${statements.join('\n')}\ncommit;\n`);
+    return file;
+  });
+}
+
+// Rebuilds documents from SQL files written by earlier versions of this script (no re-download).
+function documentsFromSql(text) {
+  const documents = [];
+  for (const block of text.split(/\n(?=-- .+ · 조문 \d+개\n)/)) {
+    const title = (block.match(/^-- (.+?) · /) || [])[1];
+    const values = block.match(/\) values \(\n\s*'((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)', '((?:[^']|'')*)',\n\s*array\[(.*?)\]::text\[\][\s\S]*?'approved', true, '([\d-]+)', null, '((?:[^']|'')*)'/);
+    const json = block.match(/jsonb_to_recordset\('((?:[^']|'')*)'::jsonb\)/);
+    if (!title || !values || !json) continue;
+    const unquote = value => value.replace(/''/g, "'");
+    documents.push({
+      metadata: { title: unquote(values[1]), source_url: unquote(values[2]), publisher: unquote(values[3]), category: values[4], kind: values[5],
+        tags: [...values[6].matchAll(/'((?:[^']|'')*)'/g)].map(m => unquote(m[1])), effective_from: values[7], source_version: unquote(values[8]) },
+      sections: JSON.parse(unquote(json[1])).map(({ locator, body, content_hash }) => ({ locator, body, content_hash })),
+    });
+  }
+  return documents;
 }
 
 async function main() {
+  if (process.argv[2] === '--from-sql') {
+    const documents = process.argv.slice(3).flatMap(file => documentsFromSql(fs.readFileSync(file, 'utf8')));
+    if (!documents.length) throw new Error('변환할 자료를 찾지 못했습니다.');
+    const out = path.resolve(__dirname, '../local-import', process.env.OUT_FILE || 'approved-official-laws.sql');
+    for (const file of writeSqlFiles(documents, out)) console.log(file);
+    console.log(`자료 ${documents.length}종 · 조문 ${documents.reduce((sum, doc) => sum + doc.sections.length, 0)}개`);
+    return;
+  }
   const titles = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_TITLES;
   const sources = titles.map(title => {
     const source = OFFICIAL_SAFETY_SOURCES.find(item => item.title === title);
@@ -160,7 +211,6 @@ async function main() {
   const outDir = path.resolve(__dirname, '../local-import');
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, process.env.OUT_FILE || 'approved-official-laws.sql');
-  fs.writeFileSync(out, `-- 국가법령정보센터 공개 원문 ${documents.length}종. 다시 실행해도 같은 자료·조문을 갱신합니다.\nbegin;\n\n${documents.map(documentSql).join('\n')}\ncommit;\n`);
-  console.log(out);
+  for (const file of writeSqlFiles(documents, out)) console.log(file);
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });
