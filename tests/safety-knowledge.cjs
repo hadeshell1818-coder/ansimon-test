@@ -58,7 +58,7 @@ async function main() {
     const parsed = new URL(url), resource = parsed.pathname.split('/').pop();
     if (resource === 'safety_documents' && parsed.searchParams.get('review_status') === 'eq.approved') return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
     if (resource === 'safety_documents' && parsed.searchParams.has('id')) return { ok: true, status: 200, json: async () => [{ id: 'law-1', title: '산업안전보건기준에 관한 규칙', publisher: '국가법령정보센터', kind: 'law', review_status: 'approved', source_url: 'https://law.example.test' }] };
-    if (resource === 'safety_document_sections' && parsed.searchParams.has('body')) return { ok: true, status: 200, json: async () => [{ id: 'law-section-1', document_id: 'law-1', version: 'current', locator: '제3조(전도의 방지)', body: '통로의 바닥을 안전하게 유지하여야 한다.' }] };
+    if (resource === 'safety_document_sections' && parsed.searchParams.has('body')) return { ok: true, status: 200, json: async () => [{ id: 'law-section-1', document_id: 'law-1', version: 'current', locator: '제3조(전도의 방지)', body: '계단 파손 등으로 넘어지지 않도록 통로의 바닥을 안전하게 유지하여야 한다.' }] };
     return { ok: true, status: 200, json: async () => [] };
   });
   const originalFetch = global.fetch;

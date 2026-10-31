@@ -69,6 +69,7 @@ function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
     <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
+    ${semanticPanel(connected)}
     <details class="detailbox"><summary>외부 검색 참고자료 목록 · ${knowledgeState?.referenceCatalog?.titles?.length||0}종</summary><p>${esc(knowledgeState?.referenceCatalog?.note||'참고 목록 확인 중')}</p><p>AI 초안 작성 시 관련 자료의 공개 원문을 우선 검색합니다. 비공개 내부자료는 기관 승인 후 원문을 등록해 주세요.</p><ol>${(knowledgeState?.referenceCatalog?.titles||[]).map(title=>`<li>${esc(title)}</li>`).join('')}</ol></details>
     <p class="workspace-note">국가법령정보센터의 현행 산업안전보건법·시행령·시행규칙·안전보건규칙과 사업장 위험성평가 지침을 조문 단위로 저장합니다. 시행예정본과 연혁본은 제외합니다.</p>
     <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
@@ -165,6 +166,52 @@ function searchLibrary() {
       host.innerHTML = docs + cases || '<small>본문이나 사례에서 일치하는 내용을 찾지 못했습니다.</small>';
     } catch (error) { host.innerHTML = `<small class="workspace-error">${esc(error.message)}</small>`; }
   }, 350);
+}
+// Semantic search: statutes and site reports rarely share words, so each section is stored with its meaning.
+function semanticPanel(connected) {
+  const sem = knowledgeState?.semantic || {};
+  const counts = sem.sections ? `조문 ${Number(sem.sections.total - sem.sections.missing).toLocaleString()}/${Number(sem.sections.total).toLocaleString()} · 사례 ${Number(sem.cases.total - sem.cases.missing).toLocaleString()}/${Number(sem.cases.total).toLocaleString()} 색인` : '';
+  return `<section class="detailbox semantic-panel"><h3>의미 검색</h3>
+    <p>현장 표현(예: 바닥이 젖어 미끄러움)과 법령 표현(전도의 방지)처럼 단어가 달라도 뜻이 가까운 조문·사례를 찾습니다. 단어 검색과 함께 씁니다.</p>
+    <p id="semantic-status" role="status">${esc(sem.message || '확인 중')}${counts ? ` · ${esc(counts)}` : ''}</p>
+    <div class="row-btns"><button class="btn" id="index-embeddings" onclick="indexEmbeddings()" ${connected ? '' : 'disabled'}>의미 검색 색인 만들기</button>
+    <button class="btn" id="evaluate-search" onclick="evaluateSearch()" ${connected ? '' : 'disabled'}>검색 정확도 점검</button></div>
+    <div id="semantic-result" role="status"></div></section>`;
+}
+async function indexEmbeddings() {
+  const button = $('index-embeddings'); button.disabled = true;
+  let total = 0;
+  try {
+    // Each request fills as many vectors as fit in its time budget; repeat until nothing is left.
+    for (;;) {
+      const result = await api('/api/safety-knowledge/index-embeddings', { method: 'POST' });
+      total += Number(result.indexed || 0);
+      const left = Number(result.sections?.missing || 0) + Number(result.cases?.missing || 0);
+      if ($('semantic-status')) $('semantic-status').textContent = `색인 ${total.toLocaleString()}개 저장 · 남은 항목 ${left.toLocaleString()}개`;
+      if (!left || !result.indexed) break;
+    }
+    await refreshKnowledge(); if (tab === 'library') renderLibrary();
+    toast(`의미 검색 색인 ${total.toLocaleString()}개 저장`);
+  } catch (error) { if ($('semantic-status')) $('semantic-status').textContent = error.message; }
+  finally { if ($('index-embeddings')) $('index-embeddings').disabled = false; }
+}
+async function evaluateSearch() {
+  const button = $('evaluate-search'); button.disabled = true;
+  const host = $('semantic-result'), rows = [];
+  let total = 64, semantic = null;
+  try {
+    for (let offset = 0; offset < total; offset += 8) {
+      host.textContent = `우체국 사례 ${offset}/${total}건 점검 중`;
+      const result = await api('/api/safety-knowledge/evaluate-search', { method: 'POST', body: JSON.stringify({ offset, limit: 8 }) });
+      total = result.total; semantic = result.semantic; rows.push(...result.results);
+    }
+    const expects = rows.flatMap(row => row.expect.map(expect => ({ ...expect, row })));
+    const words = expects.filter(item => item.words).length, hybrid = expects.filter(item => item.hybrid).length;
+    const misses = expects.filter(item => semantic?.used ? !item.hybrid : !item.words);
+    host.innerHTML = `<p><b>기대 근거 ${expects.length}개 중 단어 검색 ${words}개${semantic?.used ? ` · 단어+의미 검색 ${hybrid}개` : ''}가 AI에 전달됩니다.</b>${semantic?.used ? '' : ` 의미 검색 미사용: ${esc(semantic?.error || '')}`}</p>
+      <details><summary>놓친 근거 ${misses.length}개</summary><ul>${misses.map(item => `<li>${esc(item.row.id)} ${esc(item.row.desc)} — <small>${esc(item.label)}</small></li>`).join('')}</ul></details>`;
+  } catch (error) { host.textContent = error.message; }
+  finally { button.disabled = false; }
 }
 async function reloadLibrary() { await refreshKnowledge(); if (tab === 'library') renderLibrary(); }
 async function importOfficialLaws() {

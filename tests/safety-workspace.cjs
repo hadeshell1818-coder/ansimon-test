@@ -14,7 +14,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    let connected = false, documents = [], lawImports = 0;
+    let connected = false, documents = [], lawImports = 0, missing = 70, indexCalls = 0;
     await page.route('**/api/**', async route => {
       const request = route.request();
       const url = new URL(request.url());
@@ -26,7 +26,13 @@ async function main() {
         if (request.method() === 'POST') {
           documents.push({ ...request.postDataJSON(), review_status: 'pending', jurisdiction: '미확인', rights_note: '이용조건 확인 필요' });
           data = { added: [documents.at(-1)] };
-        } else data = { connected, documents, message: connected ? 'Supabase 연결됨 (테스트 응답)' : 'Supabase 미연결' };
+        } else data = { connected, documents, message: connected ? 'Supabase 연결됨 (테스트 응답)' : 'Supabase 미연결',
+          semantic: connected ? { ready: !missing, message: missing ? `의미 검색 색인 미완료 · 조문 ${missing}개·사례 0건 남음` : '의미 검색 사용 중', sections: { total: 70, missing }, cases: { total: 0, missing: 0 } } : { ready: false, message: 'Supabase 미연결' } };
+      }
+      if (url.pathname.endsWith('/index-embeddings')) { indexCalls++; const indexed = Math.min(32, missing); missing -= indexed; data = { indexed, sections: { total: 70, missing }, cases: { total: 0, missing: 0 } }; }
+      if (url.pathname.endsWith('/evaluate-search')) {
+        const { offset } = request.postDataJSON();
+        data = { total: 16, offset, semantic: { used: true, error: '' }, results: Array.from({ length: 8 }, (_, i) => ({ id: `C${offset + i}`, desc: '사례', expect: [{ label: '규칙 / 조문', words: i % 2 === 0, hybrid: i !== 7 }] })) };
       }
       if (url.pathname.endsWith('/import-official-laws')) {
         lawImports++;
@@ -66,6 +72,14 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#library-result')?.textContent.includes('적재하지 못한 자료 1종'));
     assert.match(await page.locator('#library-result').innerText(), /안전검사 고시: 안전검사 고시 현행본을 찾지 못했습니다/);
     assert.match(await page.locator('#source-rows').innerText(), /산업안전보건법[\s\S]*본문 3개 저장/);
+    // Semantic index: the button keeps requesting batches until nothing is left, then shows the accuracy check.
+    assert.match(await page.locator('#semantic-status').innerText(), /조문 70개.*남음.*조문 0\/70/);
+    await page.locator('#index-embeddings').click();
+    await page.waitForFunction(() => document.querySelector('#semantic-status')?.textContent.includes('의미 검색 사용 중'));
+    assert.equal(indexCalls, 3); assert.equal(missing, 0);
+    await page.locator('#evaluate-search').click();
+    await page.waitForFunction(() => document.querySelector('#semantic-result')?.textContent.includes('기대 근거 16개'));
+    assert.match(await page.locator('#semantic-result').innerText(), /단어 검색 8개 · 단어\+의미 검색 14개[\s\S]*놓친 근거 2개/);
     await page.locator('#source-form [name=title]').fill('테스트 자료');
     await page.locator('#source-form [name=publisher]').fill('테스트 기관');
     await page.locator('#source-form [name=source_url]').fill('https://example.com/test');

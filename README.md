@@ -27,6 +27,15 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `prepare-kosha-guides.cjs [out.sql]` | 산업안전포털(portal.kosha.or.kr)의 현행 KOSHA GUIDE 목록에서 우체국 시설·작업 관련 60건 PDF를 받아 글을 추출하고 `4.2 제목` 단위로 나눈 SQL 생성 (`curl`, `pdftotext` 필요; `KOSHA_PDF_DIR`로 받은 PDF 재사용). 그림으로만 된 PDF는 건너뛰고 실패로 표시. 월 1회 개정 검토 때 다시 실행 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
 
+## 의미 검색 설정
+
+현장 표현과 법령 표현은 단어가 잘 겹치지 않습니다(예: "바닥이 젖어 미끄러움" ↔ "전도의 방지"). 의미 검색은 조문·사례마다 뜻을 벡터로 저장해 두고 신고 문장과 뜻이 가까운 근거를 찾으며, 단어 검색 결과와 합쳐 AI에 전달합니다.
+
+1. Supabase SQL Editor에서 `supabase/006_semantic_search.sql`을 실행합니다(pgvector 확장·벡터 칸·검색 함수).
+2. 서버 환경변수 `OPENAI_API_KEY`가 있어야 합니다. 모델은 `SAFETY_EMBEDDING_MODEL`(기본 `text-embedding-3-small`, 1536차원)로 바꿀 수 있고, `SAFETY_SEMANTIC_SEARCH=off`이면 단어 검색만 씁니다.
+3. 위험성평가 화면 → 근거자료실 → 「의미 검색 색인 만들기」를 누릅니다. 벡터가 없는 조문·승인된 사례만 채우며 끝날 때까지 자동으로 이어집니다. 새 자료를 올리거나 조문 본문이 바뀌면(바뀐 조문은 벡터가 자동으로 비워짐) 다시 누릅니다.
+4. 「검색 정확도 점검」은 우체국 사례 64건(`seed-assets/search-evaluation-cases.json`)으로 단어 검색과 단어+의미 검색이 기대 근거를 AI에 넘기는 비율을 운영 자료로 비교합니다.
+
 ## 공식 법령 적재 설정
 근거자료실의 「공식 법령 최신본 적재」는 국가법령정보센터 Open API를 씁니다.
 1. open.law.go.kr에서 Open API 사용을 신청해 OC 값(신청 시 정한 아이디)을 받습니다.

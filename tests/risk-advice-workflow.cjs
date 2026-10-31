@@ -13,7 +13,7 @@ async function main() {
     if (String(url).includes('supabase')) {
       if(!internalMode)throw Error('repository unavailable');
       const parsed=new URL(url),table=parsed.pathname.split('/').pop();
-      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'안전 통로 확보',locator:'제3조'},{id:'law-section-2',document_id:'law',body:'운반 작업 통로 정리',locator:'제22조'}]:[];
+      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'운반 작업 시 안전 통로 확보',locator:'제3조'},{id:'law-section-2',document_id:'law',body:'운반 작업 통로 정리',locator:'제22조'}]:[];
       return {ok:true,json:async()=>result};
     }
     if (String(url).endsWith('/responses')) {
