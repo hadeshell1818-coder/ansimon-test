@@ -73,11 +73,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // Ranked evidence search over approved documents. Supabase returns ilike matches in no particular order and
   // thousands of sections match common words, so candidates are gathered by article title (locator), body and
   // word pairs, then ranked by how many search words each section contains (article titles weigh most).
-  async function searchApprovedSections(queries) {
+  async function searchApprovedSections(queries, semanticSections = []) {
     const words = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
       .filter(term => term.length >= 2).slice(0, 12);
-    if (!words.length) return { laws: [], guides: [] };
+    if (!words.length && !semanticSections.length) return { laws: [], guides: [] };
     const phrases = queries.map(query => String(query).trim()).filter(query => /\s/.test(query));
     const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&limit=1000');
     const approved = new Map(documents.map(doc => [doc.id, doc]));
@@ -92,7 +92,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       found.push(...(await Promise.all(requests.slice(index, index + 8).map(query => callResource('safety_document_sections', query).catch(() => [])))).flat());
     }
     const candidates = new Map();
-    for (const section of found) {
+    for (const section of [...found, ...semanticSections]) {
       const doc = approved.get(section.document_id);
       // Older versions stay only because an assessment cites them; search the current text.
       if (doc && section.body && (!doc.source_version || !section.version || section.version === doc.source_version)) candidates.set(section.id, { ...section, ...doc, id: section.id, document_id: doc.id });
@@ -103,8 +103,15 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       for (const phrase of phrases) if (item.body.includes(phrase)) total += 2;
       return total;
     };
-    const ranked = [...candidates.values()].map(item => ({ item, score: score(item) }))
+    const byWords = [...candidates.values()].filter(item => score(item) > 0).map(item => ({ item, score: score(item) }))
       .sort((a, b) => b.score - a.score || a.item.body.length - b.item.body.length).map(entry => entry.item);
+    // Reciprocal rank fusion: a section near the top of either list (word matches or meaning) ranks high,
+    // so legal wording that shares no word with the report is still found through the semantic list.
+    const fused = new Map();
+    const addRanks = (list, weight) => list.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + weight / (60 + index)));
+    addRanks(byWords, 1);
+    addRanks(semanticSections.map(section => candidates.get(section.id)).filter(Boolean), 1);
+    const ranked = [...fused.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => candidates.get(id));
     // At most three sections per document so one long act does not crowd out the others.
     const pick = (list, limit) => { const perDocument = new Map(), picked = [];
       for (const item of list) { const count = perDocument.get(item.document_id) || 0; if (count >= 3) continue; perDocument.set(item.document_id, count + 1); picked.push(item); if (picked.length >= limit) break; }
@@ -112,6 +119,50 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
     const isLaw = item => item.kind === 'law' || String(item.source_url || '').startsWith('https://www.law.go.kr/');
     return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8) };
+  }
+  // Semantic search (supabase/006_semantic_search.sql): reports and statutes rarely share words, so the
+  // meaning of the report is compared with the stored meaning of every approved section and case.
+  const embeddingModel = env.SAFETY_EMBEDDING_MODEL || 'text-embedding-3-small';
+  const semanticEnabled = () => Boolean(configured && env.OPENAI_API_KEY && env.SAFETY_SEMANTIC_SEARCH !== 'off');
+  async function embed(texts) {
+    const response = await send('임베딩(OpenAI)', 'https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+      body: JSON.stringify({ model: embeddingModel, input: texts, ...(/^text-embedding-3/.test(embeddingModel) ? { dimensions: 1536 } : {}) }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`임베딩 생성 실패 (${response.status}). ${detail.replace(/\s+/g, ' ').slice(0, 200)}`);
+    }
+    const data = await response.json();
+    return [...(data.data || [])].sort((a, b) => a.index - b.index).map(item => item.embedding);
+  }
+  const vectorLiteral = values => `[${values.join(',')}]`;
+  const rpc = (name, payload) => callResource(`rpc/${name}`, '', { method: 'POST', body: JSON.stringify(payload) });
+  const semanticSetupHint = error => /match_safety|set_safety_embeddings|embedding|PGRST202|42703/.test(error.message)
+    ? new Error('의미 검색 준비 안 됨: Supabase SQL Editor에서 supabase/006_semantic_search.sql을 실행하세요.') : error;
+  async function semanticSearch(text) {
+    const [vector] = await embed([String(text).slice(0, 3000)]);
+    const literal = vectorLiteral(vector);
+    try {
+      const [sections, cases] = await Promise.all([
+        rpc('match_safety_sections', { query_embedding: literal, match_count: 40 }),
+        rpc('match_safety_cases', { query_embedding: literal, match_count: 25 }),
+      ]);
+      return { sections: sections || [], caseIds: (cases || []).map(item => item.id) };
+    } catch (error) { throw semanticSetupHint(error); }
+  }
+  const caseColumns = 'id,document_id,source_sheet,source_row,domain,industry_large,industry_medium,industry_small,work_category,work_name,unit_work,incident_type,incident_summary,hazard_object,high_risk_situation,causal_factors,reduction_measures,review_status';
+  const sectionText = (item, titles) => `${titles.get(item.document_id) || ''} ${item.locator || ''}\n${item.body || ''}`.slice(0, 3000);
+  const caseText = item => [item.industry_large, item.work_category, item.work_name, item.unit_work, item.incident_type, item.incident_summary,
+    item.hazard_object, item.high_risk_situation, item.causal_factors, item.reduction_measures].filter(Boolean).join(' / ').slice(0, 3000);
+  async function countRows(resource, query) {
+    const response = await send('Supabase 자료실', new URL(`/rest/v1/${resource}${query}`, new URL(url)), {
+      headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: 'count=exact', Range: '0-0' }, signal: AbortSignal.timeout(10000),
+    }, SUPABASE_HINT);
+    if (!response.ok) throw new Error(`자료실 조회 실패 (${response.status}). ${(await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200)}`);
+    return Number(String(response.headers.get('content-range') || '').split('/')[1] || 0);
   }
   async function searchExternalSources(description, queries) {
     const openAiKey = env.OPENAI_API_KEY;
@@ -201,7 +252,64 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         doc.case_count = doc.safety_import_rows?.[0]?.count || 0;
         doc.section_count = doc.safety_document_sections?.[0]?.count || 0;
       });
-      return { ...external, connected: true, documents, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
+      const semantic = await this.embeddingStatus().catch(error => ({ ready: false, message: error.message }));
+      return { ...external, connected: true, documents, semantic, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
+    },
+    async embeddingStatus() {
+      if (!configured) return { ready: false, message: 'Supabase 미연결' };
+      if (!env.OPENAI_API_KEY) return { ready: false, message: 'OPENAI_API_KEY가 없어 의미 검색을 쓸 수 없습니다.' };
+      try {
+        const [sections, sectionsMissing, cases, casesMissing] = await Promise.all([
+          countRows('safety_document_sections', '?select=id'),
+          countRows('safety_document_sections', '?select=id&embedding=is.null'),
+          countRows('safety_import_rows', '?select=id&review_status=eq.approved'),
+          countRows('safety_import_rows', '?select=id&review_status=eq.approved&embedding=is.null'),
+        ]);
+        const missing = sectionsMissing + casesMissing;
+        return { ready: missing === 0 && sections > 0, model: embeddingModel, sections: { total: sections, missing: sectionsMissing }, cases: { total: cases, missing: casesMissing },
+          message: missing ? `의미 검색 색인 미완료 · 조문 ${sectionsMissing.toLocaleString()}개·사례 ${casesMissing.toLocaleString()}건 남음` : '의미 검색 사용 중' };
+      } catch (error) { throw semanticSetupHint(error); }
+    },
+    // Fills missing vectors in batches within one request's time budget; call again until nothing remains.
+    async indexEmbeddings({ budgetMs = 40000 } = {}) {
+      if (!configured) throw new Error('Supabase 미연결: 색인을 만들 수 없습니다.');
+      if (!env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY가 없어 의미 검색 색인을 만들 수 없습니다.');
+      const started = Date.now(); let indexed = 0;
+      const titles = new Map((await call('?select=id,title&limit=1000')).map(doc => [doc.id, doc.title]));
+      try {
+        for (const target of ['sections', 'cases']) {
+          while (Date.now() - started < budgetMs) {
+            const rows = target === 'sections'
+              ? await callResource('safety_document_sections', '?select=id,document_id,locator,body&embedding=is.null&limit=32')
+              : await callResource('safety_import_rows', `?select=${caseColumns}&review_status=eq.approved&embedding=is.null&limit=32`);
+            if (!rows.length) break;
+            const vectors = await embed(rows.map(row => target === 'sections' ? sectionText(row, titles) : caseText(row)));
+            await rpc('set_safety_embeddings', { target, items: rows.map((row, index) => ({ id: row.id, embedding: vectors[index] })), model: embeddingModel });
+            indexed += rows.length;
+          }
+        }
+      } catch (error) { throw semanticSetupHint(error); }
+      return { indexed, ...(await this.embeddingStatus()) };
+    },
+    // Runs the post-office hazard cases (seed-assets/search-evaluation-cases.json) through word search and
+    // word+meaning search and reports how many expected legal grounds each one hands to the AI.
+    async evaluateSearch({ offset = 0, limit = 8 } = {}) {
+      if (!configured) throw new Error('Supabase 미연결: 검색을 점검할 수 없습니다.');
+      const all = require('./seed-assets/search-evaluation-cases.json');
+      const cases = all.slice(Math.max(0, Number(offset) || 0), Math.max(0, Number(offset) || 0) + Math.min(Math.max(Number(limit) || 8, 1), 16));
+      const hit = (items, expect) => items.some(item => new RegExp(expect.t).test(item.title || '') && new RegExp(expect.b).test(item.body || ''));
+      const results = [];
+      let semanticError = '';
+      for (const item of cases) {
+        const queries = [...item.q, ...(item.lq || [])];
+        const words = await searchApprovedSections(queries);
+        const semantic = semanticEnabled() ? await semanticSearch(item.desc).catch(error => { semanticError = error.message; return null; }) : null;
+        const hybrid = semantic ? await searchApprovedSections(queries, semantic.sections) : null;
+        const wordItems = [...words.laws, ...words.guides], hybridItems = hybrid ? [...hybrid.laws, ...hybrid.guides] : null;
+        results.push({ id: item.id, area: item.area, desc: item.desc, expect: item.expect.map(expect => ({
+          label: `${expect.t} / ${expect.b}`, words: hit(wordItems, expect), hybrid: hybridItems ? hit(hybridItems, expect) : null })) });
+      }
+      return { total: all.length, offset: Number(offset) || 0, results, semantic: { used: semanticEnabled() && !semanticError, error: semanticError || (semanticEnabled() ? '' : '의미 검색 미설정') } };
     },
     async search(query) {
       const q = String(query || '').trim().replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9\s-]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
@@ -430,8 +538,21 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const queries = [...new Set((Array.isArray(extracted.queries) ? extracted.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 8);
       const searchErrors = [];
       const found = configured && !reused ? await Promise.all(queries.map(query => this.search(query).catch(error => { searchErrors.push(error.message); return { results: [], cases: [] }; }))) : [];
-      const ranked = reused || !configured ? { laws: [], guides: [] } : await searchApprovedSections(queries).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
-      const caseMap = new Map(); const docMap = new Map(); const lawMap = new Map();
+      const caseMap = new Map();
+      // Meaning-based search first; when it is not set up the word search still runs and the gap is reported.
+      let semantic = null, semanticError = '';
+      if (!reused && semanticEnabled()) {
+        semantic = await semanticSearch([description, body.process, ...queries].filter(Boolean).join('\n'))
+          .catch(error => { semanticError = error.message; return null; });
+      }
+      const ranked = reused || !configured ? { laws: [], guides: [] } : await searchApprovedSections(queries, semantic?.sections || []).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
+      if (semantic?.caseIds?.length) {
+        const ids = semantic.caseIds.map(eq).join(',');
+        const semanticCases = await callResource('safety_import_rows', `?select=${caseColumns}&id=in.(${ids})`).catch(() => []);
+        const order = new Map(semantic.caseIds.map((id, index) => [id, index]));
+        semanticCases.sort((a, b) => order.get(a.id) - order.get(b.id)).forEach(item => caseMap.set(item.id, item));
+      }
+      const docMap = new Map(); const lawMap = new Map();
       for (const item of ranked.guides) docMap.set(item.id, item);
       for (const result of found) {
         // Document sections come from the ranked search (current versions only); this search supplies SIF cases.
@@ -555,7 +676,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         noEvidence: evidence.length === 0,
         sourceOrigin,
         answers,
-        internalSearch: { configured, errors: searchErrors },
+        internalSearch: { configured, errors: searchErrors, semantic: reused ? { reused: true } : { used: Boolean(semantic), error: semanticError || (semanticEnabled() ? '' : '의미 검색 미설정') } },
         externalSources: externalSearch.sources,
         externalSearch: { configured: externalSearch.configured, attempted: Boolean(externalSearch.attempted), reused: Boolean(reused), used: externalSearch.sources.length > 0, error: externalSearch.error || null, limitations: externalSearch.limitations || '' },
       };
@@ -605,6 +726,16 @@ function mountKnowledge(app, authorize, env) {
   app.get('/api/safety-knowledge/:id/file', async (req, res) => {
     try { res.json(await repository.signedFile(req.params.id)); }
     catch (error) { res.status(503).json({ error: error.message }); }
+  });
+  app.post('/api/safety-knowledge/index-embeddings', async (req, res) => {
+    if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 색인을 만들 수 없습니다.' });
+    try { res.json(await repository.indexEmbeddings()); }
+    catch (error) { res.status(400).json({ error: error.message }); }
+  });
+  app.post('/api/safety-knowledge/evaluate-search', async (req, res) => {
+    if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 검색을 점검할 수 없습니다.' });
+    try { res.json(await repository.evaluateSearch(req.body || {})); }
+    catch (error) { res.status(400).json({ error: error.message }); }
   });
   app.post('/api/safety-knowledge/import-official-laws', async (req, res) => {
     if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 저장하지 않았습니다.' });
