@@ -15,6 +15,8 @@ const notices=[
  {ref:'doc:internal',status:'approved',title:'우정사업본부 위험성평가 표준지침서',locator:'제3조(평가 시기)'}
 ];
 assert.deepEqual(legalReferences({evidence:notices}),['위험기계·기구 방호조치 기준 제4조(방호조치)']);
+// Numbered sections of official technical standards are cited by section number.
+assert.deepEqual(legalReferences({evidence:[{ref:'doc:nftc',status:'approved',title:'소화기구 및 자동소화장치의 화재안전기술기준(NFTC 101)',locator:'2.1 설치기준',sourceUrl:'https://www.law.go.kr/LSW/admRulInfoP.do?admRulSeq=2'},{ref:'doc:memo',status:'approved',title:'내부 점검 기준',locator:'2.1 점검'}]}),['소화기구 및 자동소화장치의 화재안전기술기준(NFTC 101) 2.1']);
 assert.equal(searchableEvidence({evidence}).length,3);
 assert.equal(conciseReferences('1. 산업안전보건법 제36조 · 법제처 국가법령정보센터 · https://www.law.go.kr/법령/산업안전보건법'),'1. 산업안전보건법 제36조');
-console.log('PASS: only searchable legal clauses, official notices from law.go.kr, approved internal references, unavailable and spoofed sources excluded, concise existing references');
+console.log('PASS: only searchable legal clauses, official notices and numbered standards from law.go.kr, approved internal references, unavailable and spoofed sources excluded, concise existing references');

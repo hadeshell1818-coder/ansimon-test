@@ -10,6 +10,8 @@
  function legalReferences(d){return [...new Set(searchableEvidence(d).flatMap(item=>{
   const title=conciseReferences(item.title||''),locator=String(item.locator||'');
   const clause=(title+' '+locator).match(/제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*\([^)]*\))?(?:\s*제\s*\d+\s*항)?(?:\s*제\s*\d+\s*호)?/);
+  // Technical standards such as NFTC cite numbered sections ("2.1.1") instead of articles.
+  if(!clause&&officialLawSource(item)&&/(?:기준|지침)/.test(title)){const section=locator.match(/^\d+(?:\.\d+)+/);if(section)return [(title+' '+section[0]).trim()];}
   if(!clause||!(/(?:법|시행령|규칙)/.test(title)||(officialLawSource(item)&&/(?:고시|지침|기준)/.test(title))))return [];
   return [(title.replace(/\s*제\s*\d+\s*조.*$/,'').trim()+' '+clause[0]).trim()];
  }))]}
