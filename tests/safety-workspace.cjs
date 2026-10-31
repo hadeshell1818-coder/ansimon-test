@@ -31,7 +31,7 @@ async function main() {
       if (url.pathname.endsWith('/import-official-laws')) {
         lawImports++;
         if (!documents.some(doc => doc.title === '산업안전보건법')) documents.push({ title: '산업안전보건법', publisher: '국가법령정보센터', source_url: 'https://www.law.go.kr/', review_status: 'approved', section_count: 3 });
-        data = { imported: [{ title: '산업안전보건법', sections: 3 }] };
+        data = { imported: [{ title: '산업안전보건법', sections: 3 }], failed: lawImports > 1 ? [{ title: '안전검사 고시', error: '안전검사 고시 현행본을 찾지 못했습니다.' }] : [] };
       }
       await route.fulfill({ json: data });
     });
@@ -62,6 +62,9 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#import-official-laws')?.disabled === false);
     await page.waitForFunction(() => document.querySelector('#source-rows')?.textContent.includes('산업안전보건법'));
     assert.equal(lawImports, 2); assert.equal(documents.length, 1);
+    // A partially failed import keeps the failure reason visible after the library re-renders.
+    await page.waitForFunction(() => document.querySelector('#library-result')?.textContent.includes('적재하지 못한 자료 1종'));
+    assert.match(await page.locator('#library-result').innerText(), /안전검사 고시: 안전검사 고시 현행본을 찾지 못했습니다/);
     assert.match(await page.locator('#source-rows').innerText(), /산업안전보건법[\s\S]*본문 3개 저장/);
     await page.locator('#source-form [name=title]').fill('테스트 자료');
     await page.locator('#source-form [name=publisher]').fill('테스트 기관');

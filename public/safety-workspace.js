@@ -174,9 +174,11 @@ async function importOfficialLaws() {
   try {
     const result = await api('/api/safety-knowledge/import-official-laws', { method: 'POST' });
     const sections = (result.imported || []).reduce((sum, item) => sum + Number(item.sections || 0), 0);
-    if ($('library-result')) $('library-result').textContent = `공식 법령 ${result.imported.length}종 · 조문/별표 ${sections.toLocaleString()}개를 저장했습니다.`;
+    const failed = (result.failed || []).map(item => `${item.title}: ${item.error}`).join(' / ');
+    // Refresh first: it re-renders the library, which would otherwise erase the result and failure list.
     await refreshKnowledge();
-    toast('공식 법령 현행본 적재 완료');
+    if ($('library-result')) $('library-result').textContent = `공식 법령 ${result.imported.length}종 · 조문/별표 ${sections.toLocaleString()}개를 저장했습니다.${failed ? ` 적재하지 못한 자료 ${result.failed.length}종 · ${failed}` : ''}`;
+    toast(failed ? `공식 법령 ${result.imported.length}종 적재 · ${result.failed.length}종 실패` : '공식 법령 현행본 적재 완료');
   } catch (error) { if ($('library-result')) $('library-result').textContent = error.message; }
   finally { button.disabled = false; }
 }

@@ -34,7 +34,47 @@ const OFFICIAL_SAFETY_SOURCES = [
     category: 'general',
     tags: ['위험성평가', '유해위험요인', '위험성 감소대책', '근로자 참여'],
   },
+  // Sources below back hazards a carrier can photograph inside a post office.
+  {
+    type: 'administrative-rule',
+    title: '근골격계부담작업의 범위 및 유해인자조사 방법에 관한 고시',
+    category: 'musculoskeletal',
+    tags: ['근골격계', '중량물', '반복작업', '부담작업', '소포', '작업대'],
+  },
+  {
+    type: 'administrative-rule',
+    title: '위험기계·기구 방호조치 기준',
+    category: 'inspections',
+    tags: ['방호장치', '컨베이어', '지게차', '끼임', '구동부', '덮개'],
+  },
+  {
+    type: 'administrative-rule',
+    title: '안전검사 고시',
+    category: 'inspections',
+    tags: ['안전검사', '컨베이어', '리프트', '크레인', '정기검사'],
+  },
+  {
+    type: 'administrative-rule',
+    title: '보호구 안전인증 고시',
+    category: 'general',
+    tags: ['보호구', '안전모', '안전화', '장갑', '보안경'],
+  },
+  {
+    type: 'law',
+    title: '소방시설 설치 및 관리에 관한 법률',
+    category: 'inspections',
+    tags: ['소방시설', '소화기', '비상구', '피난통로', '방화문', '적치물'],
+  },
+  {
+    type: 'law',
+    title: '화재의 예방 및 안전관리에 관한 법률',
+    category: 'inspections',
+    tags: ['화재예방', '화기취급', '가연물', '적치', '전기화재'],
+  },
 ];
+
+// Official titles differ only in spacing or middle-dot characters (·, ㆍ, ・) across listings.
+const sameTitle = (a, b) => String(a || '').replace(/[\s·ㆍ・‧∙]/g, '') === String(b || '').replace(/[\s·ㆍ・‧∙]/g, '');
 
 function arrayOf(value) {
   if (value == null) return [];
@@ -139,7 +179,7 @@ async function fetchJson(request, pathname, params, apiCode) {
 async function fetchLaw(source, request, apiCode) {
   const listPayload = await fetchJson(request, 'lawSearch.do', { target: 'eflaw', query: source.title, display: '100' }, apiCode);
   const candidates = arrayOf(listPayload?.LawSearch?.law);
-  const item = candidates.find(row => row.법령명한글 === source.title && row.현행연혁코드 === '현행');
+  const item = candidates.find(row => sameTitle(row.법령명한글, source.title) && row.현행연혁코드 === '현행');
   if (!item) throw new Error(`${source.title} 현행본을 찾지 못했습니다.`);
   const effectiveDate = isoDate(item.시행일자);
   const detail = await fetchJson(request, 'lawService.do', {
@@ -166,7 +206,7 @@ async function fetchAdministrativeRule(source, request, apiCode) {
     target: 'admrul', nw: '1', query: source.title, display: '100',
   }, apiCode);
   const candidates = arrayOf(listPayload?.AdmRulSearch?.admrul);
-  const item = candidates.find(row => row.행정규칙명 === source.title && row.현행연혁구분 === '현행');
+  const item = candidates.find(row => sameTitle(row.행정규칙명, source.title) && row.현행연혁구분 === '현행');
   if (!item) throw new Error(`${source.title} 현행본을 찾지 못했습니다.`);
   const detail = await fetchJson(request, 'lawService.do', {
     target: 'admrul', ID: item.행정규칙일련번호,
@@ -186,21 +226,27 @@ async function fetchAdministrativeRule(source, request, apiCode) {
   };
 }
 
-async function fetchOfficialSafetySources(env = process.env, request = fetch) {
+// One missing or renamed source must not block the others; failures are returned with their reason.
+async function fetchOfficialSafetySources(env = process.env, request = fetch, sources = OFFICIAL_SAFETY_SOURCES) {
   const apiCode = String(env.LAW_API_OC || 'test').trim();
-  const documents = [];
-  for (const source of OFFICIAL_SAFETY_SOURCES) {
-    const document = source.type === 'law'
-      ? await fetchLaw(source, request, apiCode)
-      : await fetchAdministrativeRule(source, request, apiCode);
-    if (!document.sections.length) throw new Error(`${source.title} 조문을 추출하지 못했습니다.`);
-    document.sections = uniqueSectionLocators(document.sections).map(section => ({
-      ...section,
-      content_hash: crypto.createHash('sha256').update(section.body).digest('hex'),
-    }));
-    documents.push(document);
+  const documents = [], failures = [];
+  for (const source of sources) {
+    try {
+      const document = source.type === 'law'
+        ? await fetchLaw(source, request, apiCode)
+        : await fetchAdministrativeRule(source, request, apiCode);
+      if (!document.sections.length) throw new Error(`${source.title} 조문을 추출하지 못했습니다.`);
+      document.sections = uniqueSectionLocators(document.sections).map(section => ({
+        ...section,
+        content_hash: crypto.createHash('sha256').update(section.body).digest('hex'),
+      }));
+      documents.push(document);
+    } catch (error) {
+      failures.push({ title: source.title, error: error.message });
+    }
   }
-  return documents;
+  if (!documents.length && failures.length) throw new Error(failures[0].error);
+  return { documents, failures };
 }
 
 module.exports = { OFFICIAL_SAFETY_SOURCES, fetchOfficialSafetySources };
