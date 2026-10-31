@@ -12,6 +12,8 @@
   const clause=(title+' '+locator).match(/제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*\([^)]*\))?(?:\s*제\s*\d+\s*항)?(?:\s*제\s*\d+\s*호)?/);
   // Technical standards such as NFTC cite numbered sections ("2.1.1") instead of articles.
   if(!clause&&officialLawSource(item)&&/(?:기준|지침)/.test(title)){const section=locator.match(/^\d+(?:\.\d+)+/);if(section)return [(title+' '+section[0]).trim()];}
+  // Annexes (별표) of laws are cited by their annex number, e.g. "산업안전보건법 시행규칙 별표 7".
+  if(!clause&&officialLawSource(item)){const annex=locator.match(/^별표\s*\d+(?:의\d+)?/);if(annex)return [(title.replace(/\s*별표.*$/,'').trim()+' '+annex[0]).trim()];}
   if(!clause||!(/(?:법|시행령|규칙)/.test(title)||(officialLawSource(item)&&/(?:고시|지침|기준)/.test(title))))return [];
   return [(title.replace(/\s*제\s*\d+\s*조.*$/,'').trim()+' '+clause[0]).trim()];
  }))]}

@@ -497,7 +497,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         .filter(ref => draftCitations.includes(ref)).slice(0, 8);
       const citedEvidence = evidence.filter(item => reviewedCitations.includes(item.ref)).slice(0, 8);
       const legalReferences = citedEvidence.filter(item => item.type === '승인된 법령' || ((item.type === '문서 본문' || item.type === '외부 공식자료') && (item.kind === 'law' || String(item.sourceUrl || '').startsWith('https://www.law.go.kr/')))).map(item => {
-        const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?|^\d+(?:\.\d+)+/);
+        const locator = String(item.locator || '').match(/제\s*\d+조(?:의\s*\d+)?(?:\s*\([^)]*\))?|^\d+(?:\.\d+)+|^별표\s*\d+(?:의\d+)?/);
         return locator?.[0]?.replace(/\s+/g, ' ').trim() || '';
       }).filter(Boolean);
       const causalCheck = ['pass', 'partial', 'fail'].includes(review.causalCheck) ? review.causalCheck : 'partial';
