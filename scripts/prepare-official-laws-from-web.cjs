@@ -32,20 +32,19 @@ async function frameUrl(page, source) {
 async function readDocument(page, source) {
   const url = await frameUrl(page, source);
   await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
+  // Large regulations fill their article blocks after the network goes idle.
+  await page.waitForSelector('.lawcon', { timeout: 120000 }).catch(() => {});
   const data = await page.evaluate(() => {
     const header = (document.body.innerText.match(/\[시행[^\]]*\]\s*\[[^\]]*\]/) || [''])[0];
     const title = (document.querySelector('#conTop h2, .lawtit, h2') || {}).innerText || '';
     let chapter = '';
     const articles = [];
-    for (const group of document.querySelectorAll('.pgroup')) {
-      const heading = group.querySelector('.gtit');
-      if (heading) {
-        const text = heading.innerText.replace(/\s+/g, ' ').trim();
+    // Chapter headings and article blocks are not always nested the same way; read them in document order.
+    for (const node of document.querySelectorAll('.gtit, .lawcon')) {
+      if (node.classList.contains('gtit')) {
+        const text = node.innerText.replace(/\s+/g, ' ').trim();
         if (/^제\d+장/.test(text)) chapter = text;
-        continue;
-      }
-      const content = group.querySelector('.lawcon');
-      if (content) articles.push({ chapter, text: content.innerText });
+      } else articles.push({ chapter, text: node.innerText });
     }
     return { header, title, articles };
   });
@@ -111,6 +110,11 @@ begin
   select v_document_id, item.version, item.locator, item.body, item.content_hash
   from jsonb_to_recordset(${quote(json)}::jsonb) as item(version text, locator text, body text, content_hash text)
   on conflict (document_id, version, locator) do update set body = excluded.body, content_hash = excluded.content_hash;
+
+  -- Superseded versions would otherwise be searched next to the current text; keep rows cited by assessments.
+  delete from public.safety_document_sections s
+  where s.document_id = v_document_id and s.version <> ${quote(metadata.source_version)}
+    and not exists (select 1 from public.safety_assessment_evidence e where e.section_id = s.id);
 end
 $upload$;
 `;
@@ -125,17 +129,26 @@ async function main() {
   });
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  const documents = [];
+  const documents = [], failures = [];
   try {
     for (const source of sources) {
-      const document = await readDocument(page, source);
+      // law.go.kr occasionally serves a partly rendered page; retry before giving up.
+      let document, lastError;
+      for (let attempt = 1; attempt <= 3 && !document; attempt++) {
+        try { document = await readDocument(page, source); }
+        catch (error) { lastError = error; console.error(`${source.title}: 재시도 ${attempt}/3 · ${error.message}`); }
+      }
+      if (!document) { failures.push(`${source.title}: ${lastError.message}`); continue; }
       console.log(`${document.metadata.title} · ${document.metadata.source_version} · 조문 ${document.sections.length}개`);
       documents.push(document);
     }
   } finally { await browser.close(); }
+  // Like the in-app import, keep what succeeded and report what did not.
+  if (failures.length) console.error(`적재하지 못한 자료 ${failures.length}종\n${failures.join('\n')}`);
+  if (!documents.length) { process.exitCode = 1; return; }
   const outDir = path.resolve(__dirname, '../local-import');
   fs.mkdirSync(outDir, { recursive: true });
-  const out = path.join(outDir, 'approved-official-laws.sql');
+  const out = path.join(outDir, process.env.OUT_FILE || 'approved-official-laws.sql');
   fs.writeFileSync(out, `-- 국가법령정보센터 공개 원문 ${documents.length}종. 다시 실행해도 같은 자료·조문을 갱신합니다.\nbegin;\n\n${documents.map(documentSql).join('\n')}\ncommit;\n`);
   console.log(out);
 }
