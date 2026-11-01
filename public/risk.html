@@ -422,7 +422,7 @@ function showResult(id){
  $('modal').classList.add('on');
 }
 function printResult(id){const it=R.registered.find(x=>x.id===id);return printRiskDocument('개선조치 이행 결과서',resultFormHtml(it))}
-// References numbered as the measures cite them ("(근거 n)"): laws, KOSHA guides, checklists and cases that support
+// References in the order the measures use them: laws, KOSHA guides, checklists and cases that support
 // a measure. Older drafts without per-measure links fall back to the cited statutes.
 function adviceReferences(d){return Array.isArray(d.references)&&d.references.length?d.references.map(item=>item.label):RiskReferences.legalReferences(d)}
 // One line on how the evidence was ordered, so the officer can tell a reranked draft from a fallback.
