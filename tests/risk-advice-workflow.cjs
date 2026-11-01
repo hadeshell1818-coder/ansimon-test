@@ -27,8 +27,8 @@ async function main() {
     }
     const prompt=body.messages[0].content;
     let result;
-    if(prompt.startsWith('질문 필요성을 재검토'))result={unresolvedMeaning:unresolvedMeaning && questions,queries:['운반 작업'],questions:[{question:'운반 방식은?',reason:'위험 대상 해석 불가'},{question:'설명한 설비는?',reason:'대상 설비 해석 불가'},{question:'세 번째 질문',reason:'제외해야 함'}]};
-    else if(prompt.startsWith('산업안전 위험 설명')) result={queries:['운반 작업'],critical,questions:questions?[{question:'설명한 운반 작업은 차량 운행인가요, 수작업 운반인가요?',reason:'서로 다른 위험 대상이라 안전대책의 적용 대상을 해석할 수 없습니다.'},{question:'추가 질문',reason:'추가 이유'}]:[]};
+    if(prompt.startsWith('질문 필요성을 재검토'))result={unresolvedMeaning:unresolvedMeaning && questions,queries:['운반 통로'],questions:[{question:'운반 방식은?',reason:'위험 대상 해석 불가'},{question:'설명한 설비는?',reason:'대상 설비 해석 불가'},{question:'세 번째 질문',reason:'제외해야 함'}]};
+    else if(prompt.startsWith('산업안전 위험 설명')) result={queries:['운반 통로'],critical,questions:questions?[{question:'설명한 운반 작업은 차량 운행인가요, 수작업 운반인가요?',reason:'서로 다른 위험 대상이라 안전대책의 적용 대상을 해석할 수 없습니다.'},{question:'추가 질문',reason:'추가 이유'}]:[]};
     else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질')) result={approvedReply:'수작업 조건에서 적재물 제거와 동선 분리를 검토하세요.',causalCheck:'pass',legalCheck:'pass',approvedMeasures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],approvedCitations:['external:0'],reviewSummary:'현장 대책 검토',additionalChecks:[]};
     else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
     return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};
@@ -71,7 +71,7 @@ async function main() {
   assert.match(docQuery,/review_status=eq\.approved/);
   const sectionQueries=calls.map(call=>decodeURIComponent(call.url)).filter(url=>url.includes('/rest/v1/safety_document_sections?'));
   assert.ok(sectionQueries.some(url=>/locator=ilike\.\*운반\*/.test(url)),'조문 제목 검색');
-  assert.ok(sectionQueries.some(url=>/and=\(body\.ilike\.\*운반\*,body\.ilike\.\*작업\*\)/.test(url)),'두 단어 동시 검색');
+  assert.ok(sectionQueries.some(url=>/and=\(body\.ilike\.\*운반\*,body\.ilike\.\*통로\*\)/.test(url)),'두 단어 동시 검색(일반어 작업·점검 등은 제외)');
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
   const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));

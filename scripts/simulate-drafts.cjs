@@ -78,27 +78,35 @@ async function run() {
   const modes = String(args.modes || 'words,meaning,rerank').split(',');
   const repo = createKnowledgeRepository(env);
   const done = new Set(readJsonl(RUNS).filter(row => !row.error).map(row => `${row.caseId}|${row.mode}`));
-  const jobs = allCases().flatMap(item => modes.map(mode => ({ item, mode }))).filter(job => !done.has(`${job.item.id}|${job.mode}`));
-  console.log(`실행할 초안 ${jobs.length}건 (이미 끝난 ${done.size}건 건너뜀)`);
+  // Per case: the words run extracts the search words; the other modes reuse them so only retrieval differs.
+  const previous = new Map(readJsonl(RUNS).filter(row => !row.error && row.mode === 'words').map(row => [row.caseId, row.queries]));
+  const cases = allCases().filter(item => modes.some(mode => !done.has(`${item.id}|${mode}`)));
+  console.log(`실행할 사례 ${cases.length}건 × 방식 ${modes.length} (이미 끝난 초안 ${done.size}건 건너뜀)`);
   let finished = 0;
-  await pool(jobs, Number(args.concurrency || 4), async ({ item, mode }) => {
+  const runOne = async (item, mode, queries) => {
     const started = Date.now();
     let row;
     try {
-      const result = await repo.recommendRisk({ description: item.text }, { evidenceMode: mode, diagnostics: true });
+      const result = await repo.recommendRisk({ description: item.text }, { evidenceMode: mode, diagnostics: true, ...(queries ? { queries } : {}) });
       const d = result.diagnostics || {};
       const byRef = new Map((d.delivered || []).map(entry => [entry.ref, entry]));
       row = { caseId: item.id, typeId: item.typeId, set: item.set, area: item.area, mode, ms: Date.now() - started,
-        status: result.status, needsClarification: Boolean(result.needsClarification), queries: d.queries || [],
+        status: result.status, needsClarification: Boolean(result.needsClarification), queries: d.queries || queries || [],
         candidates: d.candidates || [], delivered: d.delivered || [], rerank: d.rerank ? { kept: d.rerank.kept, candidates: d.rerank.candidates, error: d.rerank.error, dropped: d.rerank.dropped } : null,
-        draftCitations: d.draftCitations || [], cited: (d.reviewedCitations || []).map(ref => byRef.get(ref) || { ref }),
+        draftCited: (d.draftCitations || []).map(ref => byRef.get(ref) || { ref }), cited: (d.reviewedCitations || []).map(ref => byRef.get(ref) || { ref }),
         sifCited: (d.reviewedCitations || []).filter(ref => ref.startsWith('sif:')).length, measures: result.measures || [] };
     } catch (error) {
       row = { caseId: item.id, typeId: item.typeId, set: item.set, area: item.area, mode, ms: Date.now() - started, error: error.message };
     }
     fs.appendFileSync(RUNS, `${JSON.stringify(row)}\n`);
     finished += 1;
-    if (finished % 10 === 0 || row.error) console.log(`${finished}/${jobs.length} ${item.id} ${mode}${row.error ? ` 오류: ${row.error}` : ''}`);
+    if (finished % 10 === 0 || row.error) console.log(`${finished} ${item.id} ${mode}${row.error ? ` 오류: ${row.error}` : ''}`);
+    return row;
+  };
+  await pool(cases, Number(args.concurrency || 4), async item => {
+    let queries = previous.get(item.id);
+    if (modes.includes('words') && !done.has(`${item.id}|words`)) queries = (await runOne(item, 'words')).queries;
+    for (const mode of modes.filter(mode => mode !== 'words' && !done.has(`${item.id}|${mode}`))) await runOne(item, mode, queries?.length ? queries : undefined);
   });
 }
 
@@ -134,6 +142,36 @@ async function judge() {
   });
 }
 
+// Replay stored search words through the current retrieval code (no AI calls): share of expected grounds that
+// reach the word-search candidates. Compare runs with SAFETY_SEARCH_IDF=off (old ranking) and default.
+async function replay() {
+  const repo = createKnowledgeRepository(env);
+  const corpus = await corpusIndex();
+  const types = new Map(casesFile.types.map(type => [type.id, type]));
+  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
+  const tally = {}, failed = [];
+  await pool(rows, Number(args.concurrency || 4), async row => {
+    const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
+    let ranked;
+    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) }); }
+    catch (error) { failed.push(`${row.caseId}: ${error.message.slice(0, 80)}`); return; }
+    // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
+    const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
+    const top10 = [...laws.slice(0, 6), ...guides.slice(0, 4)], top4 = [...laws.slice(0, 2), ...guides.slice(0, 2)];
+    const t = tally[row.set] ||= { existing: 0, all: 0, top10: 0, top4: 0 };
+    for (const expect of types.get(row.typeId).expect) {
+      if (!corpus.some(item => matches(expect, item))) continue;
+      t.existing += 1;
+      if (ranked.some(item => matches(expect, item))) t.all += 1;
+      if (top10.some(item => matches(expect, item))) t.top10 += 1;
+      if (top4.some(item => matches(expect, item))) t.top4 += 1;
+    }
+  });
+  const pct = (a, b) => `${a}/${b} (${Math.round(a / b * 100)}%)`;
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}`,
+    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))), `실패 ${failed.length}건`, failed.slice(0, 3).join(' / '));
+}
+
 async function report() {
   const corpus = await corpusIndex();
   const types = new Map(casesFile.types.map(type => [type.id, type]));
@@ -147,7 +185,7 @@ async function report() {
   for (const row of runs) {
     const type = types.get(row.typeId);
     const key = `${row.mode}|${row.set}`;
-    const s = summary[key] ||= { mode: row.mode, set: row.set, drafts: 0, expectations: 0, missingMaterial: 0, existing: 0, candidate: 0, delivered: 0, cited: 0,
+    const s = summary[key] ||= { mode: row.mode, set: row.set, drafts: 0, expectations: 0, missingMaterial: 0, existing: 0, candidate: 0, delivered: 0, draftCited: 0, cited: 0,
       citedDocs: 0, unexpected: 0, relevant: 0, partial: 0, irrelevant: 0, unjudged: 0, reviewRequired: 0, ms: 0, byArea: {} };
     const a = s.byArea[row.area] ||= { existing: 0, delivered: 0, cited: 0, irrelevant: 0 };
     s.drafts += 1; s.ms += row.ms; if (row.status === 'review_required') s.reviewRequired += 1;
@@ -157,7 +195,9 @@ async function report() {
       s.existing += 1; a.existing += 1;
       const inCandidates = row.candidates.some(item => matches(expect, item));
       const inDelivered = row.delivered.some(item => matches(expect, item));
+      const inDraft = (row.draftCited || []).some(item => item.title && matches(expect, item));
       const inCited = row.cited.some(item => item.title && matches(expect, item));
+      if (inDraft) s.draftCited += 1;
       if (inCandidates) s.candidate += 1;
       if (inDelivered) { s.delivered += 1; a.delivered += 1; }
       if (inCited) { s.cited += 1; a.cited += 1; }
@@ -175,10 +215,10 @@ async function report() {
   }
   const pct = (part, whole) => whole ? `${Math.round(part / whole * 100)}%` : '-';
   const lines = ['# 초안 시뮬레이션 결과', '', `실행 ${runs.length}건, 오류 ${errors.length}건. 기대 근거는 저장소와 무관하게 정했다(seed-assets/draft-simulation-cases.json).`, '',
-    '| 방식 | 세트 | 초안 | 기대 근거 | 자료 없음 | 후보에 있음 | 초안에 전달 | 인용됨 | 기대 밖 인용 | 그중 엉뚱함 | 일반 수준 | 타당 | 미판정 | 재검토 필요 초안 | 평균 초 |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+    '| 방식 | 세트 | 초안 | 기대 근거 | 자료 없음 | 후보에 있음 | 초안에 전달 | 초안 인용 | 재검토 후 인용 | 기대 밖 인용 | 그중 엉뚱함 | 일반 수준 | 타당 | 미판정 | 재검토 필요 초안 | 평균 초 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const s of Object.values(summary).sort((a, b) => a.set.localeCompare(b.set) || a.mode.localeCompare(b.mode))) {
-    lines.push(`| ${s.mode} | ${s.set} | ${s.drafts} | ${s.expectations} | ${s.missingMaterial} | ${s.candidate}/${s.existing} (${pct(s.candidate, s.existing)}) | ${s.delivered}/${s.existing} (${pct(s.delivered, s.existing)}) | ${s.cited}/${s.existing} (${pct(s.cited, s.existing)}) | ${s.unexpected}/${s.citedDocs} | ${s.irrelevant} | ${s.partial} | ${s.relevant} | ${s.unjudged} | ${s.reviewRequired} | ${Math.round(s.ms / s.drafts / 1000)} |`);
+    lines.push(`| ${s.mode} | ${s.set} | ${s.drafts} | ${s.expectations} | ${s.missingMaterial} | ${s.candidate}/${s.existing} (${pct(s.candidate, s.existing)}) | ${s.delivered}/${s.existing} (${pct(s.delivered, s.existing)}) | ${s.draftCited}/${s.existing} (${pct(s.draftCited, s.existing)}) | ${s.cited}/${s.existing} (${pct(s.cited, s.existing)}) | ${s.unexpected}/${s.citedDocs} | ${s.irrelevant} | ${s.partial} | ${s.relevant} | ${s.unjudged} | ${s.reviewRequired} | ${Math.round(s.ms / s.drafts / 1000)} |`);
   }
   lines.push('', '## 업무 구역별 (초안 전달 / 인용 / 엉뚱한 인용)', '');
   const areas = [...new Set(casesFile.types.map(type => type.area))];
@@ -199,6 +239,7 @@ async function report() {
 (async () => {
   if (args.judge) await judge();
   else if (args.report) await report();
+  else if (args.replay) await replay();
   else if (args.corpus) { const index = await corpusIndex(); console.log(`조문 ${index.length}건`); }
   else await run();
 })().catch(error => { console.error(error); process.exitCode = 1; });
