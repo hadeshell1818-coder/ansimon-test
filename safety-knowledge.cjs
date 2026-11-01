@@ -217,13 +217,30 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // correct citations without adding wrong ones, drafts use the word search only (evidence mode below).
   // The accuracy check and indexing still measure it whenever an OpenAI key is configured.
   const semanticAvailable = () => Boolean(configured && env.OPENAI_API_KEY && env.SAFETY_SEMANTIC_SEARCH !== 'off');
-  // Evidence modes (docs/working-rules.md §2-1): 'words' word search only (default), 'meaning' word + semantic
-  // candidates, 'rerank' word + semantic candidates then an AI step keeps only sections that apply to the report.
-  // SAFETY_EVIDENCE_MODE picks the production mode; SAFETY_SEMANTIC_SEARCH=on keeps meaning 'meaning'.
-  const EVIDENCE_MODES = ['words', 'meaning', 'rerank'];
+  // Evidence modes (docs/working-rules.md §2-1, §2-2):
+  //   'cohere'  word + semantic (HyDE) candidates, about 50, reordered by the Cohere Rerank API (default when
+  //             COHERE_API_KEY is set; measured top-4 right ground 70/79% → 90/87% on 198 cases, 0.3-0.6 s)
+  //   'words'   word search only (default without a Cohere key)
+  //   'meaning' word + semantic candidates;  'rerank' GPT selection (measured worse, kept only for comparison)
+  const EVIDENCE_MODES = ['words', 'meaning', 'rerank', 'cohere'];
   const evidenceModeFor = requested => EVIDENCE_MODES.includes(requested) ? requested
     : EVIDENCE_MODES.includes(env.SAFETY_EVIDENCE_MODE) ? env.SAFETY_EVIDENCE_MODE
-      : env.SAFETY_SEMANTIC_SEARCH === 'on' ? 'meaning' : 'words';
+      : env.COHERE_API_KEY ? 'cohere' : env.SAFETY_SEMANTIC_SEARCH === 'on' ? 'meaning' : 'words';
+  // Stage ③ (rerank) with the Cohere Rerank API: one call scores every candidate against the report. A failure or a
+  // reply slower than SAFETY_RERANK_TIMEOUT_MS (3 s) falls back to the search order; the draft never waits on it.
+  async function cohereRerank(query, items) {
+    const started = Date.now();
+    const response = await send('재순위(Cohere)', 'https://api.cohere.com/v2/rerank', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.COHERE_API_KEY}` },
+      body: JSON.stringify({ model: env.SAFETY_RERANK_MODEL || 'rerank-v3.5', query: String(query).slice(0, 2000),
+        documents: items.map(item => `${item.title || ''} ${item.locator || ''}\n${String(item.body || '').slice(0, 800)}`), top_n: items.length }),
+      signal: AbortSignal.timeout(Number(env.SAFETY_RERANK_TIMEOUT_MS || 3000)),
+    });
+    if (!response.ok) throw new Error(`재순위 실패 (${response.status}). ${(await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160)}`);
+    const data = await response.json();
+    return { ordered: (data.results || []).map(row => items[row.index]).filter(Boolean), ms: Date.now() - started };
+  }
   // HyDE (stage ①/②): a short hypothetical passage in statute style, used only as semantic-search text so a short
   // field note ("정화조 점검하러 맨홀 들어감") is compared with articles in their own wording. Never cited or shown.
   async function hypotheticalPassage(description) {
@@ -714,12 +731,28 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const useSemantic = evidenceMode !== 'words' && semanticAvailable();
       if (evidenceMode !== 'words' && !semanticAvailable()) semanticError = '의미 검색 미설정: 단어 검색 후보만 사용';
       if (!reused && useSemantic) {
-        semantic = await semanticSearch([description, body.process, ...queries].filter(Boolean).join('\n'))
+        // Cohere mode adds a statute-style hypothetical passage (HyDE) to the meaning search; it is never cited.
+        const passage = evidenceMode === 'cohere' ? await hypotheticalPassage(description).catch(() => '') : '';
+        semantic = await semanticSearch([description, body.process, passage || queries.join(' ')].filter(Boolean).join('\n'))
           .catch(error => { semanticError = error.message; return null; });
       }
-      let ranked = reused || !configured ? { laws: [], guides: [] } : await searchApprovedSections(queries, semantic?.sections || [], { wide: evidenceMode === 'rerank' }).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
+      const widePool = evidenceMode === 'rerank' || evidenceMode === 'cohere';
+      let ranked = reused || !configured ? { laws: [], guides: [] } : await searchApprovedSections(queries, semantic?.sections || [], { wide: widePool }).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
+      const wordSearchPath = ranked.rankedSearch || null;
       const candidatePool = [...ranked.laws.map(item => ({ ...item, pool: 'law' })), ...ranked.guides.map(item => ({ ...item, pool: 'guide' }))];
       let rerank = null;
+      if (!reused && evidenceMode === 'cohere' && candidatePool.length) {
+        // The draft gets the reranked top 6 statutes and top 4 guides (the measured top 10; 97/94% held a right ground).
+        const keepLaws = Number(env.SAFETY_RERANK_LAWS || 6), keepGuides = Number(env.SAFETY_RERANK_GUIDES || 4);
+        try {
+          const { ordered, ms } = await cohereRerank([description, body.process].filter(Boolean).join('\n'), candidatePool);
+          ranked = { laws: ordered.filter(item => item.pool === 'law').slice(0, keepLaws), guides: ordered.filter(item => item.pool === 'guide').slice(0, keepGuides) };
+          rerank = { provider: 'cohere', candidates: candidatePool.length, kept: ranked.laws.length + ranked.guides.length, ms, error: '' };
+        } catch (error) {
+          rerank = { provider: 'cohere', candidates: candidatePool.length, kept: 0, ms: 0, error: /TimeoutError|aborted/i.test(`${error.name} ${error.message}`) ? '재순위 응답 지연: 검색 순서 사용' : `재순위 실패: 검색 순서 사용 · ${error.message}` };
+          ranked = { laws: ranked.laws.filter(item => !item.matchedBy).slice(0, 12), guides: ranked.guides.filter(item => !item.matchedBy).slice(0, 8) };
+        }
+      }
       if (!reused && evidenceMode === 'rerank' && candidatePool.length) {
         // AI selection: semantic search also returns look-alike sections, so every candidate is read against the
         // report and only applicable ones reach the draft. On failure the word-search order is kept (12 laws, 8 guides).
@@ -863,7 +896,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         noEvidence: evidence.length === 0,
         sourceOrigin,
         answers,
-        internalSearch: { configured, errors: searchErrors, mode: evidenceMode, wordSearch: ranked.rankedSearch || null, rerank: rerank ? { candidates: rerank.candidates, kept: rerank.kept, error: rerank.error } : null,
+        internalSearch: { configured, errors: searchErrors, mode: evidenceMode, wordSearch: wordSearchPath, rerank: rerank ? { provider: rerank.provider || 'gpt', candidates: rerank.candidates, kept: rerank.kept, ms: rerank.ms || 0, error: rerank.error } : null,
           semantic: reused ? { reused: true } : { used: Boolean(semantic), error: semanticError || (evidenceMode !== 'words' ? '' : (semanticAvailable() ? '초안에는 의미 검색을 쓰지 않음(SAFETY_EVIDENCE_MODE=meaning 또는 rerank일 때만)' : '의미 검색 미설정')) } },
         ...(options.diagnostics ? { diagnostics: {
           mode: evidenceMode, queries, refinement,
