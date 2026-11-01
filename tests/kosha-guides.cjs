@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { cleanLines, guideSections } = require('../scripts/prepare-kosha-guides.cjs');
+const { cleanLines, guideSections, transcribedSections } = require('../scripts/prepare-kosha-guides.cjs');
 
 // Shaped like pdftotext output of a KOSHA GUIDE: contents page, a heading split over two lines,
 // a quoted law excerpt with numbered items and an annex, an inline appendix reference, then appendices.
@@ -27,4 +27,11 @@ assert.match(sections[3].body, /^\[4\. 사다리 작업\]\n4\.1 설치\n[\s\S]*<
 assert(!sections.some(section => /KOSHA GUIDE|X - G|- \d -/.test(section.body)), 'running headers and page numbers removed');
 assert(sections.every(section => /^[0-9a-f]{64}$/.test(section.content_hash)));
 assert.deepEqual(guideSections(cleanLines('그림으로만 된 PDF\n- 1 -', 'X-G-2-2026')), [], 'image-only PDFs yield no sections instead of guesses');
+// A heading number alone on its line ("1." / "목적") still opens the section (W-26-2023 layout).
+const split = guideSections(['1.', '목적', '이 지침은 환기에 관한 사항을 정한다.', '2. 적용 범위', '이 지침은 급식시설에 적용한다.']);
+assert.deepEqual(split.map(section => section.locator), ['1. 목적', '2. 적용 범위']);
+// Hand-copied image PDFs: '## heading' lines become sections; empty headings are dropped.
+const copied = transcribedSections('## 4.1 넘어짐\n(1) 위험요소\n## 빈 제목\n## 5.1 사업주의 책무\n(1) 정기 점검');
+assert.deepEqual(copied.map(section => section.locator), ['4.1 넘어짐', '5.1 사업주의 책무']);
+assert.match(copied[0].body, /^4\.1 넘어짐\n\(1\) 위험요소$/);
 console.log('PASS: KOSHA GUIDE sections follow the contents page, keep quoted law text and inline references, skip image-only PDFs');

@@ -144,32 +144,62 @@ async function judge() {
 
 // Replay stored search words through the current retrieval code (no AI calls): share of expected grounds that
 // reach the word-search candidates. Compare runs with SAFETY_SEARCH_IDF=off (old ranking) and default.
+// One call per case: which candidates directly apply to the report (gpt-4.1-mini, a different model from drafts).
+async function judgeDirect(situation, items) {
+  const bodies = await Promise.all(items.map(item => supabase('safety_document_sections', `?select=body&id=eq.${item.ref.slice(4)}`).then(rows => rows[0]?.body || '').catch(() => '')));
+  const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: args['judge-model'] || 'gpt-4.1-mini', temperature: 0, response_format: { type: 'json_object' }, messages: [
+      { role: 'system', content: '산업안전 위험성평가 근거를 판정합니다. 담당자가 적은 위험 상황에 대해 후보 조문·지침 중 그 위험의 원인·의무·개선대책에 직접 적용되는 것의 번호만 고르세요. 일반 원칙 수준만 맞거나 대상·작업·설비가 다른 것은 고르지 마세요. JSON: {"direct":[번호]}' },
+      { role: 'user', content: JSON.stringify({ situation, candidates: items.map((item, index) => ({ no: index + 1, title: item.title, locator: item.locator, text: bodies[index].slice(0, 600) })) }) },
+    ] }) }).catch(() => null);
+  if (!response?.ok) return [];
+  const verdict = JSON.parse((await response.json()).choices[0].message.content);
+  const chosen = (Array.isArray(verdict.direct) ? verdict.direct : []).map(no => items[Number(no) - 1]).filter(Boolean);
+  // Kept for spot checks of the judge (re-review rule): situation, chosen and rejected candidates.
+  fs.appendFileSync(path.join(OUT, 'judge-top.jsonl'), `${JSON.stringify({ situation, direct: chosen.map(item => `${item.title} ${item.locator}`), rejected: items.filter(item => !chosen.includes(item)).map(item => `${item.title} ${item.locator}`) })}\n`);
+  return chosen.map(item => item.ref);
+}
+
 async function replay() {
   const repo = createKnowledgeRepository(env);
   const corpus = await corpusIndex();
   const types = new Map(casesFile.types.map(type => [type.id, type]));
-  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
+  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length)
+    .filter((row, index) => !args.limit || index % Math.ceil(317 / Number(args.limit)) === 0);
   const tally = {}, failed = [];
   await pool(rows, Number(args.concurrency || 4), async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
     let ranked;
-    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) }); }
+    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}), ...(args.wide ? { wide: true } : {}), ...(args.rerank ? { rerankFor: text } : {}), ...(args.hyde ? { hyde: true } : {}) }); }
     catch (error) { failed.push(`${row.caseId}: ${error.message.slice(0, 80)}`); return; }
     // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
     const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
     const top10 = [...laws.slice(0, 6), ...guides.slice(0, 4)], top4 = [...laws.slice(0, 2), ...guides.slice(0, 2)];
-    const t = tally[row.set] ||= { existing: 0, all: 0, top10: 0, top4: 0 };
-    for (const expect of types.get(row.typeId).expect) {
-      if (!corpus.some(item => matches(expect, item))) continue;
+    const t = tally[row.set] ||= { existing: 0, all: 0, top10: 0, top4: 0, cases: 0, ok10: 0, ok4: 0, law6: 0, law2: 0 };
+    const expects = types.get(row.typeId).expect.filter(expect => corpus.some(item => matches(expect, item)));
+    for (const expect of expects) {
       t.existing += 1;
       if (ranked.some(item => matches(expect, item))) t.all += 1;
       if (top10.some(item => matches(expect, item))) t.top10 += 1;
       if (top4.some(item => matches(expect, item))) t.top4 += 1;
     }
+    // Corrected scoring (--judge-top): an item counts when it matches an expectation OR a larger model judges it
+    // directly applicable; the case succeeds when its top 10 (top 4) holds at least one such item.
+    if (args['judge-top']) {
+      const direct = new Set(top10.filter(item => expects.some(expect => matches(expect, item))).map(item => item.ref));
+      const unjudged = top10.filter(item => !direct.has(item.ref));
+      if (unjudged.length) (await judgeDirect(text, unjudged)).forEach(ref => direct.add(ref));
+      t.cases += 1;
+      if (top10.some(item => direct.has(item.ref))) t.ok10 += 1;
+      if (top4.some(item => direct.has(item.ref))) t.ok4 += 1;
+      if (laws.slice(0, 6).some(item => direct.has(item.ref))) t.law6 += 1;
+      if (laws.slice(0, 2).some(item => direct.has(item.ref))) t.law2 += 1;
+    }
   });
   const pct = (a, b) => `${a}/${b} (${Math.round(a / b * 100)}%)`;
-  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}`,
-    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))), `실패 ${failed.length}건`, failed.slice(0, 3).join(' / '));
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}${args.hyde ? ' + HyDE' : ''}${args.wide ? ' + 넓은 후보' : ''}${args.rerank ? ' + AI 골라내기' : ''}`,
+    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing),
+      ...(v.cases ? { '사례별 상위10 맞는근거': pct(v.ok10, v.cases), '사례별 상위4 맞는근거': pct(v.ok4, v.cases), '직접적용 법령 상위6': pct(v.law6, v.cases), '직접적용 법령 상위2': pct(v.law2, v.cases) } : {}) }]))), `실패 ${failed.length}건`, failed.slice(0, 3).join(' / '));
 }
 
 async function report() {

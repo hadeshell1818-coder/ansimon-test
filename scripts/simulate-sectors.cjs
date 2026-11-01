@@ -91,14 +91,14 @@ async function extract() {
 }
 
 async function rank() {
-  const tag = args.tag || ['words', args.semantic && 'semantic', args.refine && 'refine'].filter(Boolean).join('+');
+  const tag = args.tag || ['words', args.semantic && 'semantic', args.refine && 'refine', args.wide && 'wide', args.rerank && 'rerank'].filter(Boolean).join('+');
   const file = path.join(OUT, `rank-${tag}.jsonl`);
   const queries = new Map(readJsonl(path.join(OUT, 'queries.jsonl')).filter(row => row.queries).map(row => [row.id, row.queries]));
   const done = new Set(readJsonl(file).map(row => row.id));
   const todo = allRuns().filter(run => queries.has(run.id) && !done.has(run.id));
   await pool(todo, Number(args.concurrency || 4), async run => {
     try {
-      const ranked = await repo.rankEvidence(queries.get(run.id), { ...(args.semantic ? { semanticText: run.text } : {}), ...(args.refine ? { refineFor: run.text } : {}) });
+      const ranked = await repo.rankEvidence(queries.get(run.id), { ...(args.semantic ? { semanticText: run.text } : {}), ...(args.refine ? { refineFor: run.text } : {}), ...(args.wide ? { wide: true } : {}), ...(args.rerank ? { rerankFor: run.text } : {}) });
       const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
       const position = guides.findIndex(item => item.ref === `doc:${run.item.sectionId}`);
       fs.appendFileSync(file, `${JSON.stringify({ id: run.id, set: run.set, sector: run.item.sector, checklistRank: position, guides: guides.length, laws: laws.slice(0, 6) })}\n`);
