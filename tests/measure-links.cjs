@@ -15,30 +15,53 @@ async function main() {
     kosha: [{ id: 'g64', document_id: 'kosha', version: 'v1', locator: '6.4 계단 디딤면의 미끄럼 방지', body: '계단 디딤면 미끄럼방지 테이프' },
       { id: 'c5', document_id: 'list', version: 'v1', locator: '청사·사무 · 청사·사무실·출퇴근 · 항목 5', body: item(5) },
       { id: 'c6', document_id: 'list', version: 'v1', locator: '청사·사무 · 청사·사무실·출퇴근 · 항목 6', body: item(6) }] };
+  const calls = [];
+  let noRefs = false, noVerdict = false;
   const request = async (url, options = {}) => {
     const href = decodeURIComponent(String(url)), body = options.body ? JSON.parse(options.body) : {};
+    if (body.messages) calls.push(body);
     if (href.includes('/rpc/search_safety_sections')) return json(body.law_only ? sections.rule : sections.kosha);
     if (href.includes('/safety_documents?')) return json(docs);
     if (body.messages) {
       const first = body.messages[0].content;
       const content = first.startsWith('산업안전 위험 설명') ? { queries: ['계단 미끄러움', '전도의 방지'], critical: false, questions: [] }
-        : first.startsWith('당신은 산업안전 위험성평가 초안의 품질') ? { causalCheck: 'pass', legalCheck: 'pass', reviewSummary: 'ok', additionalChecks: [],
-          approvedMeasures: [{ text: '계단 디딤판에 미끄럼방지 테이프 부착', refs: ['doc:g64', 'doc:a26', 'doc:c5'] }, { text: '계단 주변 물기 즉시 제거', refs: ['doc:a3', 'doc:c6'] }] }
-          : { factor: '계단 미끄러짐', measures: [{ text: '계단 디딤판에 미끄럼방지 테이프 부착', refs: ['doc:g64', 'doc:c5'] }, { text: '계단 주변 물기 즉시 제거', refs: ['doc:a3', 'doc:c6'] }, { text: '직원 안전교육', refs: [] }], citations: ['doc:a26'], limitations: '' };
+        : first.startsWith('당신은 산업안전 위험성평가 초안의 품질') ? noVerdict ? { causalCheck: 'pass' } : noRefs ? { causalCheck: 'pass', measures: [{ no: 1, logical: true, refs: ['doc:g64'] }, { no: 2, logical: true, refs: [] }] } : { causalCheck: 'pass', note: '계단 디딤면 상태를 현장에서 확인',
+          measures: [{ no: 1, logical: true, refs: ['doc:g64', 'doc:c5'] }, { no: 2, logical: true, refs: ['doc:a3', 'doc:c6'] }, { no: 3, logical: true, refs: [] }, { no: 4, logical: false, refs: [] }] }
+          : noRefs ? { factor: '계단 미끄러짐', measures: ['계단 디딤면에 미끄럼방지 테이프', '직원 안전교육'], citations: [], limitations: '' }
+          : { factor: '계단 미끄러짐', measures: [{ text: '계단 디딤판에 미끄럼방지 테이프 부착', refs: ['doc:g64', 'doc:a26', 'doc:c5'] }, { text: '계단 주변 물기 즉시 제거', refs: ['doc:a3', 'doc:c6'] }, { text: '직원 안전교육', refs: [] }, { text: '계단 난간을 새로 칠한다', refs: [] }], citations: ['doc:a26'], limitations: '' };
       return json({ choices: [{ message: { content: JSON.stringify(content) } }] });
     }
     return json([]);
   };
   const repo = createKnowledgeRepository({ SAFETY_SUPABASE_URL: 'https://t.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'k', OPENAI_API_KEY: 'k', SAFETY_EXTERNAL_SEARCH: 'off' }, request);
-  const advice = await repo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함' });
-  // doc:a26 (계단의 강도) was only a whole-draft citation, never a measure's ref, so the review cannot attach it.
+  const stages = [];
+  const advice = await repo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함' }, { onStage: name => stages.push(name) });
+  // The screen shows the server's real stages in order, and the result says how long each took.
+  assert.deepEqual(stages, ['understand', 'search', 'draft', 'review']);
+  assert.deepEqual(advice.timing.stages.map(item => item.stage), stages);
+  assert.ok(advice.timing.totalMs >= 0 && advice.timing.stages.every(item => Number.isFinite(item.ms)));
+  // The light review answers by number: it drops doc:a26 (계단의 강도) from measure 1 and the illogical measure 4.
   assert.deepEqual(advice.measureLinks.map(item => item.refs), [['doc:g64', 'doc:c5'], ['doc:a3', 'doc:c6'], []]);
   assert.deepEqual(advice.references.map(item => item.label), ['KOSHA GUIDE A-G-2-2025 작업장 내 통로(경사로, 계단, 발판사다리) 선정 및 설치 - 6.4 계단 디딤면의 미끄럼 방지',
     '우체국 작업 위험요인 점검표(청사·사무실·출퇴근): 계단 미끄러짐·넘어짐', '산업안전보건기준에 관한 규칙 제3조(전도의 방지)']);
   assert.deepEqual(advice.references.map(item => item.measures), [[1], [1, 2], [2]], 'the two identical checklist items are one reference supporting measures 1 and 2');
   assert.ok(advice.references.every(item => !/항목 \d/.test(item.label)), 'no storage address in 관련근거');
-  assert.deepEqual(advice.measures, ['계단 디딤판에 미끄럼방지 테이프 부착', '계단 주변 물기 즉시 제거', '직원 안전교육'], 'plain text; the general measure the review dropped comes back for staff to choose');
+  assert.deepEqual(advice.measures, ['계단 디딤판에 미끄럼방지 테이프 부착', '계단 주변 물기 즉시 제거', '직원 안전교육'], 'plain text; general measures stay, the illogical one is dropped');
+  assert.equal(advice.review.droppedMeasures, 1); assert.deepEqual(advice.review.additionalChecks, ['계단 디딤면 상태를 현장에서 확인']);
+  const reviewInput = JSON.parse(calls.find(call => call.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')).messages[1].content);
+  assert.deepEqual(reviewInput.measures.map(item => item.no), [1, 2, 3, 4], 'the review sees numbered measures');
+  assert.ok(!('evidenceFramework' in reviewInput) && reviewInput.evidence.every(item => item.excerpt !== undefined), 'only cited sources with excerpts, no full evidence list');
   assert.ok(!advice.citations.includes('doc:a26'), 'a statute that supports no measure is not cited');
-  console.log('PASS: measures keep their supporting references; unsupported refs dropped; readable 관련근거 labels; identical checklist items merged; plain measure text');
+  // A draft that cites nothing although sources were delivered: the review picks each measure's sources from them,
+  // and without a verdict the offered sources are not attached.
+  noRefs = true;
+  const picked = await repo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함', refreshSources: true });
+  assert.deepEqual(picked.measureLinks.map(item => item.refs), [['doc:g64'], []]);
+  const offeredInput = JSON.parse(calls.filter(call => call.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')).at(-1).messages[1].content);
+  assert.ok(offeredInput.measures[0].refs.length > 1, 'delivered sources are offered to the review');
+  noVerdict = true;
+  const unchecked = await repo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함', refreshSources: true });
+  assert.deepEqual(unchecked.measureLinks.map(item => item.refs), [[], []]);
+  console.log('PASS: light review by number drops unsupported refs and illogical measures; readable 관련근거 labels; identical checklist items merged; plain measure text; uncited drafts get sources only through the review');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

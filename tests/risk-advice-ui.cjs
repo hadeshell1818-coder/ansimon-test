@@ -17,10 +17,11 @@ async function main(){
    if(url.pathname==='/api/me')data={user:{id:'manager',kind:'safety_mgr',name:'담당자'}};
    if(url.pathname==='/api/risk/state')data={inbox:[],registered:[item],processes:[],hazardTypes:{},criteria:{levels:[{value:'상',allow:false},{value:'중',allow:false},{value:'하',allow:true}]}};
    if(url.pathname==='/api/safety-knowledge')data={connected:false,documents:[],candidates:[],message:'외부 검색 사용 가능'};
+   if(url.pathname.startsWith('/api/safety-knowledge/recommend/progress/'))data={stage:'search'};
    if(url.pathname==='/api/safety-knowledge/recommend'){
     const body=route.request().postDataJSON();requests.push(body);recommendCount++;
     if(recommendCount===1){await pending;data={needsClarification:true,questions:[{question:'운반물 무게와 하루 횟수는?',reason:'노출 부하 확인'}]};}
-    else data={factor:'AI가 다르게 표현한 위험요인',evidenceSession:'test-evidence-session',measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'산업안전보건법',locator:'제36조',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
+    else data={factor:'AI가 다르게 표현한 위험요인',evidenceSession:'test-evidence-session',timing:{totalMs:16200,stages:[{stage:'understand',ms:1800},{stage:'search',ms:4100},{stage:'draft',ms:5900},{stage:'review',ms:2000}]},measures:['담당자가 작업 전 출입구 적재물을 제거하고 보행 동선을 표시한다.'],citations:['external:0'],evidence:[{ref:'external:0',title:'산업안전보건법',locator:'제36조',sourceUrl:'https://www.kosha.or.kr/guide',type:'외부 공식자료'}],rationale:'운반 통로를 확보해 충돌 노출을 줄인다.',limitations:'통로 폭은 현장에서 확인',review:{passed:true,needsAttention:false,additionalChecks:['폭 확인']},sourceOrigin:'external',externalSources:[]};
    }
    if(url.pathname==='/api/risk/items/K1'){const body=route.request().postDataJSON();Object.assign(item,body);data={item};}
    await route.fulfill({json:data});
@@ -32,10 +33,14 @@ async function main(){
   await page.locator('#risk-advice-button').click();
   await page.waitForFunction(()=>document.querySelector('#risk-advice-button').textContent==='작성중…');
   assert.equal(await page.locator('#risk-advice-button').isDisabled(),true);
+  // While the draft runs, the server's current stage is shown with a seconds counter.
+  await page.getByText('2. 근거 찾기 중…').waitFor();
+  assert.match(await page.locator('#risk-advice-result').innerText(),/AI 초안 작성 중 · \d+초[\s\S]*✓ 1\. 위험 이해[\s\S]*3\. 초안 작성[\s\S]*4\. 검토/);
   release();await page.locator('#risk-answer-0').waitFor();
   await page.locator('#risk-answer-0').fill('한 개 10kg, 하루 20회');
   await page.getByRole('button',{name:'초안 작성 계속'}).click();
   await page.getByText('개선대책과 관련근거 초안',{exact:true}).waitFor();
+  await page.getByText('소요 시간: 16.2초 (위험 이해 1.8초 · 근거 찾기 4.1초 · 초안 작성 5.9초 · 검토 2.0초)').waitFor();
   assert.equal(requests[1].answers[0].answer,'한 개 10kg, 하루 20회');
   assert.equal(item.factor,'소포 운반 작업 중 통로 충돌 위험','AI가 원본 위험요인을 덮어쓰지 않음');
   assert.match(item.referenceText,/산업안전보건법 제36조/);assert.ok(!item.referenceText.includes('https://'));
