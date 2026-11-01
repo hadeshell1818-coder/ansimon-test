@@ -92,10 +92,28 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       .filter(term => term.length >= 2 && !(idf && GENERIC_TERMS.has(term))).slice(0, 12);
     const phrases = queries.map(query => String(query).trim()).filter(query => /\s/.test(query));
     const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&limit=1000');
+    let rankedFound = [];
     const select = '?select=id,document_id,version,locator,body';
     const like = term => `*${encodeURIComponent(term)}*`;
-    // Supabase returns ilike matches unordered and cut at the limit, so a common word (e.g. 밀폐공간 in dozens of
-    // KOSHA sections) could fill the 30 rows and hide the statute articles. Statutes get their own queries.
+    // How many stored sections contain each word (for rare-word weighting). Unknown counts fall back to weight 1.
+    sectionTotal ||= await countRows('safety_document_sections', '?select=id').catch(() => 0);
+    const frequency = new Map(sectionTotal ? await Promise.all(words.map(async term => [term,
+      await countRows('safety_document_sections', `?select=id&or=(body.ilike.${like(term)},locator.ilike.${like(term)})`).catch(() => null)])) : []);
+    // Ranked search inside Supabase (supabase/008_ranked_word_search.sql): every approved current section is scored,
+    // so a common word can no longer cut the right article out of an unordered 30-row page. Statutes and other
+    // material are ranked separately. Without 008 the older per-word fetch below is used and the reason is kept.
+    const weights = words.map(term => { const df = frequency.get(term); return idf && sectionTotal && Number.isFinite(df) ? 1 + Math.log((sectionTotal + 1) / (df + 1)) : 1; });
+    let rankedSearch = 'unavailable';
+    if (words.length) {
+      try {
+        const run = lawOnly => callResource('rpc/search_safety_sections', '', { method: 'POST', body: JSON.stringify({ words, weights, phrases, law_only: lawOnly, match_count: 60 }) });
+        const [laws, others] = await Promise.all([run(true), run(false)]);
+        // Zero rows (nothing matched, or an unexpected empty reply) falls back to the per-word fetch below.
+        if (Array.isArray(laws) && Array.isArray(others) && laws.length + others.length) { rankedFound = [...laws, ...others]; rankedSearch = 'ranked'; } else rankedSearch = 'empty';
+      } catch (error) { rankedSearch = /search_safety_sections|PGRST202/.test(error.message) ? 'missing-008' : `error: ${error.message.slice(0, 120)}`; }
+    }
+    // Fallback without 008: per-word fetch. Supabase returns ilike matches unordered and cut at the limit, so a common
+    // word could fill the rows and hide statute articles; statutes get their own queries.
     const lawIds = documents.filter(doc => doc.kind === 'law' || String(doc.source_url || '').startsWith('https://www.law.go.kr/')).map(doc => doc.id);
     const lawFilter = lawIds.length ? `&document_id=in.(${lawIds.map(encodeURIComponent).join(',')})` : '';
     const requests = words.flatMap(term => [`${select}&locator=ilike.${like(term)}&limit=30`, `${select}&body=ilike.${like(term)}&limit=30`,
@@ -103,15 +121,11 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     for (let i = 0; i < words.length; i++) for (let j = i + 1; j < words.length && j < i + 4; j++) {
       requests.push(`${select}&and=(body.ilike.${like(words[i])},body.ilike.${like(words[j])})&limit=20`);
     }
-    const found = [];
-    for (let index = 0; index < requests.length; index += 8) {
+    let found = rankedFound;
+    if (rankedSearch !== 'ranked') for (let index = 0; index < requests.length; index += 8) {
       found.push(...(await Promise.all(requests.slice(index, index + 8).map(query => callResource('safety_document_sections', query).catch(() => [])))).flat());
     }
-    // How many stored sections contain each word (for rare-word weighting). Unknown counts fall back to weight 1.
-    sectionTotal ||= await countRows('safety_document_sections', '?select=id').catch(() => 0);
-    const frequency = new Map(sectionTotal ? await Promise.all(words.map(async term => [term,
-      await countRows('safety_document_sections', `?select=id&or=(body.ilike.${like(term)},locator.ilike.${like(term)})`).catch(() => null)])) : []);
-    return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found, frequency, total: sectionTotal };
+    return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found, frequency, total: sectionTotal, rankedSearch };
   }
   let sectionTotal = 0;
   // Search-word refinement: the AI writes search words without knowing which ones are useless in this corpus.
@@ -139,7 +153,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     return weak;
   }
   async function searchApprovedSections(queries, semanticSections = [], { fusion = env.SAFETY_EVIDENCE_FUSION || 'add', gathered = null, wide = false } = {}) {
-    const { words, phrases, approved, found, frequency = new Map(), total = 0 } = gathered || await gatherSections(queries);
+    const { words, phrases, approved, found, frequency = new Map(), total = 0, rankedSearch = 'unavailable' } = gathered || await gatherSections(queries);
     if (!words.length && !semanticSections.length) return { laws: [], guides: [] };
     const candidates = new Map();
     for (const section of [...found, ...semanticSections]) {
@@ -180,14 +194,14 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const addRanks = list => list.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + 1 / (60 + index)));
       addRanks(byWords); addRanks(semanticItems);
       const ranked = [...fused.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => candidates.get(id));
-      return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8) };
+      return { laws: pick(ranked.filter(isLaw), 12), guides: pick(ranked.filter(item => !isLaw(item)), 8), rankedSearch };
     }
     // wide: a larger candidate pool for the AI selection step (rerank), which then keeps only applicable sections.
     const limits = wide ? { laws: 16, guides: 10, extraLaws: 10, extraGuides: 6 } : { laws: 12, guides: 8, extraLaws: 4, extraGuides: 3 };
     const laws = pick(byWords.filter(isLaw), limits.laws), guides = pick(byWords.filter(item => !isLaw(item)), limits.guides);
     const taken = new Set([...laws, ...guides].map(item => item.id));
     const extra = semanticItems.filter(item => !taken.has(item.id)).map(item => ({ ...item, matchedBy: 'meaning' }));
-    return { laws: [...laws, ...extra.filter(isLaw).slice(0, limits.extraLaws)], guides: [...guides, ...extra.filter(item => !isLaw(item)).slice(0, limits.extraGuides)] };
+    return { laws: [...laws, ...extra.filter(isLaw).slice(0, limits.extraLaws)], guides: [...guides, ...extra.filter(item => !isLaw(item)).slice(0, limits.extraGuides)], rankedSearch };
   }
   // Semantic search (supabase/006_semantic_search.sql): reports and statutes rarely share words, so the
   // meaning of the report is compared with the stored meaning of every approved section and case.
@@ -821,7 +835,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         noEvidence: evidence.length === 0,
         sourceOrigin,
         answers,
-        internalSearch: { configured, errors: searchErrors, mode: evidenceMode, rerank: rerank ? { candidates: rerank.candidates, kept: rerank.kept, error: rerank.error } : null,
+        internalSearch: { configured, errors: searchErrors, mode: evidenceMode, wordSearch: ranked.rankedSearch || null, rerank: rerank ? { candidates: rerank.candidates, kept: rerank.kept, error: rerank.error } : null,
           semantic: reused ? { reused: true } : { used: Boolean(semantic), error: semanticError || (evidenceMode !== 'words' ? '' : (semanticAvailable() ? '초안에는 의미 검색을 쓰지 않음(SAFETY_EVIDENCE_MODE=meaning 또는 rerank일 때만)' : '의미 검색 미설정')) } },
         ...(options.diagnostics ? { diagnostics: {
           mode: evidenceMode, queries, refinement,
