@@ -170,10 +170,12 @@ async function replay() {
   await pool(rows, Number(args.concurrency || 4), async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
     let ranked;
-    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}), ...(args.wide ? { wide: true } : {}), ...(args.rerank ? { rerankFor: text } : {}), ...(args.hyde ? { hyde: true } : {}) }); }
+    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}), ...(args.wide ? { wide: true } : {}), ...(args.rerank ? { rerankFor: text } : {}), ...(args.hyde ? { hyde: true } : {}), ...(args['dump-pool'] ? { withBody: true } : {}) }); }
     catch (error) { failed.push(`${row.caseId}: ${error.message.slice(0, 80)}`); return; }
     // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
     const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
+    // --dump-pool FILE: keep each case's ordered candidate pool (with text) for offline rerankers and judging.
+    if (args['dump-pool']) fs.appendFileSync(path.resolve(args['dump-pool']), `${JSON.stringify({ caseId: row.caseId, set: row.set, typeId: row.typeId, text, items: ranked })}\n`);
     const top10 = [...laws.slice(0, 6), ...guides.slice(0, 4)], top4 = [...laws.slice(0, 2), ...guides.slice(0, 2)];
     const t = tally[row.set] ||= { existing: 0, all: 0, top10: 0, top4: 0, cases: 0, ok10: 0, ok4: 0, law6: 0, law2: 0 };
     const expects = types.get(row.typeId).expect.filter(expect => corpus.some(item => matches(expect, item)));

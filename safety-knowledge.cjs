@@ -627,7 +627,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       return { url: fileUrl, fileName: rows[0].original_file_name };
     },
     // Retrieval only (no draft), for replaying stored search words in the simulation at no AI cost.
-    async rankEvidence(queries, { semanticText = '', wide = false, refineFor = '', rerankFor = '', hyde = false } = {}) {
+    async rankEvidence(queries, { semanticText = '', wide = false, refineFor = '', rerankFor = '', hyde = false, withBody = false } = {}) {
       if (refineFor) queries = (await this.refineQueries(refineFor, queries)).queries;
       const passage = hyde && semanticText ? await hypotheticalPassage(semanticText) : '';
       const semantic = semanticText && semanticAvailable() ? await semanticSearch(passage ? `${semanticText}\n${passage}` : semanticText) : null;
@@ -637,7 +637,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         const { keep } = await selectEvidence(rerankFor, '', pool);
         ranked = { laws: keep.filter(item => item.pool === 'law'), guides: keep.filter(item => item.pool === 'guide'), pool: pool.length };
       }
-      return [...ranked.laws.map(item => ({ ...item, kind: 'law' })), ...ranked.guides.map(item => ({ ...item, kind: 'guide' }))].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, kind: item.kind, matchedBy: item.matchedBy || 'words' }));
+      return [...ranked.laws.map(item => ({ ...item, kind: 'law' })), ...ranked.guides.map(item => ({ ...item, kind: 'guide' }))].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, kind: item.kind, matchedBy: item.matchedBy || 'words', ...(withBody ? { body: item.body } : {}) }));
     },
     // Stage ① only, for the simulation: the same search-word extraction a draft runs first.
     async extractQueries(description, process = '') {
