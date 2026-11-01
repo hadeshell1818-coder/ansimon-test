@@ -422,8 +422,15 @@ function showResult(id){
  $('modal').classList.add('on');
 }
 function printResult(id){const it=R.registered.find(x=>x.id===id);return printRiskDocument('개선조치 이행 결과서',resultFormHtml(it))}
+// One line on how the evidence was ordered, so the officer can tell a reranked draft from a fallback.
+function riskAdviceRanking(d){
+  const search=d.internalSearch||{},rerank=search.rerank;
+  if(rerank&&rerank.provider==='cohere')return '<p class="hint">근거 순위: '+(rerank.error?esc(rerank.error):'Cohere 재순위 사용 · 후보 '+esc(rerank.candidates)+'개 중 상위 '+esc(rerank.kept)+'개 · '+esc((rerank.ms/1000).toFixed(1))+'초')+'</p>';
+  if(search.mode)return '<p class="hint">근거 순위: 검색 순서(재순위 미사용)</p>';
+  return '';
+}
 function riskAdviceSources(d){
-  return '<details open><summary>근거자료·검색 결과</summary>'+RiskReferences.searchableEvidence(d).map(item=>{const url=String(item.sourceUrl||'');return '<p><b>'+esc(item.title||item.work||item.ref)+'</b> · '+esc(item.locator||'')+' · '+esc(item.type||'')+( /^https?:\/\//.test(url)?' <a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">원문 확인</a>':'')+'</p>'}).join('')+'<p>'+esc(d.externalSearch?.error||d.externalSearch?.limitations||'')+'</p></details>';
+  return '<details open><summary>근거자료·검색 결과</summary>'+riskAdviceRanking(d)+RiskReferences.searchableEvidence(d).map(item=>{const url=String(item.sourceUrl||'');return '<p><b>'+esc(item.title||item.work||item.ref)+'</b> · '+esc(item.locator||'')+' · '+esc(item.type||'')+( /^https?:\/\//.test(url)?' <a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">원문 확인</a>':'')+'</p>'}).join('')+'<p>'+esc(d.externalSearch?.error||d.externalSearch?.limitations||'')+'</p></details>';
 }
 async function requestRiskAdvice(id,answerQuestions=false){
   const host=$('risk-advice-result'),button=$('risk-advice-button');if(!host||button?.disabled)return;
