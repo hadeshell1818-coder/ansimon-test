@@ -165,9 +165,12 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     };
     const byWords = [...candidates.values()].filter(item => score(item) > 0).map(item => ({ item, score: score(item) }))
       .sort((a, b) => b.score - a.score || a.item.body.length - b.item.body.length).map(entry => entry.item);
-    // At most three sections per document so one long act does not crowd out the others.
+    // At most three sections per document so one long act does not crowd out the others. Collections of separate
+    // items in one document (the postal checklist: '우편작업 · 접수작업 · 항목 3', 429 items) are capped per work
+    // sector instead; a per-document cap let only 3 of 429 checklist items through (sector simulation, 2026-11-01).
+    const capGroup = item => { const sector = String(item.locator || '').match(/^(.+? · .+?) · 항목 \d+/); return sector ? `${item.document_id}|${sector[1]}` : item.document_id; };
     const pick = (list, limit) => { const perDocument = new Map(), picked = [];
-      for (const item of list) { const count = perDocument.get(item.document_id) || 0; if (count >= 3) continue; perDocument.set(item.document_id, count + 1); picked.push(item); if (picked.length >= limit) break; }
+      for (const item of list) { const group = capGroup(item); const count = perDocument.get(group) || 0; if (count >= 3) continue; perDocument.set(group, count + 1); picked.push(item); if (picked.length >= limit) break; }
       return picked; };
     // Official notices are stored as guidelines; their law.go.kr text is as citable as an act.
     const isLaw = item => item.kind === 'law' || String(item.source_url || '').startsWith('https://www.law.go.kr/');
