@@ -149,10 +149,12 @@ async function replay() {
   const corpus = await corpusIndex();
   const types = new Map(casesFile.types.map(type => [type.id, type]));
   const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
-  const tally = {};
-  await pool(rows, 4, async row => {
+  const tally = {}, failed = [];
+  await pool(rows, Number(args.concurrency || 4), async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
-    const ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) });
+    let ranked;
+    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) }); }
+    catch (error) { failed.push(`${row.caseId}: ${error.message.slice(0, 80)}`); return; }
     // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
     const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
     const top10 = [...laws.slice(0, 6), ...guides.slice(0, 4)], top4 = [...laws.slice(0, 2), ...guides.slice(0, 2)];
@@ -167,7 +169,7 @@ async function replay() {
   });
   const pct = (a, b) => `${a}/${b} (${Math.round(a / b * 100)}%)`;
   console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}`,
-    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))));
+    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))), `실패 ${failed.length}건`, failed.slice(0, 3).join(' / '));
 }
 
 async function report() {

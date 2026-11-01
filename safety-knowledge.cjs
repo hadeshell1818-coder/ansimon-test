@@ -219,10 +219,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     const [vector] = await embed([String(text).slice(0, 3000)]);
     const literal = vectorLiteral(vector);
     try {
-      const [sections, cases] = await Promise.all([
-        rpc('match_safety_sections', { query_embedding: literal, match_count: 40 }),
-        rpc('match_safety_cases', { query_embedding: literal, match_count: 25 }),
-      ]);
+      // A statement timeout (57014) under load is retried once before the caller falls back to word search.
+      const once = name => rpc(name, { query_embedding: literal, match_count: name === 'match_safety_sections' ? 40 : 25 })
+        .catch(async error => { if (!/57014|statement timeout/.test(error.message)) throw error; await new Promise(resolve => setTimeout(resolve, 800)); return rpc(name, { query_embedding: literal, match_count: name === 'match_safety_sections' ? 40 : 25 }); });
+      const [sections, cases] = await Promise.all([once('match_safety_sections'), once('match_safety_cases')]);
       return { sections: sections || [], caseIds: (cases || []).map(item => item.id) };
     } catch (error) { throw semanticSetupHint(error); }
   }
