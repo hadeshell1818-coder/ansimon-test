@@ -50,7 +50,8 @@ function score() {
   for (const [name, orderMap] of variants) {
     const tally = {};
     for (const pool of pools) {
-      if (!judged.has(pool.caseId)) continue;
+      // Only cases every order covers, so a partly finished reranker run is compared on the same cases.
+      if (!judged.has(pool.caseId) || variants.some(([, map]) => map && !map.has(pool.caseId))) continue;
       const expects = types.get(pool.typeId).expect;
       const right = item => judged.get(pool.caseId).has(item.ref) || expects.some(expect => matches(expect, item));
       const byRef = new Map(pool.items.map(item => [item.ref, item]));
