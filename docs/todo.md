@@ -12,25 +12,27 @@
 
 이 클라우드 환경에서 OpenAI·Supabase·운영 주소가 모두 막혀 있어(프록시 403) 실제 AI 채점을 돌릴 수 없다. 아래를 설정하면 이후는 에이전트가 직접 돌린다. 설정 후에는 **새 세션**에서 반영된다.
 
-- [!] **환경 설정 열기**: 세션 제목줄의 클라우드 환경 메뉴 → Edit
-- [!] **비밀값(Network secrets, 없으면 환경변수) 추가**. 대화창에는 붙여넣지 않는다.
+> 2026-10-31 확인: OpenAI·Supabase 연결 정상(Network secrets로 프록시가 키를 붙임, 코드는 `OPENAI_API_KEY=proxy`로 실행). KOSHA SQL 2건 적재 확인(문서 160건, 조문 6,462건 전부 의미 색인 완료). 운영 주소도 접속 확인(화면 파일이 main과 동일).
+
+- [x] **환경 설정 열기**: 세션 제목줄의 클라우드 환경 메뉴 → Edit
+- [x] **비밀값(Network secrets, 없으면 환경변수) 추가**. 대화창에는 붙여넣지 않는다.
   - `OPENAI_API_KEY`: Railway에 넣은 것과 같은 OpenAI 키
   - `SAFETY_SUPABASE_URL`: Supabase 프로젝트 주소(`https://<프로젝트>.supabase.co`)
   - `SAFETY_SUPABASE_SERVICE_KEY`: Supabase service_role 키(Railway와 같은 값)
   - (선택) `SUPABASE_DB_URL`: Supabase → Connect → 연결 문자열. SQL 적재를 에이전트가 직접 하려면 필요
-- [!] **Network access → Allowed domains 추가** (Allow package managers는 체크 유지)
+- [x] **Network access → Allowed domains 추가** (Allow package managers는 체크 유지)
   - `api.openai.com`
   - `<프로젝트>.supabase.co`
   - `ansimon-test-production.up.railway.app` (운영 반영 확인용)
   - (선택) Supabase 연결 문자열의 호스트(예: `aws-0-ap-northeast-2.pooler.supabase.com`)
-- [!] 아직 실행하지 않았다면 `local-import/kosha/kosha-guides-추가.sql`, `kosha-guides-그림옮김.sql`을 Supabase SQL Editor에서 실행. `SUPABASE_DB_URL`을 설정하면 에이전트가 대신 실행한다.
+- [x] 아직 실행하지 않았다면 `local-import/kosha/kosha-guides-추가.sql`, `kosha-guides-그림옮김.sql`을 Supabase SQL Editor에서 실행. `SUPABASE_DB_URL`을 설정하면 에이전트가 대신 실행한다.
 
 ### 1-1. 에이전트가 할 일
 
-- [ ] 골라내기(재순위) 단계 구현: 단어 + 의미 후보를 AI가 읽고 해당 조문만 이유와 함께 고름
-- [ ] 실제 초안까지 만드는 채점 모드: 맞는 인용 / 엉뚱한 인용 / 골라내기가 버린 정답 수
-- [ ] 세 방식 비교(기준점 단어만 · 참고 단어+의미 · 목표 단어+의미+골라내기), 업무 구역별 결과
-- [ ] 시험 사례를 담당자 말투로 다시 작성하고, 기대 근거는 저장소와 무관하게 정함
+- [x] 골라내기(재순위) 단계 구현: 단어 + 의미 후보를 AI가 읽고 해당 조문만 이유와 함께 고름 (`SAFETY_EVIDENCE_MODE=rerank`, 기본은 words)
+- [x] 실제 초안까지 만드는 채점 도구: `scripts/simulate-drafts.cjs` (맞는 인용 / 기대 밖 인용 판정 / 골라내기가 버린 정답)
+- [!] 세 방식 비교(환경변수 `SAFETY_SUPABASE_URL`을 실제 주소로 고쳐야 실행 가능)(기준점 단어만 · 참고 단어+의미 · 목표 단어+의미+골라내기), 업무 구역별 결과
+- [x] 시험 사례를 담당자 말투로 다시 작성하고, 기대 근거는 저장소와 무관하게 정함 (`seed-assets/draft-simulation-cases.json`, 59유형 236건, A·B 세트)
 - [ ] 놓친 사례를 "자료 없음"(추가할 자료)과 "있는데 못 찾음"(표현 차이)으로 나눠 보고
 - [ ] 결과 재검토(다른 사례 세트로 교차 확인) 후 운영 적용 여부 결정
 - [ ] 부족 자료 보완: KOSHA 창고(A-G-9)·지게차(B-M-11)·급식실(A-G-6)·고정식 사다리(B-M-1) 그림 PDF 옮겨 적기, LPG 사용시설 별표, 리튬 배터리 충전 안전자료

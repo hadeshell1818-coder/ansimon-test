@@ -92,6 +92,34 @@ async function main() {
   const floodLaws = JSON.parse(floodDraft.body.messages.at(-1).content).evidence.filter(item => item.type === '승인된 법령');
   assert.ok(floodLaws.some(item => item.ref === 'doc:word-hit'), 'word-search pick survives a flood of meaning matches');
   assert.equal(floodLaws.filter(item => item.ref.startsWith('doc:meaning-')).length, 4, 'at most four meaning-only statutes are appended');
+  // Rerank mode: word + meaning candidates go to an AI selection step; only kept sections reach the draft.
+  // A failed selection falls back to the word-search picks (meaning-only sections are not passed on unchecked).
+  let selection = 'keep';
+  const rerankRepo = createKnowledgeRepository({ ...env, SAFETY_SEMANTIC_SEARCH: undefined }, async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    if (body.messages?.[0]?.content?.startsWith('당신은 산업안전 근거 선별자')) {
+      if (selection === 'fail') return { ok: false, status: 500, text: async () => 'boom', json: async () => ({}) };
+      const refs = JSON.parse(body.messages[1].content).candidates.map(item => item.ref);
+      assert.ok(refs.includes('doc:word-hit') && refs.some(ref => ref.startsWith('doc:meaning-')), 'selection sees word and meaning candidates');
+      return json({ choices: [{ message: { content: JSON.stringify({ keep: [{ ref: 'doc:word-hit', reason: '통로 미끄럼' }, { ref: 'doc:meaning-0', reason: '관련' }] }) } }] });
+    }
+    const href = decodeURIComponent(String(url));
+    if (href.endsWith('match_safety_sections')) return json(flood);
+    if (href.endsWith('match_safety_cases')) return json([]);
+    if (href.includes('/safety_documents?')) return json(floodDocs);
+    if (href.includes('/safety_document_sections?') && /ilike\.\*(통로|미끄러움|출입구)\*/.test(href)) return json([wordHit]);
+    return request(url, options);
+  });
+  const draftLaws = () => JSON.parse(calls.filter(call => call.body.messages?.some(message => String(message.content).startsWith('당신은 우체국 산업안전'))).at(-1).body.messages.at(-1).content).evidence.filter(item => item.type === '승인된 법령').map(item => item.ref);
+  assert.equal((await rerankRepo.recommendRisk({ description: '출입구 통로 미끄러움' })).internalSearch.mode, 'words', 'production default stays word search');
+  const reranked = await rerankRepo.recommendRisk({ description: '출입구 통로 미끄러움' }, { evidenceMode: 'rerank', diagnostics: true });
+  assert.deepEqual(draftLaws().sort(), ['doc:meaning-0', 'doc:word-hit']);
+  assert.equal(reranked.internalSearch.rerank.kept, 2); assert.ok(reranked.diagnostics.candidates.length > 2);
+  assert.ok(reranked.diagnostics.rerank.dropped.includes('doc:meaning-1'));
+  selection = 'fail';
+  const fallback2 = await rerankRepo.recommendRisk({ description: '출입구 통로 미끄러움', refreshSources: true }, { evidenceMode: 'rerank' });
+  assert.match(fallback2.internalSearch.rerank.error, /골라내기 실패/);
+  assert.deepEqual(draftLaws(), ['doc:word-hit'], 'failed selection keeps word picks only');
   console.log('PASS: meaning-only statute and cases reach the draft, missing migration reported with word-search fallback, batched indexing and status, search evaluation');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

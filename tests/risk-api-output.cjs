@@ -20,7 +20,8 @@ const res={setHeader(){},send:value=>{payload=value},json:value=>{payload=value}
 routes['PATCH /api/risk/items/:id']({params:{id:'K1'},body:{reduction:'통로 확보 및 적재물 정리. '.repeat(100),referenceText:'공식자료 https://www.kosha.or.kr/guide',aiAdvice:{description:item.factor,answers:[{question:'운반물 무게?',answer:'10kg'}],review:{summary:'현장 검토'},sourceOrigin:'external'}}},res);
 assert.ok(item.reduction.length>500,'realistic measures are not truncated at the previous 500-character limit');
 assert.equal(item.aiAdvice.answers[0].answer,'10kg');assert.equal(item.aiAdvice.by,'담당자');
-routes['GET /api/risk/export.xlsx']({query:{from:'2026-10-01',to:'2026-10-31'}},res);
+// PATCH stamps assessmentStartedAt with today, so the export range must include today.
+routes['GET /api/risk/export.xlsx']({query:{from:'2026-10-01',to:new Date(Date.now()+9*3600000).toISOString().slice(0,10)}},res);
 assert.ok(Buffer.isBuffer(payload));
 const book=XLSX.read(payload,{type:'buffer'}),sheet=book.Sheets['소포'];
 assert.ok(sheet);const data=XLSX.utils.sheet_to_json(sheet,{header:1});
