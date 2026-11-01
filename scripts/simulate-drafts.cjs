@@ -151,14 +151,15 @@ async function replay() {
   const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
   const tally = {};
   await pool(rows, 4, async row => {
-    const ranked = await repo.rankEvidence(row.queries);
+    const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
+    const ranked = await repo.rankEvidence(row.queries, args.refine ? { refineFor: text } : {});
     const t = tally[row.set] ||= { existing: 0, hit: 0 };
     for (const expect of types.get(row.typeId).expect) {
       if (!corpus.some(item => matches(expect, item))) continue;
       t.existing += 1; if (ranked.some(item => matches(expect, item))) t.hit += 1;
     }
   });
-  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}`, JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, `${v.hit}/${v.existing} (${Math.round(v.hit / v.existing * 100)}%)`]))));
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}`, JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, `${v.hit}/${v.existing} (${Math.round(v.hit / v.existing * 100)}%)`]))));
 }
 
 async function report() {
