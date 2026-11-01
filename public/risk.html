@@ -426,6 +426,9 @@ function printResult(id){const it=R.registered.find(x=>x.id===id);return printRi
 // a measure. Older drafts without per-measure links fall back to the cited statutes.
 function adviceReferences(d){return Array.isArray(d.references)&&d.references.length?d.references.map(item=>item.label):RiskReferences.legalReferences(d)}
 // One line on how the evidence was ordered, so the officer can tell a reranked draft from a fallback.
+// The risk as the AI understood it from the text and photo: shown so staff can see at a glance whether the AI read
+// the hazard right. Display only; it is not saved into the assessment fields.
+function riskUnderstanding(d){return d&&d.understanding?'<p class="hint"><b>AI가 이해한 위험</b> '+esc(d.understanding)+'</p>':''}
 function riskAdviceRanking(d){
   const search=d.internalSearch||{},rerank=search.rerank;
   if(rerank&&rerank.provider==='cohere')return '<p class="hint">근거 순위: '+(rerank.error?esc(rerank.error):'Cohere 재순위 사용 · 후보 '+esc(rerank.candidates)+'개 중 상위 '+esc(rerank.kept)+'개 · '+esc((rerank.ms/1000).toFixed(1))+'초')+'</p>';
@@ -472,14 +475,14 @@ async function requestRiskAdvice(id,answerQuestions=false){
       const notice=d.noEvidence?'공식 근거 검색 결과가 없어 자동 반영을 보류했습니다. 아래 내용은 확인되지 않은 AI 제안입니다.':(review.summary||'근거와 대책의 연결성을 확인해 주세요.');
       const measures=hasMeasures?'<p style="white-space:pre-wrap"><b>개선대책 초안</b>\n'+esc(d.measures.map((m,i)=>(i+1)+'. '+m).join('\n'))+'</p>':'<p>검토 가능한 개선대책이 생성되지 않았습니다. 서버 AI 오류 여부를 확인해 주세요.</p>';
       const action=hasMeasures?'<button type="button" class="btn primary" onclick="applyRiskAdviceDraft(\''+esc(id)+'\')">담당자 검토 후 초안 반영</button>':'';
-      host.innerHTML='<div class="ai-box"><b>AI 제안 · 검토 필요</b><p>'+esc(notice)+'</p>'+measures+explanation+action+'</div>';
+      host.innerHTML='<div class="ai-box"><b>AI 제안 · 검토 필요</b>'+riskUnderstanding(d)+'<p>'+esc(notice)+'</p>'+measures+explanation+action+'</div>';
       return;
     }
     const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)});
     if(riskAdviceSession!==session||$('risk-advice-result')!==host)return;
     selectedEvidence=evidence;Object.assign(it,saved.item);session.description=it.factor||description;if($('e-factor'))$('e-factor').value=it.factor||description;
     const approval=d.externalSources?.length?(knowledgeState?.connected?'<button class="btn" type="button" onclick="approveExternalEvidence()">외부자료 승인·저장</button>':'<small>외부자료를 근거자료실에 저장하려면 Supabase 연결이 필요합니다.</small>'):'';
-    host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거 초안</b><small>근거 구분: '+esc(origin)+' · 최종 평가는 담당자가 확인해 주세요.</small><div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(body.reduction)+'</div></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(body.referenceText)+'</div></div>'+explanation+approval+'</div>';
+    host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거 초안</b><small>근거 구분: '+esc(origin)+' · 최종 평가는 담당자가 확인해 주세요.</small>'+riskUnderstanding(d)+'<div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(body.reduction)+'</div></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(body.referenceText)+'</div></div>'+explanation+approval+'</div>';
   }catch(error){if(riskAdviceSession===session&&$('risk-advice-result')===host)host.innerHTML='<small class="workspace-error">'+esc(error.message)+'</small>';}
   finally{if(button){button.disabled=false;button.textContent='AI로 초안 작성'}}
 }

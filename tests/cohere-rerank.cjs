@@ -29,7 +29,7 @@ async function main() {
     if (href.includes('/safety_documents?')) return json(docs);
     if (body.messages) {
       const first = body.messages[0].content;
-      const content = first.startsWith('산업안전 위험 설명') ? { queries: ['지게차 후진', '접촉의 방지'], critical: false, questions: [] }
+      const content = first.startsWith('산업안전 위험 설명') ? { understanding: '사진 속 지게차가 후진하며 뒤쪽 보행자와 부딪힐 위험', queries: ['지게차 후진', '접촉의 방지'], critical: false, questions: [] }
         : first.startsWith('산업안전 위험 설명을 읽고') ? { passage: '사업주는 지게차에 후진경보기를 설치하여야 한다.' }
           : first.startsWith('당신은 산업안전 위험성평가 초안의 품질') ? { causalCheck: 'pass', legalCheck: 'pass', approvedMeasures: ['후진경보기 설치'], approvedCitations: [], reviewSummary: 'ok', additionalChecks: [] }
             : { factor: '지게차 후진 충돌', measures: ['후진경보기 설치'], citations: [], limitations: '' };
@@ -52,6 +52,15 @@ async function main() {
   assert.deepEqual(evidence.filter(item => item.type === '승인된 법령').map(item => item.ref), ['doc:law-9', 'doc:law-8', 'doc:law-7', 'doc:law-6'], 'statutes in reranked order');
   assert.deepEqual(evidence.filter(item => item.type === '문서 본문').map(item => item.ref), ['doc:guide-5', 'doc:guide-4', 'doc:guide-3', 'doc:guide-2', 'doc:guide-1', 'doc:guide-0'], 'guides in reranked order');
   assert.ok(calls.some(call => call.body.messages?.[0]?.content.startsWith('산업안전 위험 설명을 읽고')), 'HyDE passage feeds the meaning search');
+  // The risk the AI understood from text and photo ranks the sources and is shown to staff; the review sees the photo.
+  assert.equal(advice.understanding, '사진 속 지게차가 후진하며 뒤쪽 보행자와 부딪힐 위험');
+  assert.match(rerankCall.body.query, /지게차가 후진하는데 뒤에 사람 지나감\n사진 속 지게차가 후진하며 뒤쪽 보행자와 부딪힐 위험/);
+  const photo = 'data:image/png;base64,iVBORw0KGgo=';
+  calls.length = 0;
+  await repo.recommendRisk({ description: '이거 위험함', photoBase64: photo, refreshSources: true });
+  const reviewCall = calls.find(call => call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질'));
+  assert.ok(Array.isArray(reviewCall.body.messages[1].content) && reviewCall.body.messages[1].content.some(part => part.image_url?.url === photo), 'the review sees the photo');
+  assert.match(calls.find(call => call.href === 'https://api.cohere.com/v2/rerank').body.query, /이거 위험함\n사진 속 지게차/, 'a short entry is ranked with the understood risk');
 
   cohere = 'fail';
   const failed = await repo.recommendRisk({ description: '지게차가 후진하는데 뒤에 사람 지나감', refreshSources: true });
