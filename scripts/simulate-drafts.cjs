@@ -154,14 +154,18 @@ async function judgeDirect(situation, items) {
     ] }) }).catch(() => null);
   if (!response?.ok) return [];
   const verdict = JSON.parse((await response.json()).choices[0].message.content);
-  return (Array.isArray(verdict.direct) ? verdict.direct : []).map(no => items[Number(no) - 1]?.ref).filter(Boolean);
+  const chosen = (Array.isArray(verdict.direct) ? verdict.direct : []).map(no => items[Number(no) - 1]).filter(Boolean);
+  // Kept for spot checks of the judge (re-review rule): situation, chosen and rejected candidates.
+  fs.appendFileSync(path.join(OUT, 'judge-top.jsonl'), `${JSON.stringify({ situation, direct: chosen.map(item => `${item.title} ${item.locator}`), rejected: items.filter(item => !chosen.includes(item)).map(item => `${item.title} ${item.locator}`) })}\n`);
+  return chosen.map(item => item.ref);
 }
 
 async function replay() {
   const repo = createKnowledgeRepository(env);
   const corpus = await corpusIndex();
   const types = new Map(casesFile.types.map(type => [type.id, type]));
-  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
+  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length)
+    .filter((row, index) => !args.limit || index % Math.ceil(317 / Number(args.limit)) === 0);
   const tally = {}, failed = [];
   await pool(rows, Number(args.concurrency || 4), async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
