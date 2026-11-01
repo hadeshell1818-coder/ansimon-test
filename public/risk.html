@@ -50,6 +50,7 @@
   .src-tag{font-size:11px;font-weight:800;border-radius:5px;padding:2px 7px;color:#fff;}
   .src-carrier{background:var(--danger);} .src-staff{background:var(--ok);} .src-transfer{background:#6D28D9;}
   .ai-box{background:var(--ai-bg);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;}
+  .risk-progress{font-size:13px;line-height:1.8}.risk-step{white-space:nowrap}.risk-step.done{color:#15803d}.risk-step.now{color:#1d4ed8;font-weight:700}.risk-step.wait{color:#8a8f98}
   .advice-edit-row{display:grid;grid-template-columns:88px 1fr auto;gap:8px;align-items:start;padding:8px 0;border-top:1px solid rgba(84,125,166,.25);}
   .advice-edit{min-height:28px;padding:4px 6px;background:#fff;border:1px solid var(--line);border-radius:5px;white-space:pre-wrap;outline:0;}
   .advice-edit:focus{border-color:var(--ai);box-shadow:0 0 0 2px rgba(84,125,166,.12)}
@@ -429,6 +430,29 @@ function adviceReferences(d){return Array.isArray(d.references)&&d.references.le
 // The risk as the AI understood it from the text and photo: shown so staff can see at a glance whether the AI read
 // the hazard right. Display only; it is not saved into the assessment fields.
 function riskUnderstanding(d){return d&&d.understanding?'<p class="hint"><b>AI가 이해한 위험</b> '+esc(d.understanding)+'</p>':''}
+// Draft progress: the server reports the stage it is in (위험 이해 → 근거 찾기 → 초안 작성 → 검토); the page polls it
+// and counts the seconds. The stages are the server's real ones, not a timed animation.
+const RISK_STAGES=[['understand','위험 이해'],['search','근거 찾기'],['draft','초안 작성'],['review','검토']];
+function riskProgressHtml(stage,seconds){
+  const current=Math.max(0,RISK_STAGES.findIndex(item=>item[0]===stage));
+  return '<div class="risk-progress"><small>AI 초안 작성 중 · '+seconds+'초</small><div>'+RISK_STAGES.map((item,index)=>'<span class="risk-step '+(index<current?'done':index===current?'now':'wait')+'">'+(index<current?'✓ ':'')+(index+1)+'. '+item[1]+(index===current?' 중…':'')+'</span>').join(' → ')+'</div></div>';
+}
+async function recommendWithProgress(payload,show){
+  const progressId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
+  const started=Date.now();let stage='understand',done=false;
+  const render=()=>{if(!done)show(riskProgressHtml(stage,Math.round((Date.now()-started)/1000)))};
+  render();const timer=setInterval(render,1000);
+  (async()=>{while(!done){await new Promise(resolve=>setTimeout(resolve,800));if(done)break;try{const p=await api('/api/safety-knowledge/recommend/progress/'+encodeURIComponent(progressId));if(p&&RISK_STAGES.some(item=>item[0]===p.stage)){stage=p.stage;render()}}catch(_){}}})();
+  try{return await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({...payload,progressId})})}
+  finally{done=true;clearInterval(timer)}
+}
+// How long the draft took, by stage, so the real time on the production server is visible.
+function riskAdviceTiming(d){
+  const t=d&&d.timing;if(!t||!t.totalMs)return '';
+  const names=Object.fromEntries(RISK_STAGES);
+  const parts=(t.stages||[]).filter(item=>names[item.stage]&&item.ms).map(item=>names[item.stage]+' '+(item.ms/1000).toFixed(1)+'초');
+  return '<p class="hint">소요 시간: '+(t.totalMs/1000).toFixed(1)+'초'+(parts.length?' ('+esc(parts.join(' · '))+')':'')+'</p>';
+}
 function riskAdviceRanking(d){
   const search=d.internalSearch||{},rerank=search.rerank;
   if(rerank&&rerank.provider==='cohere')return '<p class="hint">근거 순위: '+(rerank.error?esc(rerank.error):'Cohere 재순위 사용 · 후보 '+esc(rerank.candidates)+'개 중 상위 '+esc(rerank.kept)+'개 · '+esc((rerank.ms/1000).toFixed(1))+'초')+'</p>';
@@ -436,7 +460,7 @@ function riskAdviceRanking(d){
   return '';
 }
 function riskAdviceSources(d){
-  return '<details open><summary>근거자료·검색 결과</summary>'+riskAdviceRanking(d)+RiskReferences.searchableEvidence(d).map(item=>{const url=String(item.sourceUrl||'');return '<p><b>'+esc(item.title||item.work||item.ref)+'</b> · '+esc(item.locator||'')+' · '+esc(item.type||'')+( /^https?:\/\//.test(url)?' <a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">원문 확인</a>':'')+'</p>'}).join('')+'<p>'+esc(d.externalSearch?.error||d.externalSearch?.limitations||'')+'</p></details>';
+  return '<details open><summary>근거자료·검색 결과</summary>'+riskAdviceRanking(d)+riskAdviceTiming(d)+RiskReferences.searchableEvidence(d).map(item=>{const url=String(item.sourceUrl||'');return '<p><b>'+esc(item.title||item.work||item.ref)+'</b> · '+esc(item.locator||'')+' · '+esc(item.type||'')+( /^https?:\/\//.test(url)?' <a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">원문 확인</a>':'')+'</p>'}).join('')+'<p>'+esc(d.externalSearch?.error||d.externalSearch?.limitations||'')+'</p></details>';
 }
 async function requestRiskAdvice(id,answerQuestions=false){
   const host=$('risk-advice-result'),button=$('risk-advice-button');if(!host||button?.disabled)return;
@@ -450,12 +474,12 @@ async function requestRiskAdvice(id,answerQuestions=false){
     session.answers=[...session.answers,...answers].slice(-8);
   }
   if(button){button.disabled=true;button.textContent='작성중…'}
-  host.innerHTML='<small>작성중… 입력 정보와 근거자료를 검토하고 있습니다.</small>';
+  host.innerHTML=riskProgressHtml('understand',0);
   try{
     let photoBase64='';
     if(it.photoUrl||it.beforePhotoUrl){try{const response=await fetch(it.photoUrl||it.beforePhotoUrl);if(response.ok)photoBase64=await fileToDataUrl(new File([await response.blob()],'risk-photo.jpg',{type:'image/jpeg'}));}catch(_){}}
     session.photoBase64=photoBase64;
-    const d=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description,photoBase64,process:$('e-target')?.value||assessmentProcess(it),answers:session.answers})});
+    const d=await recommendWithProgress({description,photoBase64,process:$('e-target')?.value||assessmentProcess(it),answers:session.answers},html=>{if(riskAdviceSession===session&&$('risk-advice-result')===host)host.innerHTML=html});
     if(riskAdviceSession!==session||$('risk-advice-result')!==host)return;
     if($('e-factor').value.trim()!==description){host.innerHTML='<small>작성 중 유해·위험요인이 변경되었습니다. 변경된 내용으로 다시 작성해 주세요.</small>';return}
     riskAdviceDraft=d;session.evidenceSession=d.evidenceSession||null;
@@ -516,7 +540,7 @@ async function sendRiskChat(id){
   session.chatBusy=true;button.disabled=true;button.textContent='검토중…';$('risk-advice-button').disabled=true;proposal.textContent='확보한 근거와 질문을 바탕으로 수정안을 검토하고 있습니다.';
   const description=$('e-factor').value.trim();
   try{
-    const d=await api('/api/safety-knowledge/recommend',{method:'POST',body:JSON.stringify({description,photoBase64:session.photoBase64||'',process:$('e-target')?.value||assessmentProcess(it),answers:session.answers,feedback,evidenceSession:session.evidenceSession,refreshSources:$('risk-chat-refresh')?.checked===true,conversation:session.conversation||[],currentDraft:{measures:currentMeasures,rationale:session.proposal?.rationale||riskAdviceDraft?.rationale||it.aiAdvice?.rationale||''}})});
+    const d=await recommendWithProgress({description,photoBase64:session.photoBase64||'',process:$('e-target')?.value||assessmentProcess(it),answers:session.answers,feedback,evidenceSession:session.evidenceSession,refreshSources:$('risk-chat-refresh')?.checked===true,conversation:session.conversation||[],currentDraft:{measures:currentMeasures,rationale:session.proposal?.rationale||riskAdviceDraft?.rationale||it.aiAdvice?.rationale||''}},html=>{if(riskAdviceSession===session)proposal.innerHTML=html});
     if(riskAdviceSession!==session||$('e-factor').value.trim()!==description)return;
     session.conversation=[...(session.conversation||[]),{role:'user',text:feedback},{role:'assistant',text:d.chatReply||d.review?.summary||'검토 결과를 확인해 주세요.'}].slice(-8);renderRiskChat();input.value='';
     session.proposal=d;session.proposalDescription=description;if(d.evidenceSession)session.evidenceSession=d.evidenceSession;

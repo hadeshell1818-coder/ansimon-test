@@ -30,7 +30,7 @@ async function main() {
     if(prompt.startsWith('질문 필요성을 재검토'))result={unresolvedMeaning:unresolvedMeaning && questions,queries:['운반 통로'],questions:[{question:'운반 방식은?',reason:'위험 대상 해석 불가'},{question:'설명한 설비는?',reason:'대상 설비 해석 불가'},{question:'세 번째 질문',reason:'제외해야 함'}]};
     else if(prompt.startsWith('산업안전 위험 설명')) result={queries:['운반 통로'],critical,questions:questions?[{question:'설명한 운반 작업은 차량 운행인가요, 수작업 운반인가요?',reason:'서로 다른 위험 대상이라 안전대책의 적용 대상을 해석할 수 없습니다.'},{question:'추가 질문',reason:'추가 이유'}]:[]};
     else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질')) result={approvedReply:'수작업 조건에서 적재물 제거와 동선 분리를 검토하세요.',causalCheck:'pass',legalCheck:'pass',approvedMeasures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],approvedCitations:['external:0'],reviewSummary:'현장 대책 검토',additionalChecks:[]};
-    else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
+    else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',chatReply:'수작업 조건에서 적재물 제거와 동선 분리를 검토하세요.',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
     return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};
   };
   const repo=createKnowledgeRepository({OPENAI_API_KEY:'test-key'},request);
@@ -78,9 +78,11 @@ async function main() {
   assert.ok(draftCall,'단계별 근거·해결책 설계 지시');
   const draftContext=JSON.parse(draftCall.body.messages.at(-1).content);
   assert.deepEqual(draftContext.evidenceFramework.map(stage=>stage.level),['법','시행령','규칙','고시·공시','지침·매뉴얼·사례']);
-  const mixedReview=calls.find(call=>call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')&&JSON.parse(call.body.messages.at(-1).content).evidence.some(item=>item.ref.startsWith('doc:')));
-  assert.ok(mixedReview,'품질 재검토에 내부·외부 근거 함께 전달');
-  assert.ok(JSON.parse(mixedReview.body.messages.at(-1).content).evidence.some(item=>item.ref.startsWith('external:')));
+  // The light review checks each numbered measure against only the sources that measure cites.
+  const lightReview=calls.filter(call=>call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')).map(call=>JSON.parse(call.body.messages.at(-1).content)).at(-1);
+  assert.ok(lightReview.measures.length&&lightReview.measures.every(item=>item.no&&item.text),'번호 붙은 대책을 검토');
+  assert.ok(lightReview.evidence.every(item=>lightReview.measures.some(measure=>measure.refs.includes(item.ref))),'대책이 인용한 근거만 전달');
+  assert.ok(calls.filter(call=>call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')).some(call=>JSON.parse(call.body.messages.at(-1).content).evidence.some(item=>item.ref.startsWith('external:')&&item.excerpt)),'인용한 외부 근거의 본문 전달');
   searchFail=true;
   const unavailable=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(unavailable.noEvidence,true);assert.equal(unavailable.review.passed,false);assert.match(unavailable.externalSearch.error,/503/);
