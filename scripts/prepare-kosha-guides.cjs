@@ -47,6 +47,15 @@ const KOSHA_GUIDES = [
   ['D-C-14-2026', 'general', ['승강로', '엘리베이터']], ['A-G-19-2026', 'general', ['고시인성', '표시']],
   ['E-G-18-2026', 'general', ['밀폐공간', '정화조', '맨홀', '산소결핍']], ['X-68-2015', 'general', ['밀폐공간', '위험관리']],
   ['A-G-10-2025', 'general', ['급식실', '구내식당', '주방']], ['A-G-6-2025', 'general', ['급식실', '조리', '화상', '미끄러짐']],
+  // 2026-11-01 simulation gaps (motorcycles, kitchens, batteries, forklifts, warehouses, trucks, customer stress, gas).
+  ['A-G-3-2025', 'general', ['오토바이', '이륜차', '배달', '집배']], ['A-G-5-2025', 'general', ['조리도구', '칼', '구내식당']],
+  ['H-26-2020', 'general', ['조리', '급식', '화상']], ['W-26-2023', 'general', ['급식', '환기', '주방']],
+  ['E-10-2013', 'general', ['축전지', '배터리', '충전']], ['G-100-2013', 'general', ['지게차', '운전자 교육']],
+  ['X-66-2013', 'general', ['물류', '창고', '위험성평가']], ['H-221-2023', 'general', ['물류센터', '공기질', '먼지']],
+  ['C-114-2020', 'general', ['화물자동차', '적재함', '상하차']], ['H-163-2021', 'general', ['감정노동', '고객응대', '창구']],
+  ['H-203-2018', 'general', ['고객응대', '폭언', '창구']], ['E-G-2-2025', 'general', ['직무스트레스']],
+  ['E-G-5-2025', 'general', ['직무스트레스', '업종별']], ['H-91-2021', 'general', ['피로', '과로']],
+  ['H-47-2021', 'general', ['장시간 근로', '과로']], ['C-C-87-2026', 'general', ['가스누출', '경보기', '보일러']],
 ];
 const MAX_FILE_BYTES = 300000, CHUNK = 40, MAX_SECTION = 6000;
 const quote = value => `'${String(value).replace(/'/g, "''")}'`;
@@ -80,6 +89,13 @@ function cleanLines(text, number) {
 // Splits "1. 목적", "4. 제목" and "4.2 제목" headings; numbers must run in order so quoted law items
 // ("1. 견고한 구조로 할 것") are not mistaken for headings. Text after the last heading stays in it.
 function guideSections(lines) {
+  // Some PDFs put a heading number on its own line ("1." / "목적"); join it with the short title line after it.
+  lines = lines.reduce((joined, line) => {
+    const previous = joined.at(-1);
+    if (previous && /^\d{1,2}\.$/.test(previous) && line.length <= 20) joined[joined.length - 1] = `${previous} ${line}`;
+    else joined.push(line);
+    return joined;
+  }, []);
   // Older PDFs split spaced headings ("1. 목" / "적"); anchor on the body's "2. 적용범위" (not the
   // dotted table of contents) and step back to the "1." heading before it.
   const scope = lines.findIndex(line => /^2\.\s*적\s*용\s*범\s*위$/.test(line));
@@ -133,6 +149,16 @@ function guideSections(lines) {
   }).filter((section, index, all) => all.findIndex(other => other.locator === section.locator) === index);
 }
 
+const TRANSCRIBED_DIR = path.join(__dirname, '../local-import/kosha/transcribed');
+// '## 4.1 제목' headings split a hand-copied guide into sections, like the numbered sections of text PDFs.
+function transcribedSections(text) {
+  return text.split(/^## /m).map(part => part.trim()).filter(Boolean).map(part => {
+    const [heading, ...rest] = part.split('\n');
+    const locator = heading.trim().slice(0, 120), body = `${locator}\n${rest.join('\n').trim()}`;
+    return { locator, body, content_hash: crypto.createHash('sha256').update(body).digest('hex') };
+  }).filter(section => section.body.length > section.locator.length + 1);
+}
+
 function documentStatements({ metadata, sections }) {
   const url = quote(metadata.source_url), version = quote(metadata.source_version);
   const head = `-- ${metadata.title} · ${metadata.source_version} · 항목 ${sections.length}개
@@ -142,8 +168,9 @@ insert into public.safety_documents (
 ) values (
   ${quote(metadata.title)}, ${url}, '한국산업안전보건공단', ${quote(metadata.category)}, 'guideline',
   array[${metadata.tags.map(quote).join(', ')}]::text[], '대한민국',
-  '한국산업안전보건공단 공개 기술지원규정(KOSHA GUIDE) 원문 PDF에서 추출한 글. 법령이 아닌 기술 권고이며 표·그림과 최신 여부는 원문 PDF에서 확인', 'PUBLIC',
-  'approved', true, ${metadata.effective_from ? quote(metadata.effective_from) : 'null'}, null, ${version}, now(), 'KOSHA 산업안전포털 원문 확인 · PDF 글 추출', 'kosha-guide-import'
+  ${quote(metadata.transcribed ? '한국산업안전보건공단 공개 기술지원규정(KOSHA GUIDE). 원문 PDF가 그림으로만 되어 있어 화면을 보고 글로 옮김. 법령이 아닌 기술 권고이며 그림·표·수치와 최신 여부는 원문 PDF에서 확인'
+    : '한국산업안전보건공단 공개 기술지원규정(KOSHA GUIDE) 원문 PDF에서 추출한 글. 법령이 아닌 기술 권고이며 표·그림과 최신 여부는 원문 PDF에서 확인')}, 'PUBLIC',
+  'approved', true, ${metadata.effective_from ? quote(metadata.effective_from) : 'null'}, null, ${version}, now(), ${quote(metadata.transcribed ? 'KOSHA 산업안전포털 원문 확인 · 그림 PDF 옮김' : 'KOSHA 산업안전포털 원문 확인 · PDF 글 추출')}, 'kosha-guide-import'
 )
 on conflict (source_url) do update set
   title = excluded.title, publisher = excluded.publisher, category = excluded.category, kind = excluded.kind,
@@ -202,16 +229,20 @@ function main() {
     try {
       if (!guide) throw Error('현행 목록에 없음(개정·폐지 확인)');
       const { out, url } = downloadPdf(guide, dir);
-      const text = execFileSync('pdftotext', ['-enc', 'UTF-8', out, '-'], { maxBuffer: 64 << 20 }).toString();
-      const sections = guideSections(cleanLines(text, number));
+      // Image-only PDFs are copied by hand from the page images (no OCR: it misread figures such as 230mm → 2300001)
+      // into local-import/kosha/transcribed/<number>.txt with '## <heading>' lines; those files take precedence.
+      const transcribedFile = path.join(TRANSCRIBED_DIR, `${number}.txt`);
+      const transcribed = fs.existsSync(transcribedFile);
+      const sections = transcribed ? transcribedSections(fs.readFileSync(transcribedFile, 'utf8'))
+        : guideSections(cleanLines(execFileSync('pdftotext', ['-enc', 'UTF-8', out, '-'], { maxBuffer: 64 << 20 }).toString(), number));
       if (sections.length < 2) throw Error('본문 글을 추출하지 못함(그림 PDF일 수 있음)');
       const date = /^\d{8}$/.test(guide.techGdlnOfancYmd || '') ? guide.techGdlnOfancYmd.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null;
       documents.push({
-        metadata: { title: `KOSHA GUIDE ${number} ${guide.techGdlnNm.trim()}`, source_url: url, category, tags: ['KOSHA GUIDE', ...tags], effective_from: date,
+        metadata: { title: `KOSHA GUIDE ${number} ${guide.techGdlnNm.trim()}`, source_url: url, category, tags: ['KOSHA GUIDE', ...tags], effective_from: date, transcribed,
           source_version: `KOSHA GUIDE ${number}${date ? ` · 공표 ${date}` : ''}` },
         sections,
       });
-      console.log(`${number} ${guide.techGdlnNm.trim()} · 항목 ${sections.length}개`);
+      console.log(`${number} ${guide.techGdlnNm.trim()} · 항목 ${sections.length}개${transcribed ? ' (그림 PDF 옮김)' : ''}`);
     } catch (error) { failures.push(`${number}: ${error.message}`); console.log(`실패 ${number}: ${error.message}`); }
   }
   for (const file of writeSqlFiles(documents, outPath)) console.log(`작성: ${path.relative(process.cwd(), file)}`);
@@ -220,4 +251,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { KOSHA_GUIDES, cleanLines, guideSections };
+module.exports = { KOSHA_GUIDES, cleanLines, guideSections, transcribedSections };

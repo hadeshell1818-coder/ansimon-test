@@ -584,6 +584,17 @@ const OFFICIAL_SAFETY_SOURCES = [
     category: 'general',
     tags: ['편의시설', '경사로', '점자블록', '손잡이', '고객'],
   },
+  // 2026-11-01 simulation gaps and the laws cited by the added KOSHA guides (C-114, H-47, H-221, H-203, A-G-3).
+  { type: 'law', title: '도로교통법', category: 'general', tags: ['이륜차', '오토바이', '안전모', '집배', '운전', '화물자동차'] },
+  { type: 'law', title: '도로교통법 시행령', category: 'general', tags: ['이륜차', '운전', '적재'] },
+  { type: 'law', title: '도로교통법 시행규칙', category: 'general', tags: ['이륜차', '안전모', '승차'] },
+  { type: 'law', title: '동물보호법', category: 'general', tags: ['개 물림', '목줄', '맹견', '배달'] },
+  { type: 'law', title: '동물보호법 시행규칙', category: 'general', tags: ['개 물림', '목줄', '맹견'] },
+  { type: 'law', title: '근로기준법', category: 'general', tags: ['장시간 근로', '연장근로', '휴게', '직장 내 괴롭힘'] },
+  { type: 'law', title: '근로기준법 시행령', category: 'general', tags: ['근로시간', '휴게'] },
+  { type: 'law', title: '실내공기질 관리법', category: 'general', tags: ['실내공기질', '먼지', '환기'] },
+  { type: 'law', title: '실내공기질 관리법 시행규칙', category: 'general', tags: ['실내공기질', '유지기준'] },
+  { type: 'administrative-rule', title: '근로자 건강증진활동 지침', category: 'general', tags: ['건강증진', '직무스트레스', '고객응대'] },
 ];
 
 // Official titles differ only in spacing or middle-dot characters (·, ㆍ, ・) across listings.
