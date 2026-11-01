@@ -41,6 +41,9 @@ function jsonFromResponse(result) {
 
 const SUPABASE_HINT = 'Supabase 대시보드에서 프로젝트가 일시중지(Paused)되지 않았는지, 서버의 SAFETY_SUPABASE_URL 값이 맞는지 확인하세요.';
 
+// Stage ① (input understanding): search words for the report, shared by drafts and the simulation.
+const QUERY_EXTRACTION_PROMPT = '산업안전 위험 설명과 사진에서 검색할 한국어 핵심어 5~8개를 JSON으로 뽑으세요. 담당자의 일상 표현은 법령 조문과 단어가 달라 그대로는 근거를 찾지 못하므로, queries의 절반 이상은 법령·기준 조문 제목에 실제로 쓰이는 용어로 바꿔 쓰고 나머지는 현장 표현(설비·장소 이름)으로 쓰세요. 법령 용어 예(일반 분류표이며 해당하는 것만 쓰세요): 넘어짐·미끄러짐→전도의 방지·작업장의 바닥, 무거운 물건·허리→중량물 취급·근골격계, 반복 동작·자세→작업자세·유해요인 조사, 떨어짐→추락의 방지·개구부·안전난간, 사다리→사다리식 통로, 끼임·말림→원동기·회전축·덮개·비상정지장치, 정비 중 가동→운전정지·잠금, 차량·지게차와 부딪힘→접촉의 방지·유도자·작업계획서, 지게차→차량계 하역운반기계·헤드가드, 화물 쌓기·무너짐→화물의 적재·하적단, 물건 떨어짐→낙하물, 감전→충전부 방호·누전차단기·접지, 전선 벗겨짐→절연피복, 불·화재→화재위험작업·소화설비, 비상구 막힘→피난시설·비상구, 어두움→조도·조명, 추위→한랭, 더위→고열작업·휴식·온도, 고객 폭언·위협→고객의 폭언, 스트레스·과로→직무스트레스, 외부 업체 작업→도급인, 맨홀·탱크→밀폐공간, 칼·공구→수공구·보호구, 자동문·셔터→동력으로 작동되는 문, 소화기→소화기구, 유도등→유도등, 승강기→승강기 안전검사, 공기·환기→환기, 모니터·컴퓨터 작업→영상표시단말기. 한 단어 또는 두 단어로 쓰세요. 최우선은 담당자의 응답 부담을 최소화하고 주어진 설명으로 바로 초안을 작성하는 것입니다. 일상적인 표현·오탈자는 문맥으로 해석하세요. 질문은 기본적으로 하지 않습니다. 설명의 의미나 위험 대상 자체를 해석할 수 없거나, 서로 다른 해석에 따라 안전조치가 충돌하여 설비별 적절한 보수·교체·격리 방법을 정하기 어려운 경우에만 재검토가 필요한 모호함과 핵심 질문 후보 1~2개를 제시하세요. 이 단계의 질문을 담당자에게 바로 보내지 말고 별도 재검토를 거칩니다. 무게·횟수·높이·폭·기존 조치 등 세부 수치가 없다는 이유만으로 질문하지 마세요. 대상 설비가 분명하고 안전한 공통 대책이나 조건별 대책으로 작성 가능한 경우 critical은 false, questions는 빈 배열입니다. 질문 이유에는 설비 확인으로 어떤 구체적 조치가 달라지는지 적으세요. 예: 파손된 철망·모서리에 찔림이라는 설명에서 철망이 롤파레트인지 고정 울타리인지 알 수 없으면 종류를 핵심 질문 하나로 확인하세요. 일반적인 점검·교육 문구를 쓸 수 있다는 이유로 설비 종류 확인을 생략하지 마세요. 이미 답변이 있으면 추가 질문 없이 초안을 작성하고 모름·미확인은 한계로 남기세요. 형식: {"queries":["..."],"critical":false,"questions":[]} 또는 {"queries":["..."],"critical":true,"questions":[{"question":"해석에 꼭 필요한 질문","reason":"질문 없이는 안전한 초안 작성이 불가능한 이유"}]}';
+
 function createKnowledgeRepository(env = process.env, request = fetch) {
   const url = env.SAFETY_SUPABASE_URL;
   const key = env.SAFETY_SUPABASE_SERVICE_KEY;
@@ -584,6 +587,15 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const ranked = await searchApprovedSections(queries, semantic?.sections || [], { wide });
       return [...ranked.laws.map(item => ({ ...item, kind: 'law' })), ...ranked.guides.map(item => ({ ...item, kind: 'guide' }))].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, kind: item.kind, matchedBy: item.matchedBy || 'words' }));
     },
+    // Stage ① only, for the simulation: the same search-word extraction a draft runs first.
+    async extractQueries(description, process = '') {
+      if (!env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY가 필요합니다.');
+      const result = await requestAiJson({ request, key: env.OPENAI_API_KEY, maxTokens: 1000, stage: '현장정보 해석', messages: [
+        { role: 'system', content: QUERY_EXTRACTION_PROMPT },
+        { role: 'user', content: JSON.stringify({ description: String(description).slice(0, 3000), process: String(process || '').slice(0, 200), answers: [], feedback: '', conversation: [], currentDraft: null }) },
+      ] });
+      return [...new Set((Array.isArray(result.queries) ? result.queries : []).map(x => String(x).trim().slice(0, 50)).filter(Boolean))].slice(0, 8);
+    },
     async refineQueries(description, queries, process = '') {
       const weak = configured ? await weakQueries(queries) : [];
       if (!weak.length || !env.OPENAI_API_KEY) return { queries, weak, added: [] };
@@ -621,7 +633,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const reused = feedback && !correctedContext && body.refreshSources !== true && previousSession?.key === evidenceKey && previousSession.expires > Date.now()
         ? previousSession : null;
       // options.queries (simulation only): reuse one case's search words across evidence modes so modes are compared fairly.
-      const extracted = reused ? { queries: reused.queries, critical: false } : Array.isArray(options.queries) && options.queries.length ? { queries: options.queries.slice(0, 8), critical: false } : await callAi([{ role: 'system', content: '산업안전 위험 설명과 사진에서 검색할 한국어 핵심어 5~8개를 JSON으로 뽑으세요. 담당자의 일상 표현은 법령 조문과 단어가 달라 그대로는 근거를 찾지 못하므로, queries의 절반 이상은 법령·기준 조문 제목에 실제로 쓰이는 용어로 바꿔 쓰고 나머지는 현장 표현(설비·장소 이름)으로 쓰세요. 법령 용어 예(일반 분류표이며 해당하는 것만 쓰세요): 넘어짐·미끄러짐→전도의 방지·작업장의 바닥, 무거운 물건·허리→중량물 취급·근골격계, 반복 동작·자세→작업자세·유해요인 조사, 떨어짐→추락의 방지·개구부·안전난간, 사다리→사다리식 통로, 끼임·말림→원동기·회전축·덮개·비상정지장치, 정비 중 가동→운전정지·잠금, 차량·지게차와 부딪힘→접촉의 방지·유도자·작업계획서, 지게차→차량계 하역운반기계·헤드가드, 화물 쌓기·무너짐→화물의 적재·하적단, 물건 떨어짐→낙하물, 감전→충전부 방호·누전차단기·접지, 전선 벗겨짐→절연피복, 불·화재→화재위험작업·소화설비, 비상구 막힘→피난시설·비상구, 어두움→조도·조명, 추위→한랭, 더위→고열작업·휴식·온도, 고객 폭언·위협→고객의 폭언, 스트레스·과로→직무스트레스, 외부 업체 작업→도급인, 맨홀·탱크→밀폐공간, 칼·공구→수공구·보호구, 자동문·셔터→동력으로 작동되는 문, 소화기→소화기구, 유도등→유도등, 승강기→승강기 안전검사, 공기·환기→환기, 모니터·컴퓨터 작업→영상표시단말기. 한 단어 또는 두 단어로 쓰세요. 최우선은 담당자의 응답 부담을 최소화하고 주어진 설명으로 바로 초안을 작성하는 것입니다. 일상적인 표현·오탈자는 문맥으로 해석하세요. 질문은 기본적으로 하지 않습니다. 설명의 의미나 위험 대상 자체를 해석할 수 없거나, 서로 다른 해석에 따라 안전조치가 충돌하여 설비별 적절한 보수·교체·격리 방법을 정하기 어려운 경우에만 재검토가 필요한 모호함과 핵심 질문 후보 1~2개를 제시하세요. 이 단계의 질문을 담당자에게 바로 보내지 말고 별도 재검토를 거칩니다. 무게·횟수·높이·폭·기존 조치 등 세부 수치가 없다는 이유만으로 질문하지 마세요. 대상 설비가 분명하고 안전한 공통 대책이나 조건별 대책으로 작성 가능한 경우 critical은 false, questions는 빈 배열입니다. 질문 이유에는 설비 확인으로 어떤 구체적 조치가 달라지는지 적으세요. 예: 파손된 철망·모서리에 찔림이라는 설명에서 철망이 롤파레트인지 고정 울타리인지 알 수 없으면 종류를 핵심 질문 하나로 확인하세요. 일반적인 점검·교육 문구를 쓸 수 있다는 이유로 설비 종류 확인을 생략하지 마세요. 이미 답변이 있으면 추가 질문 없이 초안을 작성하고 모름·미확인은 한계로 남기세요. 형식: {"queries":["..."],"critical":false,"questions":[]} 또는 {"queries":["..."],"critical":true,"questions":[{"question":"해석에 꼭 필요한 질문","reason":"질문 없이는 안전한 초안 작성이 불가능한 이유"}]}' }, { role: 'user', content: withPhoto(context) }], 700);
+      const extracted = reused ? { queries: reused.queries, critical: false } : Array.isArray(options.queries) && options.queries.length ? { queries: options.queries.slice(0, 8), critical: false } : await callAi([{ role: 'system', content: QUERY_EXTRACTION_PROMPT }, { role: 'user', content: withPhoto(context) }], 700);
       let clarificationReview = null;
       const ambiguousWireTarget=/철망/.test(description)&&!/(롤\s*파[레렛]트|롤\s*팔[레렛]트|롤테이너|울타리|펜스|방호망|가드|창문|배수구|선반)/.test(description+' '+String(body.process||''));
       if (!feedback && !answers.length && (extracted.critical === true || ambiguousWireTarget)) {
