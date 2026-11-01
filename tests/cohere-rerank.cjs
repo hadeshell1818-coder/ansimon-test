@@ -48,8 +48,9 @@ async function main() {
   assert.equal(rerankCall.headers.Authorization, 'Bearer co'); assert.equal(rerankCall.body.model, 'rerank-v3.5');
   assert.equal(rerankCall.body.documents.length, 16, 'the whole wide pool is reranked');
   const evidence = draftEvidence();
-  assert.deepEqual(evidence.filter(item => item.type === '승인된 법령').map(item => item.ref), ['doc:law-9', 'doc:law-8', 'doc:law-7', 'doc:law-6', 'doc:law-5', 'doc:law-4'], 'top 6 statutes in reranked order');
-  assert.deepEqual(evidence.filter(item => item.type === '문서 본문').map(item => item.ref), ['doc:guide-5', 'doc:guide-4', 'doc:guide-3', 'doc:guide-2'], 'top 4 guides in reranked order');
+  // The reranked order is reversed here: 6 guides then laws 9..6 make the top 10 of any kind (no reserved law slots).
+  assert.deepEqual(evidence.filter(item => item.type === '승인된 법령').map(item => item.ref), ['doc:law-9', 'doc:law-8', 'doc:law-7', 'doc:law-6'], 'statutes in reranked order');
+  assert.deepEqual(evidence.filter(item => item.type === '문서 본문').map(item => item.ref), ['doc:guide-5', 'doc:guide-4', 'doc:guide-3', 'doc:guide-2', 'doc:guide-1', 'doc:guide-0'], 'guides in reranked order');
   assert.ok(calls.some(call => call.body.messages?.[0]?.content.startsWith('산업안전 위험 설명을 읽고')), 'HyDE passage feeds the meaning search');
 
   cohere = 'fail';
@@ -64,6 +65,6 @@ async function main() {
   calls.length = 0;
   assert.equal((await noKey.recommendRisk({ description: '지게차가 후진하는데 뒤에 사람 지나감' })).internalSearch.mode, 'words');
   assert.ok(!calls.some(call => call.href.includes('cohere')), 'no Cohere call without a key');
-  console.log('PASS: Cohere rerank orders the draft evidence (top 6 statutes + 4 guides), falls back on failure or delay, off without a key');
+  console.log('PASS: Cohere rerank orders the draft evidence (top 10 of any kind), falls back on failure or delay, off without a key');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const {createKnowledgeRepository}=require('../safety-knowledge.cjs');
 async function main(){
- let failedSearch=false,clarificationCalls=0,lateAmbiguity=false,draftHasMeasures=false;
+ let failedSearch=false,clarificationCalls=0,lateAmbiguity=false,draftHasMeasures=false,criticalFirst=false;
  const source={title:'안전 작업 지침',publisher:'안전보건공단',url:'https://www.kosha.or.kr/guide',excerpt:'파손 장비 사용 중지',measure:'파손 장비 격리'};
  const request=async(url,options)=>{
   const body=JSON.parse(options.body);let result;
@@ -10,7 +10,7 @@ async function main(){
    return {ok:true,json:async()=>({output:[{type:'web_search_call',action:{sources:[{url:source.url}]}},{type:'message',content:[{type:'output_text',text:JSON.stringify({sources:[source]})}]}]})};
   }
   const prompt=body.messages[0].content;
-  if(prompt.startsWith('산업안전 위험 설명'))result={critical:false,queries:['롤파레트 파손'],questions:[]};
+  if(prompt.startsWith('산업안전 위험 설명'))result={critical:criticalFirst,queries:['롤파레트 파손'],questions:criticalFirst?[{question:'철사가 어느 부위에서 튀어나왔나요?',reason:'부위 확인'}]:[]};
   else if(prompt.startsWith('질문 필요성을 재검토')){clarificationCalls++;result={unresolvedMeaning:true,questions:[{question:'어떤 설비의 철망인가요? 예: 롤파레트, 고정 울타리',reason:'설비 종류에 따라 격리·수리·교체 방법이 다릅니다.'}]};}
   else if(prompt.startsWith('당신은 산업안전 위험성평가 초안의 품질'))result=lateAmbiguity?{needsClarification:true,questions:[{question:'어떤 설비인가요?',reason:'대상 식별 필요'}]}:{causalCheck:'pass',legalCheck:'pass',approvedMeasures:['파손 롤파레트 사용을 중지하고 표시·격리한 뒤 담당자가 철망 교체 또는 적정 수리를 확인하고 재사용한다.'],approvedCitations:['external:0']};
   else result=lateAmbiguity&&!draftHasMeasures?{factor:'파손 부품에 찔림',measures:[],citations:[]}:{factor:'파손 롤파레트 철망에 찔림',measures:['사용 중지 후 격리·수리'],citations:['external:0']};
@@ -22,6 +22,8 @@ async function main(){
  const answer=await repo.recommendRisk({description:'파손된 철망·모서리에 긁히거나 찔릴 위험',answers:[{question:first.questions[0].question,answer:'롤파레트'}]});
  assert.equal(answer.review.passed,true);assert.match(answer.measures[0],/롤파레트.*격리/);assert.equal(clarificationCalls,1);
  const known=await repo.recommendRisk({description:'롤파레트의 파손된 철망에 찔릴 위험'});assert.equal(known.needsClarification,undefined);assert.equal(clarificationCalls,1);
+ // Named equipment: a part/detail question is never asked even when the first AI pass marks it critical.
+ criticalFirst=true;const named=await repo.recommendRisk({description:'롤파렛트에 철사 튀어나와 찔림',process:'접수'});assert.equal(named.needsClarification,undefined);assert.equal(clarificationCalls,1);criticalFirst=false;
  lateAmbiguity=true;const late=await repo.recommendRisk({description:'파손된 부품의 끝에 찔릴 위험'});assert.equal(late.needsClarification,true);assert.equal(late.questions.length,1);
  // A usable draft is shown for review instead of being replaced by a late question.
  draftHasMeasures=true;const usable=await repo.recommendRisk({description:'파손된 부품의 끝에 찔릴 위험'});assert.equal(usable.needsClarification,undefined);assert.equal(usable.measures.length>0,true);draftHasMeasures=false;

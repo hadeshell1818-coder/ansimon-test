@@ -32,6 +32,32 @@ async function main() {
   missing = true; calls.length = 0;
   const fallback = await repo.rankEvidence(['밀폐공간', '맨홀']);
   assert.ok(fallback.some(item => item.ref === 'doc:old'), 'per-word fetch runs without 008');
-  console.log('PASS: ranked word search inside Supabase with weights; per-word fetch only without 008');
+
+  // Other spellings are searched without their own count query, a word in over a fifth of sections (사용) is left
+  // out of the ranked search, and the document list and counts are fetched once for repeated searches.
+  const seen = [];
+  const counts = { 사용: 500, 롤파렛트: 3, 철사: 4 };
+  const countingRequest = async (url, options = {}) => {
+    const href = decodeURIComponent(String(url)), body = options.body ? JSON.parse(options.body) : {};
+    seen.push({ href, body });
+    const word = (href.match(/body\.ilike\.\*(.+?)\*/) || [])[1];
+    const range = href.includes('select=id&or=') ? `0-0/${counts[word] ?? 0}` : href.endsWith('?select=id') ? '0-0/1000' : '0-0/0';
+    const reply = data => ({ ok: true, status: 200, headers: { get: () => range }, json: async () => data, text: async () => JSON.stringify(data) });
+    if (href.includes('/rpc/search_safety_sections')) return reply(body.law_only ? [] : [{ id: 'p5', document_id: 'guide', version: 'v1', locator: '접수작업 · 항목 5', body: '롤테이너 돌출된 강선' }]);
+    if (href.includes('/safety_documents?')) return reply(docs);
+    return reply([]);
+  };
+  const counting = createKnowledgeRepository({ SAFETY_SUPABASE_URL: 'https://t.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'k' }, countingRequest);
+  const found = await counting.rankEvidence(['롤파렛트 사용', '철사']);
+  assert.deepEqual(found.map(item => item.ref), ['doc:p5']);
+  const searchCall = seen.find(call => call.href.includes('/rpc/search_safety_sections'));
+  assert.ok(searchCall.body.words.includes('롤테이너') && searchCall.body.words.includes('철사'), 'other spellings are searched');
+  assert.ok(!searchCall.body.words.includes('사용'), 'a word in over a fifth of sections is left out');
+  const countedWords = seen.filter(call => call.href.includes('select=id&or=')).map(call => call.href.match(/body\.ilike\.\*(.+?)\*/)[1]);
+  assert.deepEqual(countedWords.sort(), ['롤파렛트', '사용', '철사'].sort(), 'only the words the staff used are counted');
+  seen.length = 0;
+  await counting.rankEvidence(['롤파렛트 사용', '철사']);
+  assert.ok(!seen.some(call => call.href.includes('/safety_documents?') || call.href.includes('select=id')), 'document list and counts are reused');
+  console.log('PASS: ranked word search inside Supabase with weights; per-word fetch only without 008; spellings share counts; common words dropped; lists cached');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
