@@ -153,7 +153,7 @@ async function replay() {
   await pool(rows, Number(args.concurrency || 4), async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
     let ranked;
-    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) }); }
+    try { ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}), ...(args.wide ? { wide: true } : {}), ...(args.rerank ? { rerankFor: text } : {}) }); }
     catch (error) { failed.push(`${row.caseId}: ${error.message.slice(0, 80)}`); return; }
     // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
     const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
@@ -168,7 +168,7 @@ async function replay() {
     }
   });
   const pct = (a, b) => `${a}/${b} (${Math.round(a / b * 100)}%)`;
-  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}`,
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}${args.wide ? ' + 넓은 후보' : ''}${args.rerank ? ' + AI 골라내기' : ''}`,
     JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))), `실패 ${failed.length}건`, failed.slice(0, 3).join(' / '));
 }
 
