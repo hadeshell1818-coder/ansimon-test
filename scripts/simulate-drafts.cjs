@@ -142,6 +142,25 @@ async function judge() {
   });
 }
 
+// Replay stored search words through the current retrieval code (no AI calls): share of expected grounds that
+// reach the word-search candidates. Compare runs with SAFETY_SEARCH_IDF=off (old ranking) and default.
+async function replay() {
+  const repo = createKnowledgeRepository(env);
+  const corpus = await corpusIndex();
+  const types = new Map(casesFile.types.map(type => [type.id, type]));
+  const rows = readJsonl(path.resolve(args.replay === true ? RUNS : args.replay)).filter(row => !row.error && row.mode === 'words' && row.queries?.length);
+  const tally = {};
+  await pool(rows, 4, async row => {
+    const ranked = await repo.rankEvidence(row.queries);
+    const t = tally[row.set] ||= { existing: 0, hit: 0 };
+    for (const expect of types.get(row.typeId).expect) {
+      if (!corpus.some(item => matches(expect, item))) continue;
+      t.existing += 1; if (ranked.some(item => matches(expect, item))) t.hit += 1;
+    }
+  });
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}`, JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, `${v.hit}/${v.existing} (${Math.round(v.hit / v.existing * 100)}%)`]))));
+}
+
 async function report() {
   const corpus = await corpusIndex();
   const types = new Map(casesFile.types.map(type => [type.id, type]));
@@ -209,6 +228,7 @@ async function report() {
 (async () => {
   if (args.judge) await judge();
   else if (args.report) await report();
+  else if (args.replay) await replay();
   else if (args.corpus) { const index = await corpusIndex(); console.log(`조문 ${index.length}건`); }
   else await run();
 })().catch(error => { console.error(error); process.exitCode = 1; });

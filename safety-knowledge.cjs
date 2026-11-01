@@ -79,15 +79,24 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // Word-search candidates for the given queries: by article title, body and word pairs (Supabase ilike
   // returns matches unordered, so candidates are ranked afterwards). Reused when one query set is ranked
   // several ways, as in the accuracy check.
+  // Generic words that appear in article titles of every chapter (거푸집·동바리 "안전조치") and say nothing about
+  // the hazard; the AI often adds them to search words. Ignored when ranking is on (SAFETY_SEARCH_IDF is not off).
+  const GENERIC_TERMS = new Set(['안전조치', '안전', '조치', '관리', '점검', '작업', '위험', '사고', '예방', '대책', '확인', '필요', '개선', '기준', '방지', '안전관리', '안전대책', '위험요인', '작업환경', '우체국']);
+  const idf = env.SAFETY_SEARCH_IDF !== 'off';
   async function gatherSections(queries) {
     const words = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
       .map(term => term.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9-]/g, '').slice(0, 40))
-      .filter(term => term.length >= 2).slice(0, 12);
+      .filter(term => term.length >= 2 && !(idf && GENERIC_TERMS.has(term))).slice(0, 12);
     const phrases = queries.map(query => String(query).trim()).filter(query => /\s/.test(query));
     const documents = await call('?select=id,title,source_url,publisher,kind,review_status,source_version&review_status=eq.approved&limit=1000');
     const select = '?select=id,document_id,version,locator,body';
     const like = term => `*${encodeURIComponent(term)}*`;
-    const requests = words.flatMap(term => [`${select}&locator=ilike.${like(term)}&limit=30`, `${select}&body=ilike.${like(term)}&limit=30`]);
+    // Supabase returns ilike matches unordered and cut at the limit, so a common word (e.g. 밀폐공간 in dozens of
+    // KOSHA sections) could fill the 30 rows and hide the statute articles. Statutes get their own queries.
+    const lawIds = documents.filter(doc => doc.kind === 'law' || String(doc.source_url || '').startsWith('https://www.law.go.kr/')).map(doc => doc.id);
+    const lawFilter = lawIds.length ? `&document_id=in.(${lawIds.map(encodeURIComponent).join(',')})` : '';
+    const requests = words.flatMap(term => [`${select}&locator=ilike.${like(term)}&limit=30`, `${select}&body=ilike.${like(term)}&limit=30`,
+      ...(lawFilter ? [`${select}${lawFilter}&locator=ilike.${like(term)}&limit=40`, `${select}${lawFilter}&body=ilike.${like(term)}&limit=30`] : [])]);
     for (let i = 0; i < words.length; i++) for (let j = i + 1; j < words.length && j < i + 4; j++) {
       requests.push(`${select}&and=(body.ilike.${like(words[i])},body.ilike.${like(words[j])})&limit=20`);
     }
@@ -95,10 +104,15 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     for (let index = 0; index < requests.length; index += 8) {
       found.push(...(await Promise.all(requests.slice(index, index + 8).map(query => callResource('safety_document_sections', query).catch(() => [])))).flat());
     }
-    return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found };
+    // How many stored sections contain each word (for rare-word weighting). Unknown counts fall back to weight 1.
+    sectionTotal ||= await countRows('safety_document_sections', '?select=id').catch(() => 0);
+    const frequency = new Map(sectionTotal ? await Promise.all(words.map(async term => [term,
+      await countRows('safety_document_sections', `?select=id&or=(body.ilike.${like(term)},locator.ilike.${like(term)})`).catch(() => null)])) : []);
+    return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found, frequency, total: sectionTotal };
   }
+  let sectionTotal = 0;
   async function searchApprovedSections(queries, semanticSections = [], { fusion = env.SAFETY_EVIDENCE_FUSION || 'add', gathered = null, wide = false } = {}) {
-    const { words, phrases, approved, found } = gathered || await gatherSections(queries);
+    const { words, phrases, approved, found, frequency = new Map(), total = 0 } = gathered || await gatherSections(queries);
     if (!words.length && !semanticSections.length) return { laws: [], guides: [] };
     const candidates = new Map();
     for (const section of [...found, ...semanticSections]) {
@@ -106,9 +120,15 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       // Older versions stay only because an assessment cites them; search the current text.
       if (doc && section.body && (!doc.source_version || !section.version || section.version === doc.source_version)) candidates.set(section.id, { ...section, ...doc, id: section.id, document_id: doc.id });
     }
+    // Rare words say more than common ones: "점검" appears in hundreds of stored sections, "밀폐공간" in a few dozen,
+    // so each word is weighted by how few sections contain it (inverse document frequency, as in standard search).
+    const weight = new Map(words.map(term => {
+      const df = frequency.get(term);
+      return [term, idf && total && Number.isFinite(df) ? 1 + Math.log((total + 1) / (df + 1)) : 1];
+    }));
     const score = item => {
       let total = 0;
-      for (const term of words) { if (item.body.includes(term)) total += 1; if (String(item.locator || '').includes(term)) total += 3; if (String(item.title || '').includes(term)) total += 1; }
+      for (const term of words) { const w = weight.get(term); if (item.body.includes(term)) total += w; if (String(item.locator || '').includes(term)) total += 3 * w; if (String(item.title || '').includes(term)) total += w; }
       for (const phrase of phrases) if (item.body.includes(phrase)) total += 2;
       // General provisions of the safety rules (제1~53조: workplace, passages, PPE, falls) apply to every workplace
       // and tend to lose to same-word articles of construction or mining chapters; +1 measured best on 175 cases.
@@ -532,6 +552,12 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         ? new URL(signedPath, new URL(url)).href
         : new URL(`/storage/v1${signedPath.startsWith('/object/') ? signedPath : `/${signedPath}`}`, new URL(url)).href;
       return { url: fileUrl, fileName: rows[0].original_file_name };
+    },
+    // Retrieval only (no draft), for replaying stored search words in the simulation at no AI cost.
+    async rankEvidence(queries, { semanticText = '', wide = false } = {}) {
+      const semantic = semanticText && semanticAvailable() ? await semanticSearch(semanticText) : null;
+      const ranked = await searchApprovedSections(queries, semantic?.sections || [], { wide });
+      return [...ranked.laws, ...ranked.guides].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, matchedBy: item.matchedBy || 'words' }));
     },
     async recommendRisk(body, options = {}) {
       const key = env.OPENAI_API_KEY;
