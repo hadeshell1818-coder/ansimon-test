@@ -59,11 +59,18 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     if (!configured) throw new Error('Supabase 연결 설정이 필요합니다.');
     const base = new URL(url);
     if (base.protocol !== 'https:') throw new Error('HTTPS 프로젝트 URL이 필요합니다.');
-    const response = await send('Supabase 자료실', new URL(`/rest/v1/${resource}${query}`, base), {
+    const attempt = () => send('Supabase 자료실', new URL(`/rest/v1/${resource}${query}`, base), {
       ...options,
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...options.headers },
       signal: AbortSignal.timeout(10000),
     }, SUPABASE_HINT);
+    let response = await attempt();
+    // A statement timeout (57014) under load is retried once for reads and searches (GET or rpc), never for writes.
+    const readOnly = !options.method || options.method === 'GET' || resource.startsWith('rpc/search_') || resource.startsWith('rpc/match_');
+    if (!response.ok && response.status === 500 && readOnly) {
+      const detail = await response.clone().text().catch(() => '');
+      if (/57014|statement timeout/.test(detail)) { await new Promise(resolve => setTimeout(resolve, 700)); response = await attempt(); }
+    }
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       const message = detail ? detail.replace(/\s+/g, ' ').slice(0, 240) : '프로젝트 설정과 SQL 적용 여부를 확인하세요.';
@@ -96,9 +103,9 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     const select = '?select=id,document_id,version,locator,body';
     const like = term => `*${encodeURIComponent(term)}*`;
     // How many stored sections contain each word (for rare-word weighting). Unknown counts fall back to weight 1.
-    sectionTotal ||= await countRows('safety_document_sections', '?select=id').catch(() => 0);
-    const frequency = new Map(sectionTotal ? await Promise.all(words.map(async term => [term,
-      await countRows('safety_document_sections', `?select=id&or=(body.ilike.${like(term)},locator.ilike.${like(term)})`).catch(() => null)])) : []);
+    // Counts are cached for an hour (wordFrequency): each draft used to send a count query per word.
+    if (!sectionTotal || Date.now() - frequencyCachedAt > 3600000) { sectionTotal = await countRows('safety_document_sections', '?select=id').catch(() => 0); frequencyCache.clear(); frequencyCachedAt = Date.now(); }
+    const frequency = new Map(sectionTotal ? await Promise.all(words.map(async term => [term, await wordFrequency(term)])) : []);
     // Ranked search inside Supabase (supabase/008_ranked_word_search.sql): every approved current section is scored,
     // so a common word can no longer cut the right article out of an unordered 30-row page. Statutes and other
     // material are ranked separately. Without 008 the older per-word fetch below is used and the reason is kept.
@@ -127,7 +134,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     }
     return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found, frequency, total: sectionTotal, rankedSearch };
   }
-  let sectionTotal = 0;
+  let sectionTotal = 0, frequencyCachedAt = 0;
   // Search-word refinement: the AI writes search words without knowing which ones are useless in this corpus.
   // Words that are generic, appear in too many sections (e.g. 점검: 1,308 of 6,462) or match nothing are sent back
   // with the whole report so the AI replaces them with context-specific hazard, work or statute terms.
