@@ -152,14 +152,22 @@ async function replay() {
   const tally = {};
   await pool(rows, 4, async row => {
     const text = types.get(row.typeId).cases[Number(row.caseId.split('-').pop()) - 1];
-    const ranked = await repo.rankEvidence(row.queries, args.refine ? { refineFor: text } : {});
-    const t = tally[row.set] ||= { existing: 0, hit: 0 };
+    const ranked = await repo.rankEvidence(row.queries, { ...(args.refine ? { refineFor: text } : {}), ...(args.semantic ? { semanticText: text } : {}) });
+    // Stage ② metric: expected ground within the top 10 shown (6 statutes + 4 guides) and within the whole pool.
+    const laws = ranked.filter(item => item.kind === 'law'), guides = ranked.filter(item => item.kind !== 'law');
+    const top10 = [...laws.slice(0, 6), ...guides.slice(0, 4)], top4 = [...laws.slice(0, 2), ...guides.slice(0, 2)];
+    const t = tally[row.set] ||= { existing: 0, all: 0, top10: 0, top4: 0 };
     for (const expect of types.get(row.typeId).expect) {
       if (!corpus.some(item => matches(expect, item))) continue;
-      t.existing += 1; if (ranked.some(item => matches(expect, item))) t.hit += 1;
+      t.existing += 1;
+      if (ranked.some(item => matches(expect, item))) t.all += 1;
+      if (top10.some(item => matches(expect, item))) t.top10 += 1;
+      if (top4.some(item => matches(expect, item))) t.top4 += 1;
     }
   });
-  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}`, JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, `${v.hit}/${v.existing} (${Math.round(v.hit / v.existing * 100)}%)`]))));
+  const pct = (a, b) => `${a}/${b} (${Math.round(a / b * 100)}%)`;
+  console.log(`IDF ${env.SAFETY_SEARCH_IDF === 'off' ? '끔' : '켬'}${args.refine ? ' + 검색어 다듬기' : ''}${args.semantic ? ' + 원문 의미검색' : ''}`,
+    JSON.stringify(Object.fromEntries(Object.entries(tally).map(([k, v]) => [k, { 후보전체: pct(v.all, v.existing), 상위10: pct(v.top10, v.existing), 상위4: pct(v.top4, v.existing) }]))));
 }
 
 async function report() {

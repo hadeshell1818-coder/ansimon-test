@@ -582,7 +582,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       if (refineFor) queries = (await this.refineQueries(refineFor, queries)).queries;
       const semantic = semanticText && semanticAvailable() ? await semanticSearch(semanticText) : null;
       const ranked = await searchApprovedSections(queries, semantic?.sections || [], { wide });
-      return [...ranked.laws, ...ranked.guides].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, matchedBy: item.matchedBy || 'words' }));
+      return [...ranked.laws.map(item => ({ ...item, kind: 'law' })), ...ranked.guides.map(item => ({ ...item, kind: 'guide' }))].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, kind: item.kind, matchedBy: item.matchedBy || 'words' }));
     },
     async refineQueries(description, queries, process = '') {
       const weak = configured ? await weakQueries(queries) : [];
