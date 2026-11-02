@@ -58,7 +58,7 @@
 ### 2-0. 배포 전 필수 (2026-11-02 검토)
 
 - [x] 데이터·사진 저장 위치를 `DATA_DIR`로 분리(Railway Volume 경로 자동 인식), `/api/health`로 영구 저장 여부 확인
-- [!] Railway에 Volume 연결(Mount path `/data`) 후 `/api/health`가 `persistent: true`인지 확인(사용자 연결, 에이전트 확인)
+- [ ] 보류(사용자 결정 2026-11-02, 필요할 때 연결): Railway에 Volume 연결(Mount path `/data`) 후 `/api/health`가 `persistent: true`인지 확인
 - [x] Supabase 근거 자료 백업·복원 도구(`scripts/backup-supabase.cjs`): 2026-11-02 첫 백업(문서 186·조문 7,675·SIF 6,032행), 로컬 PostgreSQL에 복원해 행 수·체크섬·검색 함수 확인. 자료를 추가하면 다시 백업
 - [ ] 운영 데이터(신고·평가·사진) 매일 백업 및 복원 절차(영구 저장 연결 후)
 - [ ] 로그인 시도 제한 복구, 세션을 파일에 저장(재배포 때 전원 로그아웃 방지)
