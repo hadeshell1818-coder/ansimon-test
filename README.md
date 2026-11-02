@@ -26,6 +26,11 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `prepare-official-laws-from-web.cjs [제목…]` | Open API 없이 국가법령정보센터 공개 페이지에서 법령·고시 조문을 읽어 SQL 생성 (Playwright 필요). 파일은 300KB 이하로 나뉘며 `-01`, `-02` 순서대로 Supabase SQL Editor에서 실행. `--from-sql 파일…`은 이전 형식 SQL을 다시 받지 않고 새 형식으로 변환 |
 | `prepare-kosha-guides.cjs [out.sql]` | 산업안전포털(portal.kosha.or.kr)의 현행 KOSHA GUIDE 목록에서 우체국 시설·작업 관련 60건 PDF를 받아 글을 추출하고 `4.2 제목` 단위로 나눈 SQL 생성 (`curl`, `pdftotext` 필요; `KOSHA_PDF_DIR`로 받은 PDF 재사용). 그림으로만 된 PDF는 건너뛰고 실패로 표시. 월 1회 개정 검토 때 다시 실행 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
+| `simulate-drafts.cjs` | 근거 검색·초안 시뮬레이션(사례별 후보·전달·인용 채점, 후보 저장 `--dump-pool`) |
+| `simulate-sectors.cjs` | 장흥 점검표 항목으로 만든 공정별 사례의 검색 순위·법령 판정 |
+| `rerank-eval.cjs`, `rerank_onnx.py`, `rerank-cohere.cjs` | 저장한 후보로 재순위 방식 비교(검색 순서·bge-reranker·Cohere) |
+
+근거 검색(RAG)을 어떻게 개선했는지와 위 도구 사용법은 `docs/rag-learning-notes.md`에 정리했습니다.
 
 ## 안드로이드 앱(APK)
 
@@ -48,11 +53,11 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 
 ## 근거 재순위(Cohere) 설정
 
-AI 초안의 근거는 RAG 표준 순서로 고릅니다. ① 담당자 문장에서 검색어를 뽑고(AI), ② 단어 검색(`supabase/008_ranked_word_search.sql`)과 의미 검색(HyDE: 법령 문체의 가상 문장을 함께 넣어 검색)으로 후보를 약 50개 모은 뒤, ③ **Cohere Rerank API**가 후보마다 관련도를 매겨 순서를 다시 정합니다. 초안에는 상위 법령 6개와 지침 4개가 그 순서로 넘어갑니다.
+AI 초안의 근거는 RAG 표준 순서로 고릅니다. ① 담당자 문장에서 검색어를 뽑고(AI), ② 단어 검색(`supabase/008_ranked_word_search.sql`)과 의미 검색(HyDE: 법령 문체의 가상 문장을 함께 넣어 검색)으로 후보를 약 50개 모은 뒤, ③ **Cohere Rerank API**가 후보마다 관련도를 매겨 순서를 다시 정합니다. 초안에는 종류와 상관없이 상위 10개가 그 순서로 넘어갑니다(맞는 법령이 없을 때 엉뚱한 법령이 자리를 채우지 않도록).
 
-1. https://dashboard.cohere.com 에서 **Production** API 키를 만듭니다(결제 정보 등록 필요, 체험 키는 분당 10회 제한·운영 불가).
+1. https://dashboard.cohere.com 의 API Keys에서 키를 복사합니다. 장흥 샘플 단계는 체험(Trial) 키로 충분합니다(분당 10회 제한, 넘으면 그 건만 검색 순서로 대체). 실제 우체국 도입 때는 결제 정보를 등록한 **Production** 키로 바꿉니다(약관상 체험 키는 시험·평가용).
 2. Railway 서비스 Variables에 `COHERE_API_KEY`를 넣고 재배포합니다. 키가 있으면 재순위가 기본으로 켜집니다(`SAFETY_EVIDENCE_MODE=words`로 끌 수 있음).
-3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_LAWS`·`SAFETY_RERANK_GUIDES`(기본 6·4).
+3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_KEEP`(초안에 넘길 개수, 기본 10).
 4. Cohere가 실패하거나 제한 시간을 넘기면 검색 순서 그대로 초안을 만들고, 초안 화면의 「근거자료·검색 결과」에 "근거 순위: …"로 사용 여부·사유를 표시합니다.
 5. 비용: 초안 1건 = 재순위 1회(검색 1회). 공개 요금 기준 검색 1,000회에 약 2달러라 월 수백 건이면 몇백 원 수준입니다(가입 시 공식 요금표 확인).
 
