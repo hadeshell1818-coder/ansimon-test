@@ -62,6 +62,22 @@ async function main() {
   noVerdict = true;
   const unchecked = await repo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함', refreshSources: true });
   assert.deepEqual(unchecked.measureLinks.map(item => item.refs), [[], []]);
-  console.log('PASS: light review by number drops unsupported refs and illogical measures; readable 관련근거 labels; identical checklist items merged; plain measure text; uncited drafts get sources only through the review');
+  // External web search runs only when our own sources are thin (or staff ask for a fresh search): a top 10 of
+  // checklist items and guides without any statute does not trigger it.
+  noRefs = false; noVerdict = false;
+  let webSearches = 0;
+  const noStatutes = async (url, options = {}) => {
+    const href = decodeURIComponent(String(url)), body = options.body ? JSON.parse(options.body) : {};
+    if (href.endsWith('/v1/responses')) { webSearches++; return json({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ sources: [] }) }] }] }); }
+    if (href.includes('/rpc/search_safety_sections')) return json(body.law_only ? [] : sections.kosha);
+    return request(url, options);
+  };
+  const webRepo = createKnowledgeRepository({ SAFETY_SUPABASE_URL: 'https://t.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'k', OPENAI_API_KEY: 'k' }, noStatutes);
+  const noLaw = await webRepo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함' });
+  assert.equal(webSearches, 0, 'no statute in the sources is not a reason for a web search');
+  assert.equal(noLaw.externalSearch.attempted, false);
+  await webRepo.recommendRisk({ description: '계단이 미끄러워 넘어질 뻔함', refreshSources: true });
+  assert.equal(webSearches, 1, 'a fresh search requested by staff still includes the web search');
+  console.log('PASS: light review by number drops unsupported refs and illogical measures; readable 관련근거 labels; identical checklist items merged; plain measure text; uncited drafts get sources only through the review; web search only when own sources are thin');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

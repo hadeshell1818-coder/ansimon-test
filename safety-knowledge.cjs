@@ -863,7 +863,10 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       if (!reused) {
         try {
           const usableInternal = evidence.filter(item => item.status === 'approved' && (item.excerpt || item.controls));
-          const shouldSearch = externalSearch.configured && (body.refreshSources === true || usableInternal.length < 3 || !usableInternal.some(item => item.type === '승인된 법령'));
+          // External web search only when our own material is thin (fewer than 3 usable sources) or staff ask for a fresh
+          // search. A top 10 without statutes is not a reason: legal citation is optional and a matching checklist item
+          // is a better source; that rule added about 6 s and found nothing (롤파렛트 case, 2026-11-02).
+          const shouldSearch = externalSearch.configured && (body.refreshSources === true || usableInternal.length < 3);
           if (shouldSearch) externalSearch = { ...await searchExternalSources(description, queries), attempted: true };
           externalSearch.sources.forEach((source, index) => evidence.push({
             ref: `external:${index}`,
@@ -930,7 +933,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const review = await callAi([
         {
           role: 'system',
-          content: '당신은 산업안전 위험성평가 초안의 품질 검토자입니다. 유해·위험요인과 각 개선대책이 논리적으로 맞는지만 확인하세요: 그 대책이 이 위험을 실제로 줄이는가. 일반적인 점검·교육·관리 대책도 이 위험을 줄이면 맞음(logical true)입니다. 이 위험과 무관하거나 위험을 키우는 대책만 logical false로 표시하세요. 각 대책의 refs 중에서 그 대책 내용을 실제로 담고 있거나 직접 요구하는 근거만 남기세요(뒷받침하지 않는 ref는 빼고, 새 ref는 추가하지 않음). 대책 문장은 고쳐 쓰지 말고 번호로만 답하세요. note에는 담당자가 현장에서 확인할 점을 한 문장으로 쓰고 없으면 빈 문자열로 두세요. 대책이 하나도 없고 위험 대상(설비 종류)을 알 수 없을 때만 needsClarification=true와 질문 1~2개를 쓰세요. JSON: {"measures":[{"no":1,"logical":true,"refs":["남길 ref"]}],"causalCheck":"pass|partial|fail","note":"","needsClarification":false,"questions":[]}',
+          content: '당신은 산업안전 위험성평가 초안의 품질 검토자입니다. 유해·위험요인과 각 개선대책이 논리적으로 맞는지만 확인하세요: 그 대책이 이 위험을 실제로 줄이는가. 교육·점검·표지·기록·작업수칙 같은 관리적 대책은 항상 logical true로 두세요(담당자가 필요 없는 것을 지웁니다). logical false는 이 위험과 상관없는 대상·작업에 대한 대책이거나 위험을 키우는 대책일 때만 씁니다. 각 대책의 refs 중에서 그 대책 내용을 실제로 담고 있거나 직접 요구하는 근거만 남기세요(뒷받침하지 않는 ref는 빼고, 새 ref는 추가하지 않음). 대책 문장은 고쳐 쓰지 말고 번호로만 답하세요. note에는 담당자가 현장에서 확인할 점을 한 문장으로 쓰고 없으면 빈 문자열로 두세요. 대책이 하나도 없고 위험 대상(설비 종류)을 알 수 없을 때만 needsClarification=true와 질문 1~2개를 쓰세요. JSON: {"measures":[{"no":1,"logical":true,"refs":["남길 ref"]}],"causalCheck":"pass|partial|fail","note":"","needsClarification":false,"questions":[]}',
         },
         { role: 'user', content: JSON.stringify({
           hazard: description, interpretation: understanding, process: String(body.process || '').slice(0, 200),
