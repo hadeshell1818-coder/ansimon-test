@@ -32,6 +32,16 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 
 근거 검색(RAG)을 어떻게 개선했는지와 위 도구 사용법은 `docs/rag-learning-notes.md`에 정리했습니다.
 
+## 데이터 영구 저장(Railway Volume) — 운영 필수
+
+신고·소통실 기록·위험성평가(`data.json`, `safety.json`, `risk.json`)와 사진(`uploads/`)은 서버 파일로 저장됩니다. Railway는 배포할 때마다 앱 폴더를 새로 만들기 때문에, **Volume을 붙이지 않으면 재배포 때 모두 지워집니다**(알림 구독 정보 포함).
+
+1. Railway 프로젝트 화면 → **+ Create**(또는 빈 곳 오른쪽 클릭) → **Volume** → 서비스 `ansimon-test` 선택 → Mount path에 `/data` 입력. `/app`처럼 앱 폴더를 덮는 경로는 쓰지 않습니다.
+2. Volume을 붙이면 Railway가 다시 배포하고, 서버가 Railway가 알려 주는 경로(`RAILWAY_VOLUME_MOUNT_PATH`)에 자동으로 저장합니다. 다른 경로를 쓰려면 `DATA_DIR`을 지정합니다.
+3. 확인: `https://<운영 주소>/api/health`가 `"persistent":true`이면 영구 저장 중입니다(`false`면 앱 폴더에 저장 중).
+4. Volume을 처음 붙이는 배포 때는 그 전 컨테이너에만 있던 자료는 옮겨지지 않습니다(그동안도 배포마다 지워졌던 자료).
+5. 백업은 별도로 필요합니다(다음 단계).
+
 ## 안드로이드 앱(APK)
 
 `android/`는 집배원 화면(`/report.html`)을 앱으로 여는 Trusted Web Activity입니다. 화면·기능은 웹과 같고 설치 파일만 제공합니다.
