@@ -29,6 +29,7 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `simulate-drafts.cjs` | 근거 검색·초안 시뮬레이션(사례별 후보·전달·인용 채점, 후보 저장 `--dump-pool`) |
 | `simulate-sectors.cjs` | 장흥 점검표 항목으로 만든 공정별 사례의 검색 순위·법령 판정 |
 | `rerank-eval.cjs`, `rerank_onnx.py`, `rerank-cohere.cjs` | 저장한 후보로 재순위 방식 비교(검색 순서·bge-reranker·Cohere) |
+| `backup-supabase.cjs` | Supabase 근거 자료 전체 백업(표별 JSON·행 수·체크섬·DB 구조 SQL·복원 SQL·zip, 의미 색인 벡터는 제외). `--to-sql 폴더`로 복원 SQL만 다시 생성. 우체국 내부 자료가 들어 있으니 공개 저장소에 올리지 않음. 자료를 추가하면 다시 실행 |
 
 근거 검색(RAG)을 어떻게 개선했는지와 위 도구 사용법은 `docs/rag-learning-notes.md`에 정리했습니다.
 
