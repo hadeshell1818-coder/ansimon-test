@@ -38,9 +38,31 @@ app.use(express.json({ limit: '10mb' }));
 require('./carrier-weather.cjs').registerWeatherRoute(app, userFromReq);
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data.json');
-const UP_DIR = path.join(__dirname, 'uploads');
+/* Runtime data (reports, safety control, risk assessments, photos) lives in DATA_DIR. The app folder is replaced on
+ * every Railway deploy, so data kept there disappears; with a Railway Volume attached (mount path such as /data) the
+ * server uses its mount path automatically (RAILWAY_VOLUME_MOUNT_PATH), or DATA_DIR when set. */
+const DATA_DIR = path.resolve(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname);
+const PERSISTENT_STORAGE = DATA_DIR !== path.resolve(__dirname);
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!PERSISTENT_STORAGE) console.warn('⚠️ 영구 저장소 없음 — 신고·평가·사진이 앱 폴더에 저장되어 재배포 때 지워집니다. Railway Volume을 붙이세요.');
+// First start on a new data folder: carry over files left in the app folder (local runs); never overwrite.
+if (PERSISTENT_STORAGE) {
+  for (const name of ['data.json', 'safety.json', 'risk.json']) {
+    const from = path.join(__dirname, name), to = path.join(DATA_DIR, name);
+    if (!fs.existsSync(to) && fs.existsSync(from)) { try { fs.copyFileSync(from, to); } catch (e) { console.error('data copy fail', name, e.message); } }
+  }
+}
+const DATA_FILE = path.join(DATA_DIR, 'data.json');
+const UP_DIR = path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(UP_DIR)) fs.mkdirSync(UP_DIR, { recursive: true });
+if (PERSISTENT_STORAGE && fs.existsSync(path.join(__dirname, 'uploads'))) {
+  for (const name of fs.readdirSync(path.join(__dirname, 'uploads'))) {
+    const to = path.join(UP_DIR, name);
+    if (!fs.existsSync(to)) { try { fs.copyFileSync(path.join(__dirname, 'uploads', name), to); } catch (_) { /* folders or unreadable files are skipped */ } }
+  }
+}
+// Public health check: whether data survives a redeploy (no paths or counts are shown).
+app.get('/api/health', (_req, res) => res.json({ ok: true, storage: { persistent: PERSISTENT_STORAGE } }));
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -1062,7 +1084,7 @@ app.get('/api/reports/:id/photo', (req, res) => {
  *   ④ 업무종료 이상유무 보고: 본인 보고 + 관제 확인 수정(수정 이력 보존)
  * 외부 신고(reports)와 데이터·권한을 완전히 분리한다(safety.json 별도 저장).
  * ========================================================================= */
-const SAFETY_FILE = path.join(__dirname, 'safety.json');
+const SAFETY_FILE = path.join(DATA_DIR, 'safety.json');
 const SAFETY_OFFICE = '장흥우체국';
 const SAFETY_CALL_NUMBER = process.env.SAFETY_CALL_NUMBER || '061-000-0000'; // 소통팀장 사무실 번호로 교체
 const LEVELS = { urgent: '긴급', caution: '주의', notice: '전달말씀' };
@@ -1801,7 +1823,7 @@ setInterval(() => resendUnacknowledged().catch(e => console.error('push reminder
  *   소통팀장 ↔ 안전보건담당자 이관(음성→평가), 역이관(사진→긴급전파)
  * 데이터는 risk.json 별도 저장. 외부 신고(reports)·즉시위험(SAFE)과 분리.
  * ========================================================================= */
-const RISK_FILE = path.join(__dirname, 'risk.json');
+const RISK_FILE = path.join(DATA_DIR, 'risk.json');
 const isSafetyMgr = u => !!u && u.kind === 'safety_mgr' && u.org === SAFETY_OFFICE;
 
 /* 공정: 교재 서식은 소포 공정 예시. 장흥우체국 실제 공정으로 교체 예정(값은 예시). */
