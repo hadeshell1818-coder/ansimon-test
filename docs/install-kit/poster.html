@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>안심ON 설치 QR</title>
+<style>
+@font-face { font-family: "Noto Sans KR"; font-weight: 400; src: url("https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.1.1/files/noto-sans-kr-korean-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Noto Sans KR"; font-weight: 700; src: url("https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.1.1/files/noto-sans-kr-korean-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Noto Sans KR"; font-weight: 900; src: url("https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.1.1/files/noto-sans-kr-korean-900-normal.woff2") format("woff2"); }
+@page { size: A4; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #fff; color: #14181f; font-family: "Noto Sans KR", sans-serif; }
+.page { width: 210mm; height: 297mm; padding: 22mm 18mm 16mm; display: flex; flex-direction: column; align-items: center; text-align: center; }
+small { font-size: 13pt; font-weight: 700; color: #b4231b; border: 2px solid #b4231b; border-radius: 6px; padding: 0.8mm 3.5mm; }
+h1 { margin: 6mm 0 2mm; font-size: 46pt; font-weight: 900; letter-spacing: -1px; }
+.lead { margin: 0; font-size: 17pt; line-height: 1.5; color: #2a313b; }
+.qr { margin: 11mm 0 6mm; border: 3px solid #14181f; border-radius: 16px; padding: 5mm; }
+.qr img { width: 110mm; height: 110mm; display: block; }
+.cta { font-size: 21pt; font-weight: 900; margin: 0 0 7mm; }
+.steps { display: flex; gap: 4mm; width: 100%; }
+.steps div { flex: 1; border: 1.5px solid #c9ced6; border-radius: 10px; padding: 3.5mm 3mm; font-size: 12.5pt; line-height: 1.5; }
+.steps b { display: block; font-size: 16pt; font-weight: 900; margin-bottom: 1mm; }
+.foot { margin-top: auto; font-size: 11pt; color: #4d5562; }
+</style>
+</head>
+<body>
+<div class="page">
+  <small>장흥우체국 시범운영</small>
+  <h1>안심ON</h1>
+  <p class="lead">위험 신고 · 귀국보고 · 관제실 알림</p>
+  <div class="qr"><img src="qr.svg" alt="안심ON 설치 QR 코드"></div>
+  <p class="cta">📱 카메라로 찍고 링크를 누르세요</p>
+  <div class="steps">
+    <div><b>① 로그인</b>담당자에게 받은<br>아이디·비밀번호</div>
+    <div><b>② 홈 화면에 설치</b>안드로이드: 「앱 설치」<br>아이폰: 공유 →<br>「홈 화면에 추가」</div>
+    <div><b>③ 알림 켜기</b>아이콘으로 실행 후<br>「관제실 알림 켜기」</div>
+  </div>
+  <p class="foot">자세한 방법은 설치 안내문을 보세요 · 주소: ansimon-test-production.up.railway.app/report.html</p>
+</div>
+</body>
+</html>
