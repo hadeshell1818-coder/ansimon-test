@@ -156,9 +156,16 @@ if (process.env.PW_JIP4) {
   console.warn('⚠️ PW_JIP4 미설정 — 우체국 안전관제(jip4) 계정이 비활성화됩니다.');
 }
 if (process.env.PW_JIP5) {
-  USERS.jip5 = { pwHash: requiredPassword('PW_JIP5'), kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', region: '장흥군', type: null, role: '안전보건담당자' };
+  USERS.jip5 = { pwHash: requiredPassword('PW_JIP5'), kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', region: '장흥군', type: null, role: '안전보건담당자', officeCode: 'jangheung', officeRole: 'manager' };
 } else {
   console.warn('⚠️ PW_JIP5 미설정 — 안전보건담당자(jip5) 계정이 비활성화됩니다.');
+}
+/* 관내국 시험 계정(2026-11-04): 장흥대덕우체국 담당자(daedeok1)와 국장(daedeok2)이 비밀번호 PW_TEST_OFFICE 하나를 함께 쓴다.
+ * 국 구분·상하반기 보고·국장 결재를 시험하는 용도이며, 직원 명단으로 계정을 만들 때 이 블록과 변수를 지운다(AGENTS.md 1-1절). */
+if (process.env.PW_TEST_OFFICE) {
+  const testOfficeHash = requiredPassword('PW_TEST_OFFICE');
+  USERS.daedeok1 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 담당자', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국 안전 담당자(시험용)', officeCode: 'daedeok', officeRole: 'manager', test: true };
+  USERS.daedeok2 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 국장', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국장(시험용)', officeCode: 'daedeok', officeRole: 'head', test: true };
 }
 // Prototype accounts use per-account passwords when configured, otherwise existing PW_JIP.
 for (let i=11;i<=16;i++) {
@@ -166,7 +173,8 @@ for (let i=11;i<=16;i++) {
   USERS['jip'+i]={pwHash:requiredPassword(envName),kind:'carrier',name:'집배원'+(i-10),org:'장흥우체국',region:'장흥군',type:null,role:'집배원'};
 }
 function publicUser(id) { const u = USERS[id]; if (!u) return null;
-  return { id, kind: u.kind, name: u.name, org: u.org, zone: u.zone || null, region: u.region, type: u.type, role: u.role }; }
+  return { id, kind: u.kind, name: u.name, org: u.org, zone: u.zone || null, region: u.region, type: u.type, role: u.role,
+    officeCode: u.officeCode || null, officeRole: u.officeRole || null, test: !!u.test }; }
 
 /* ===================== 세션(토큰) ===================== */
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -596,8 +604,9 @@ function routeReport(r) {
     r.riskId = existing.id;
     syncRiskSource(existing); saveRisk(); broadcastRisk(); return;
   }
+  // The reporter's office goes with the report (accounts without one, today every carrier, belong to the head office).
   const item = {
-    id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier',
+    id:nextRiskId(), fromReport:r.id, status:'inbox', source:'carrier', officeCode: r.reporterOfficeCode || 'jangheung',
     reporter:r.carrier, reporterOrg:r.reporterOrg, createdAt:new Date().toISOString(),
     addr:r.addr, lat:r.lat, lng:r.lng,
     note:[r.addr, r.item, r.internalNote||r.memo].filter(Boolean).join(' · '),
@@ -810,7 +819,7 @@ app.post('/api/reports', reportLimiter, (req, res) => {
     aiMode: needsClassification ? null : (isInternalWorkRisk ? 'not-required' : 'na'),
     createdAt: new Date().toISOString(),
     carrier: u.zone ? `${u.name}(${u.zone})` : `${u.name}·${u.org}`, carrierId: u.id,
-    reporterOrg: u.org || null,
+    reporterOrg: u.org || null, reporterOfficeCode: u.officeCode || null,
     edited: false, editedAt: null, cancelledAt: null, cancelledBy: null,
     photoMosaic: false, mosaicBy: null, mosaicAt: null, mergedInto: null, dupDismissed: [], invalidReport: false,
   };
@@ -1824,7 +1833,58 @@ setInterval(() => resendUnacknowledged().catch(e => console.error('push reminder
  * 데이터는 risk.json 별도 저장. 외부 신고(reports)·즉시위험(SAFE)과 분리.
  * ========================================================================= */
 const RISK_FILE = path.join(DATA_DIR, 'risk.json');
-const isSafetyMgr = u => !!u && u.kind === 'safety_mgr' && u.org === SAFETY_OFFICE;
+const isSafetyMgr = u => !!u && u.kind === 'safety_mgr' && (u.org === SAFETY_OFFICE || RISK_OFFICES.some(office => office.code === u.officeCode));
+
+/* 국 구분(관내국): 총괄국 장흥우체국과 관내국 9곳이 같은 화면을 쓰고, 서버가 로그인한 사람의 국·역할로 자료를 거른다.
+ * 관내국 평가는 상·하반기 보고로 묶어 그 국 국장이 결재하면 그때부터 총괄국에 국별로 보인다. 결재 대기·결재 완료
+ * 보고에 든 항목은 고정되고, 총괄국의 보완 요청으로만 다시 고칠 수 있다(AGENTS.md 1-1절). 기록의 국 코드가 없으면 총괄국이다. */
+const HEAD_OFFICE_CODE = 'jangheung';
+const RISK_OFFICES = [
+  { code: HEAD_OFFICE_CODE, name: '장흥우체국', head: true },
+  ...[['yongsan', '장흥용산'], ['gwansan', '장흥관산'], ['daedeok', '장흥대덕'], ['hoejin', '회진'], ['anyang', '장흥안양'],
+    ['jangpyeong', '장평'], ['yuchi', '유치'], ['jangdong', '장흥장동'], ['busan', '장흥부산']].map(([code, name]) => ({ code, name: `${name}우체국`, head: false })),
+];
+const riskOffice = code => RISK_OFFICES.find(office => office.code === code) || RISK_OFFICES[0];
+const userOfficeCode = u => (u && RISK_OFFICES.some(office => office.code === u.officeCode)) ? u.officeCode : HEAD_OFFICE_CODE;
+const itemOfficeCode = it => (it && RISK_OFFICES.some(office => office.code === it.officeCode)) ? it.officeCode : HEAD_OFFICE_CODE;
+const isOfficeHead = u => u?.officeRole === 'head';
+const isHeadOfficeManager = u => isSafetyMgr(u) && userOfficeCode(u) === HEAD_OFFICE_CODE && !isOfficeHead(u);
+// Half-years follow the assessment date used by the table and the export: H1 = January–June, H2 = July–December.
+const riskItemDate = it => String(it?.assessmentStartedAt || it?.triagedAt || it?.createdAt || '').slice(0, 10);
+const halfOf = date => /^\d{4}-\d{2}/.test(String(date || '')) ? `${String(date).slice(0, 4)}-H${Number(String(date).slice(5, 7)) <= 6 ? 1 : 2}` : null;
+const halfRange = half => { const [year, part] = String(half).split('-H'); return part === '1' ? [`${year}-01-01`, `${year}-06-30`] : [`${year}-07-01`, `${year}-12-31`]; };
+const halfLabel = half => `${String(half).slice(0, 4)}년 ${String(half).endsWith('1') ? '상' : '하'}반기`;
+const officeReports = () => { if (!Array.isArray(RISK.officeReports)) RISK.officeReports = []; return RISK.officeReports; };
+const reportFor = (code, half) => officeReports().find(report => report.officeCode === code && report.half === half) || null;
+function reportOfItem(it) {
+  const report = reportFor(itemOfficeCode(it), halfOf(riskItemDate(it)));
+  return report && (report.itemIds || []).includes(it.id) ? report : null;
+}
+// Own office always; the head office manager also sees branch items in a report the branch head has approved.
+function riskItemVisible(u, it) {
+  if (!isSafetyMgr(u)) return false;
+  if (itemOfficeCode(it) === userOfficeCode(u)) return true;
+  return isHeadOfficeManager(u) && !!reportOfItem(it)?.approvedOnce;
+}
+// Why a change is refused (null when allowed): only the item's own office edits it, heads only view and approve,
+// and items in a report awaiting or holding approval stay fixed.
+function riskItemDenied(u, it) {
+  if (itemOfficeCode(it) !== userOfficeCode(u)) return { status: 403, error: '다른 국의 위험성평가는 수정할 수 없습니다.' };
+  if (isOfficeHead(u)) return { status: 403, error: '국장 계정은 보기와 결재만 할 수 있습니다.' };
+  const report = reportOfItem(it);
+  if (report?.status === 'pending') return { status: 409, error: '국장 결재 대기 중인 보고에 든 항목입니다. 고치려면 결재 요청을 취소하세요.' };
+  if (report?.status === 'approved') return { status: 409, error: '결재가 끝난 보고에 든 항목입니다. 고치려면 총괄국의 보완 요청이 필요합니다.' };
+  return null;
+}
+// Names for the approval box at the top right of printed and exported forms. A branch range inside one half-year
+// takes them from its report (preparer, and the head once approved); the head office prints the box with its
+// evaluators and leaves the approver blank for signing.
+function riskApprovalNames(code, rows, from, to) {
+  const half = halfOf(from) && halfOf(from) === halfOf(to) ? halfOf(from) : null;
+  const report = half && code !== HEAD_OFFICE_CODE ? reportFor(code, half) : null;
+  const evaluators = [...new Set(rows.map(it => it.evaluator || it.assessedBy).filter(Boolean))].join(', ');
+  return { writer: report?.preparedBy || evaluators, approver: report?.status === 'approved' ? report.approvedBy || '' : '' };
+}
 
 /* 공정: 교재 서식은 소포 공정 예시. 장흥우체국 실제 공정으로 교체 예정(값은 예시). */
 const PROCESSES = [
@@ -1936,16 +1996,32 @@ app.use(['/api/risk/state', '/api/risk/items'], (req, res, next) => {
   const user = userFromReq(req);
   if (!user) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
   if (!isSafetyMgr(user)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  // Every item change (PATCH, DELETE, triage, improve, transfer) passes here once for office and approval state.
+  const id = req.baseUrl === '/api/risk/items' ? decodeURIComponent(String(req.path || '').split('/')[1] || '') : '';
+  if (id === 'manual' && isOfficeHead(user)) return res.status(403).json({ error: '국장 계정은 보기와 결재만 할 수 있습니다.' });
+  const item = id && id !== 'manual' ? RISK.items.find(x => x.id === id) : null;
+  if (item) {
+    if (!riskItemVisible(user, item)) return res.status(404).json({ error: 'not found' });
+    const denied = riskItemDenied(user, item);
+    if (denied) return res.status(denied.status).json({ error: denied.error });
+  }
   next();
 });
 app.get('/api/risk/state', async (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   ensureRiskDemo();
+  const own = userOfficeCode(u);
+  const visible = RISK.items.filter(it => riskItemVisible(u, it));
+  const view = it => ({ ...itemForMgr(it), officeCode: itemOfficeCode(it), officeName: riskOffice(itemOfficeCode(it)).name,
+    readOnly: !!riskItemDenied(u, it), reportStatus: reportOfItem(it)?.status || null });
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
     criteria: RISK_CRITERIA,
-    inbox: RISK.items.filter(it => !it.routingInactive && ['inbox','referred'].includes(it.status)).map(itemForMgr),
-    registered: RISK.items.filter(it => !it.routingInactive && it.status !== 'inbox').map(itemForMgr),
+    office: { code: own, name: riskOffice(own).name, head: own === HEAD_OFFICE_CODE, role: isOfficeHead(u) ? 'head' : 'manager' },
+    offices: RISK_OFFICES,
+    inbox: isOfficeHead(u) ? [] : visible.filter(it => itemOfficeCode(it) === own && !it.routingInactive && ['inbox','referred'].includes(it.status)).map(view),
+    registered: visible.filter(it => !it.routingInactive && it.status !== 'inbox').map(view),
+    reports: reportsVisibleTo(u).map(officeReportView),
   });
 });
 app.get('/api/risk/export.xlsx', (req, res) => {
@@ -1953,40 +2029,51 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : null;
   const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : null;
   if (!from || !to || from > to) return res.status(400).json({ error: '조회 시작일과 종료일을 확인하세요.' });
+  // office: the user's own office by default; the head office may pick a branch or 'all' (approved reports only).
+  const office = typeof req.query.office === 'string' && (req.query.office === 'all' || RISK_OFFICES.some(o => o.code === req.query.office)) ? req.query.office : userOfficeCode(u);
   const items = RISK.items.filter(it => {
     const date = String(it.assessmentStartedAt || it.triagedAt || it.createdAt || '').slice(0, 10);
-    return !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
+    return riskItemVisible(u, it) && (office === 'all' || itemOfficeCode(it) === office)
+      && !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
   }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt)));
   const headers = ['번호', '유해·위험요인', '위험성 수준', '개선대책', '개선예정일', '개선완료일', '담당자', '이행결과서', '관련근거(선택사항)'];
   const border = { top: { style: 'thin', color: { rgb: '9AA4AE' } }, bottom: { style: 'thin', color: { rgb: '9AA4AE' } }, left: { style: 'thin', color: { rgb: '9AA4AE' } }, right: { style: 'thin', color: { rgb: '9AA4AE' } } };
   const workbook = XLSXStyle.utils.book_new();
   const groups = new Map();
   for (const it of items) {
-    const name = it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '미지정 공정';
-    if (!groups.has(name)) groups.set(name, []);
+    const processName = it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '미지정 공정';
+    // With all offices, sheets are per office and process (the sheet name carries the office; the title shows it in full).
+    const name = office === 'all' ? `${riskOffice(itemOfficeCode(it)).name.replace(/우체국$/, '')} · ${processName}` : processName;
+    if (!groups.has(name)) groups.set(name, Object.assign([], { processName }));
     groups.get(name).push(it);
   }
   if (!groups.size) groups.set('조회결과', []);
   const usedNames = new Set();
-  for (const [processName, group] of groups) {
-    const evaluators = [...new Set(group.map(it => it.evaluator || it.assessedBy).filter(Boolean))].join(', ') || '-';
+  for (const [sheetLabel, group] of groups) {
+    const processName = group.processName || sheetLabel;
+    const groupOffice = group.length ? itemOfficeCode(group[0]) : (office === 'all' ? userOfficeCode(u) : office);
+    const approval = riskApprovalNames(groupOffice, group, from, to);
     const { rows, heights } = riskExportRows(group);
-    const titleRow = [`공정명: ${processName}`, '', '', '', '', '', '', '', `평가자: ${evaluators}`];
-    const sheet = XLSXStyle.utils.aoa_to_sheet([titleRow, [], headers, ...rows]);
-    sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 2 } }];
+    // Rows 0–1: title on the left, approval box (담당 · 국장 with names) at the top right; row 3: column headers.
+    const titleRow = [`${riskOffice(groupOffice).name} 위험성평가표 · 공정명: ${processName}`, '', '', '', '', '', '', '담당', '국장'];
+    const nameRow = ['', '', '', '', '', '', '', approval.writer || '', approval.approver || ''];
+    const sheet = XLSXStyle.utils.aoa_to_sheet([titleRow, nameRow, [], headers, ...rows]);
+    sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 1, c: headers.length - 3 } }];
     sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch }));
-    sheet['!rows'] = [{ hpt: 30 }, { hpt: 8 }, { hpt: 42 }, ...heights.map(hpt => ({ hpt }))];
-    const endRow = 2 + rows.length;
+    sheet['!rows'] = [{ hpt: 20 }, { hpt: 36 }, { hpt: 8 }, { hpt: 42 }, ...heights.map(hpt => ({ hpt }))];
+    const endRow = 3 + rows.length;
     for (let r = 0; r <= endRow; r++) for (let c = 0; c < headers.length; c++) {
+      if (r === 2) continue;
       const address = XLSXStyle.utils.encode_cell({ r, c });
       const cell = sheet[address] || (sheet[address] = { t: 's', v: '' });
+      if (r <= 1 && c < headers.length - 2) { if (c === 0) cell.s = { font: { bold: true, sz: 14 }, alignment: { horizontal: 'left', vertical: 'center', wrapText: true } }; continue; }
       cell.s = { ...(cell.s || {}), border };
-      if (r === 0 && c === 0) cell.s = { ...cell.s, font: { bold: true, sz: 14 }, alignment: { horizontal: 'left', vertical: 'center' } };
-      else if (r === 0 && c === headers.length - 1) cell.s = { ...cell.s, font: { bold: true, sz: 11 }, alignment: { horizontal: 'right', vertical: 'center' } };
-      else if (r === 2) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
-      else if (r >= 3) cell.s = { ...cell.s, font: { sz: 10 }, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
+      if (r === 0) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' } };
+      else if (r === 1) cell.s = { ...cell.s, font: { sz: 10 }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
+      else if (r === 3) cell.s = { ...cell.s, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
+      else if (r >= 4) cell.s = { ...cell.s, font: { sz: 10 }, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } };
     }
-    const baseName = String(processName).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
+    const baseName = String(sheetLabel).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
     let sheetName = baseName, suffix = 2;
     while (usedNames.has(sheetName)) { const tail = ` (${suffix++})`; sheetName = baseName.slice(0, 31 - tail.length) + tail; }
     usedNames.add(sheetName);
@@ -2005,7 +2092,7 @@ function intakeRiskPhoto(u, b, viaTransfer) {
   if (b.photoBase64) { try { photoFile = path.basename(savePhoto('risk-' + id, b.photoBase64)); } catch (e) { throw e; } }
   const fromCarrier = u.kind === 'carrier' && !!(rosterById && rosterById(u.id));
   const it = {
-    id, status: 'inbox',
+    id, status: 'inbox', officeCode: userOfficeCode(u), officeName: riskOffice(userOfficeCode(u)).name,
     source: viaTransfer ? 'transfer' : (fromCarrier ? 'carrier' : 'staff'),
     reporter: u.name, reporterId: fromCarrier ? u.id : null, reporterOrg: u.org || null, reporterZone: u.zone || null,
     createdAt: new Date().toISOString(),
@@ -2101,7 +2188,7 @@ app.post('/api/risk/items/manual', async (req, res) => {
     catch (e) { return res.status(400).json({ error: e.message }); }
   }
   const it = {
-    id, status: 'assessing', source: 'safety_mgr',
+    id, status: 'assessing', source: 'safety_mgr', officeCode: userOfficeCode(u), officeName: riskOffice(userOfficeCode(u)).name,
     reporter: u.name, reporterOrg: u.org || null, reporterZone: null, createdAt: now,
     assessmentStartedAt: now, triagedAt: now, triagedBy: u.name,
     lat: null, lng: null, note: '', photoFile, proc: null, customProcess,
@@ -2253,13 +2340,94 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   res.json({ ok: true });
 });
 
+/* 관내국 상·하반기 보고: 관내국 담당자가 결재 요청 → 그 국 국장이 결재 또는 반려(사유) → 결재되면 따로 보고 없이
+ * 총괄국에 국별로 보인다. 결재된 보고는 고정되고, 총괄국의 보완 요청(사유)으로 다시 작성 → 재결재한다.
+ * 총괄국 자체 평가는 앱 결재 없이 출력물 결재란만 쓴다. 작성·결재·반려·보완 요청의 사람·시각·사유를 남긴다. */
+function reportsVisibleTo(u) {
+  return officeReports().filter(report => report.officeCode === userOfficeCode(u) || (isHeadOfficeManager(u) && report.approvedOnce));
+}
+function officeReportView(report) {
+  return { ...report, officeName: riskOffice(report.officeCode).name, halfLabel: halfLabel(report.half), itemCount: (report.itemIds || []).length, range: halfRange(report.half) };
+}
+// Items a half-year report carries: the office's registered assessments dated inside that half.
+function halfReportItems(code, half) {
+  const [from, to] = halfRange(half);
+  return RISK.items.filter(it => itemOfficeCode(it) === code && !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status)
+    && riskItemDate(it) >= from && riskItemDate(it) <= to);
+}
+function recordReportAction(report, action, u, reason = '') {
+  report.history = [...(report.history || []), { action, by: u.name, byId: u.id, at: new Date().toISOString(), ...(reason ? { reason } : {}) }].slice(-100);
+}
+app.get('/api/risk/office-reports', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  res.json({ office: userOfficeCode(u), reports: reportsVisibleTo(u).map(officeReportView) });
+});
+// 결재 요청: the branch manager sends one half-year to the head of the same office.
+app.post('/api/risk/office-reports', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  const code = userOfficeCode(u);
+  if (code === HEAD_OFFICE_CODE) return res.status(400).json({ error: '총괄국 평가는 앱 결재 없이 출력물 결재란만 사용합니다.' });
+  if (isOfficeHead(u)) return res.status(403).json({ error: '결재 요청은 관내국 안전 담당자가 합니다.' });
+  const half = String(req.body?.half || '');
+  if (!/^\d{4}-H[12]$/.test(half)) return res.status(400).json({ error: '보고할 반기를 확인하세요.' });
+  const items = halfReportItems(code, half);
+  if (!items.length) return res.status(400).json({ error: `${halfLabel(half)}에 보고할 위험성평가 항목이 없습니다.` });
+  let report = reportFor(code, half);
+  if (report?.status === 'pending') return res.status(409).json({ error: '이미 국장 결재 대기 중입니다.' });
+  if (report?.status === 'approved') return res.status(409).json({ error: '이미 결재된 보고입니다. 고치려면 총괄국의 보완 요청이 필요합니다.' });
+  const now = new Date().toISOString();
+  if (!report) {
+    RISK.reportSeq = (Number(RISK.reportSeq) || 0) + 1;
+    report = { id: 'OR' + RISK.reportSeq, officeCode: code, officeName: riskOffice(code).name, half, createdAt: now, approvedOnce: false };
+    officeReports().push(report);
+  }
+  Object.assign(report, { status: 'pending', itemIds: items.map(it => it.id), preparedBy: u.name, preparedById: u.id, requestedAt: now,
+    approvedBy: null, approvedById: null, approvedAt: null, rejectReason: null });
+  recordReportAction(report, 'request', u);
+  saveRisk(); broadcastRisk();
+  res.json({ ok: true, report: officeReportView(report) });
+});
+// withdraw (담당자, 결재 대기), approve / reject (같은 국 국장, 결재 대기), revision (총괄국 담당자, 결재 완료).
+app.post('/api/risk/office-reports/:id/:action', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  const report = officeReports().find(x => x.id === req.params.id);
+  if (!report || !reportsVisibleTo(u).includes(report)) return res.status(404).json({ error: '보고를 찾을 수 없습니다.' });
+  const action = req.params.action, reason = String(req.body?.reason || '').trim().slice(0, 500), now = new Date().toISOString();
+  const ownOffice = report.officeCode === userOfficeCode(u);
+  if (action === 'withdraw') {
+    if (!ownOffice || isOfficeHead(u)) return res.status(403).json({ error: '결재 요청은 관내국 안전 담당자만 취소할 수 있습니다.' });
+    if (report.status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 보고만 취소할 수 있습니다.' });
+    report.status = 'draft';
+  } else if (action === 'approve' || action === 'reject') {
+    if (!ownOffice || !isOfficeHead(u)) return res.status(403).json({ error: '그 국의 국장만 결재할 수 있습니다.' });
+    if (report.status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 보고만 결재할 수 있습니다.' });
+    if (action === 'reject' && !reason) return res.status(400).json({ error: '반려 사유를 입력하세요.' });
+    if (action === 'approve') Object.assign(report, { status: 'approved', approvedBy: u.name, approvedById: u.id, approvedAt: now, approvedOnce: true, revisionReason: null });
+    else Object.assign(report, { status: 'rejected', rejectReason: reason });
+  } else if (action === 'revision') {
+    if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '보완 요청은 총괄국 안전관리담당자가 합니다.' });
+    if (report.status !== 'approved') return res.status(409).json({ error: '결재가 끝난 보고에만 보완을 요청할 수 있습니다.' });
+    if (!reason) return res.status(400).json({ error: '보완할 내용을 입력하세요.' });
+    Object.assign(report, { status: 'revision', revisionReason: reason, revisionBy: u.name, revisionAt: now });
+  } else return res.status(404).json({ error: 'not found' });
+  recordReportAction(report, action, u, reason);
+  saveRisk(); broadcastRisk();
+  res.json({ ok: true, report: officeReportView(report) });
+});
+
 /* 청 누적보고: 기간 집계 */
 app.get('/api/risk/report-summary', (req, res) => {
   const u = userFromReq(req);
   if (!isSafetyMgr(u) && !(u && u.kind === 'control')) return res.status(403).json({ error: 'forbidden' });
   const days = Math.min(365, Math.max(1, +req.query.days || 30));
   const since = Date.now() - days * 864e5;
-  const inRange = RISK.items.filter(it => it.status !== 'inbox' && it.status !== 'discarded' && new Date(it.createdAt).getTime() >= since);
+  const inRange = RISK.items.filter(it => (!isSafetyMgr(u) || riskItemVisible(u, it)) && it.status !== 'inbox' && it.status !== 'discarded' && new Date(it.createdAt).getTime() >= since);
   const assessed = inRange.filter(it => RISK_CRITERIA.levels.some(x => x.value === it.riskLevel));
   const highRisk = assessed.filter(it => it.riskLevel !== '하');
   const done = highRisk.filter(it => it.status === 'done' && it.afterRiskLevel === '하');
@@ -2336,6 +2504,10 @@ function ensureRiskDemo() {
 }
 
 loadRisk();
+// Records from before the office split belong to the head office (장흥우체국); the name at the time is stored with the code.
+let riskOfficeMigrated = false;
+for (const it of RISK.items) if (!it.officeCode) { it.officeCode = HEAD_OFFICE_CODE; it.officeName = riskOffice(HEAD_OFFICE_CODE).name; riskOfficeMigrated = true; }
+if (riskOfficeMigrated) saveRisk();
 // 기존 내부위험 접수도 원본 신고와 처리 상태가 위험성평가 통계에 남도록 한 번 연결한다.
 let riskSourceMigrated = false;
 for (const it of RISK.items) {
@@ -2358,9 +2530,10 @@ for (const report of reports) {
 }
 if (externalRoutingMigrated) save();
 
+// Branch offices and heads use the library for drafts and search; loading, indexing and backup stay with the head office.
 require('./safety-knowledge.cjs').mountKnowledge(app, req => {
   const user = userFromReq(req);
-  return isSafetyMgr(user) ? user : null;
+  return isSafetyMgr(user) ? { ...user, knowledgeAdmin: isHeadOfficeManager(user) } : null;
 });
 
 // Digital Asset Links for the Android app (android/, Trusted Web Activity): with the signing fingerprint in

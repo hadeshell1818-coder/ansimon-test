@@ -108,6 +108,10 @@
 </style>
 <style id="risk-form-style">
 .month-summary{display:none!important}
+.doc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.doc-title{flex:1}.doc-title h1{text-align:left;margin-top:0}
+.approval-box{width:58mm;min-width:58mm;border-collapse:collapse;table-layout:fixed;margin-left:auto}.approval-box th,.approval-box td{border:1px solid #555;text-align:center;padding:4px;font-size:11px}.approval-box th{background:#eee;height:22px}.approval-box td{height:46px;vertical-align:middle}
+.report-card{border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 0}.report-card header{font-size:14px}.report-card p{margin:6px 0;font-size:13px}.err-text{color:#b42318}.status-pending{color:#b54708;font-weight:700}.status-approved{color:#067647;font-weight:700}.status-rejected,.status-revision{color:#b42318;font-weight:700}
+.result-head{display:flex;justify-content:flex-end;margin-bottom:8px}.result-form .approval-box{width:58mm;margin:0 0 0 auto;table-layout:fixed}.locked-row td{background:#fafbfc}.office-tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#e8edf2}
 .process-evaluator{margin-left:auto;text-align:right}
 .criteria-table{width:100%;border-collapse:collapse;font-size:12px}.criteria-table th,.criteria-table td{border:1px solid #aab2ba;padding:8px}.criteria-detail{white-space:pre-line}.three-step td{white-space:pre-wrap}.three-step select{max-width:100%;padding:5px;border:1px solid #aab2ba}.three-step small{display:block;font-size:10px}.screen-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}.screen-actions .btn{padding:4px 7px;font-size:11px}.result-form{max-width:760px;margin:auto}.result-form h2{text-align:center;border:1px solid #777;padding:16px;font-size:20px}.result-number{border:1px solid #777;padding:12px;margin:18px 0}.result-photos{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}.result-photos>div{border:1px solid #777}.result-photo{height:240px;display:flex;align-items:center;justify-content:center}.result-photo img{width:100%;max-height:230px;object-fit:contain}.result-caption{text-align:center;border-top:1px solid #777;background:#eee;padding:8px;font-weight:700}.result-form table{width:100%;border-collapse:collapse;table-layout:fixed;margin:18px 0;font-size:12px}.result-form th,.result-form td{border:1px solid #777;padding:9px;white-space:pre-wrap;overflow-wrap:anywhere}.result-form th{background:#eee}.result-measures th{width:20%}.result-measures td{height:110px}.result-plan th:first-child{width:20%}.result-plan td{height:35px}.result-appendix{margin:24px 0}.result-appendix p{white-space:pre-wrap;overflow-wrap:anywhere}.result-appendix img{width:45%;max-height:240px;object-fit:contain;margin:6px}.card:has(.result-form){max-width:850px}
 .process-group{margin:18px 0 26px}.process-group>header{display:flex;align-items:center;gap:10px;margin:10px 0}.process-name-edit{font-size:15px;font-weight:700;max-width:360px;min-width:150px;padding:4px 7px;border:1px solid #c8d0d8;border-radius:4px;background:#f7f9fa}.process-evaluator{font-size:15px;font-weight:700;color:var(--ink-2)}.direct-edit{cursor:text;min-height:40px}.direct-edit>div{min-height:24px;outline:0}.direct-edit:focus-within{box-shadow:inset 0 0 0 2px #547da6;background:#f7fbff}.direct-edit:empty:before{content:'클릭해 입력';color:#8a949e}
@@ -122,7 +126,7 @@
   <div class="lg">
     <span class="badge">우체국</span>
     <h1>위험성평가 · 안전보건</h1>
-    <p>총괄국 안전보건담당자 계정으로 로그인하세요.</p>
+    <p>총괄국 안전보건담당자 또는 관내국 계정으로 로그인하세요.</p>
     <input id="lid" placeholder="아이디" autocapitalize="off" onkeydown="if(event.key==='Enter')doLogin()">
     <input id="lpw" type="password" placeholder="비밀번호" onkeydown="if(event.key==='Enter')doLogin()">
     <div class="err" id="lerr"></div>
@@ -141,6 +145,7 @@
 <div class="tabs" aria-label="안전관리 업무">
     <button class="tab on" id="tab-inbox" onclick="setTab('inbox')">내부위험 접수 <span class="n hidden" id="inboxN"></span></button>
     <button class="tab" id="tab-table" onclick="setTab('table')">위험성평가표</button>
+    <button class="tab hidden" id="tab-approval" onclick="setTab('approval')">상·하반기 보고 <span class="n hidden" id="approvalN"></span></button>
     <button class="tab" id="tab-library" onclick="setTab('library')">근거자료실</button>
   </div>
   <div class="wrap" id="content"></div>
@@ -157,7 +162,7 @@ const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const hm=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;};
 const localDate=value=>{const d=value?new Date(value):new Date();const offset=d.getTimezoneOffset()*60000;return new Date(d-offset).toISOString().slice(0,10)};
 let token=sessionStorage.getItem('cv_risk_token')||null, me=null, R=null, ws=null, poll=null, tab='inbox', reportData=null, reportDays=30, assessmentStart=localDate(new Date(new Date().getFullYear(),new Date().getMonth(),1)), assessmentEnd=localDate();
-let riskAdviceDraft=null, processOutput='', riskAdviceSession=null;
+let riskAdviceDraft=null, processOutput='', riskAdviceSession=null, officeView='', reportHalf='';
 
 async function api(path,opts={}){
   opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
@@ -200,7 +205,7 @@ function logout(){
 }
 function enter(){
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
-  $('who').textContent=`${me.org} · ${me.name}`;
+  $('who').textContent=`${me.org} · ${me.name}${me.test?' (시험용)':''}`;
   const proto=location.protocol==='https:'?'wss':'ws';
   const open=()=>{ if(!token) return; ws=new WebSocket(`${proto}://${location.host}?token=${token}`);
     ws.onmessage=e=>{ try{ const t=JSON.parse(e.data).type; if(t==='risk'||t==='safety') load(); }catch(_){} };
@@ -213,7 +218,14 @@ function setTab(t){ tab=t; document.querySelectorAll('.tab').forEach(x=>x.classL
 async function load(){
   try{ R=await api('/api/risk/state'); }catch(e){ toast(e.message); return false; }
   $('inboxN').textContent=R.inbox.length; $('inboxN').classList.toggle('hidden',!R.inbox.length);
-  if(['inbox','table','report','actions'].includes(tab)) render();
+  // Office split: branch offices and their heads see the half-year report tab; the head office sees approved branch reports.
+  const office=R.office||null, reports=R.reports||[];
+  $('tab-approval').classList.toggle('hidden',!office);
+  const waiting=office?.role==='head'?reports.filter(r=>r.status==='pending').length:office&&!office.head?reports.filter(r=>['rejected','revision'].includes(r.status)).length:0;
+  $('approvalN').textContent=waiting; $('approvalN').classList.toggle('hidden',!waiting);
+  $('tab-inbox').classList.toggle('hidden',office?.role==='head');
+  if(office?.role==='head'&&tab==='inbox'){tab='approval';document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id==='tab-'+tab));}
+  if(['inbox','table','report','actions','approval'].includes(tab)) render();
   return true;
 }
 const procName=id=>R.processes.find(p=>p.id===id)?.name||'-';
@@ -228,6 +240,7 @@ function render(){
   if(tab==='inbox') renderInbox();
   else if(tab==='table') renderTable();
   else if(tab==='report') renderReport();
+  else if(tab==='approval') renderApproval();
   else renderSafetyWorkspace(tab);
 }
 
@@ -278,9 +291,49 @@ async function triage(id,decision){
     if(loaded && decision==='promote') { setTab('table'); editRow(id); }
   }catch(e){ toast(e.message); }
 }
+/* ---------- 국 구분·상하반기 보고 ---------- */
+// The server already sends only what this account may see; these helpers pick the office on screen and name the approval box.
+const HEAD_CODE='jangheung';
+function itemOffice(it){return it.officeCode||R.office?.code||HEAD_CODE}
+function officeName(code){return (R.offices||[]).find(o=>o.code===code)?.name||(code===HEAD_CODE?'장흥우체국':'')}
+function shownOffice(){return officeView||R.office?.code||HEAD_CODE}
+function halfOf(date){return /^\d{4}-\d{2}/.test(String(date||''))?String(date).slice(0,4)+'-H'+(Number(String(date).slice(5,7))<=6?1:2):null}
+function halfRange(half){const [y,p]=String(half).split('-H');return p==='1'?[y+'-01-01',y+'-06-30']:[y+'-07-01',y+'-12-31']}
+function halfLabel(half){return String(half).slice(0,4)+'년 '+(String(half).endsWith('1')?'상':'하')+'반기'}
+function approvalNames(code,rows){const half=halfOf(assessmentStart)&&halfOf(assessmentStart)===halfOf(assessmentEnd)?halfOf(assessmentStart):null;const report=half&&code!==HEAD_CODE?(R.reports||[]).find(r=>r.officeCode===code&&r.half===half):null;const evaluators=[...new Set(rows.map(it=>it.evaluator||it.assessedBy).filter(Boolean))].join(', ');return {writer:report?.preparedBy||evaluators,approver:report?.status==='approved'?report.approvedBy||'':''}}
+// Approval box at the top right of every printed form: 담당 and 국장 with names (the head office leaves 국장 for signing).
+function approvalBox(code,rows){const n=approvalNames(code,rows);return '<table class="approval-box" aria-label="결재란"><tr><th>담당</th><th>국장</th></tr><tr><td>'+esc(n.writer)+'</td><td>'+esc(n.approver)+'</td></tr></table>'}
+function docHead(title,code,rows,sub=''){return '<header class="doc-head"><div class="doc-title"><h1>'+esc(title)+'</h1>'+sub+'</div>'+approvalBox(code,rows)+'</header>'}
+function setHalfRange(which){const year=new Date().getFullYear();const [from,to]=halfRange(year+'-H'+which);assessmentStart=from;assessmentEnd=to;renderTable()}
+function officeSelect(){if(!R.office?.head)return '';const counts=code=>R.registered.filter(it=>itemOffice(it)===code).length;return '<label>국<select aria-label="볼 국" onchange="officeView=this.value;renderTable()">'+(R.offices||[]).map(o=>'<option value="'+esc(o.code)+'" '+(o.code===shownOffice()?'selected':'')+'>'+esc(o.name)+(o.head?' (총괄)':' · 결재 '+counts(o.code)+'건')+'</option>').join('')+'<option value="all" '+(shownOffice()==='all'?'selected':'')+'>관내 전체</option></select></label>'}
+// 상·하반기 보고 tab. Branch manager: request the head's approval per half-year. Head: approve or reject with a reason.
+// Head office: approved branch reports by office, with a revision request.
+function reportStatusText(r){return r?({draft:'결재 요청 전',pending:'국장 결재 대기',approved:'결재 완료',rejected:'반려',revision:'총괄국 보완 요청'}[r.status]||r.status):'결재 요청 전'}
+function halfItemsOf(code,half){const [from,to]=halfRange(half);return R.registered.filter(it=>itemOffice(it)===code&&['assessing','assessed','done'].includes(it.status)&&assessmentDate(it)>=from&&assessmentDate(it)<=to)}
+function recentHalves(){const today=localDate(),now=halfOf(today),[y,p]=now.split('-H');const prev=p==='2'?y+'-H1':(Number(y)-1)+'-H2';const fromReports=(R.reports||[]).map(r=>r.half);return [...new Set([now,prev,...fromReports])].sort().reverse()}
+function viewHalf(code,half){const [from,to]=halfRange(half);assessmentStart=from;assessmentEnd=to;officeView=R.office?.head?code:'';setTab('table')}
+function printHalf(code,half){const [from,to]=halfRange(half);assessmentStart=from;assessmentEnd=to;officeView=R.office?.head?code:'';printAssessment()}
+function reportHistory(r){return r?.history?.length?'<details><summary>처리 기록 '+r.history.length+'건</summary><ol>'+r.history.map(h=>'<li>'+esc(hm(h.at))+' · '+esc(h.by)+' · '+esc({request:'결재 요청',withdraw:'결재 요청 취소',approve:'결재',reject:'반려',revision:'보완 요청'}[h.action]||h.action)+(h.reason?' · '+esc(h.reason):'')+'</li>').join('')+'</ol></details>':''}
+function reportNote(r){if(!r)return '';if(r.status==='approved')return '<p>결재: '+esc(r.approvedBy||'')+' · '+esc(hm(r.approvedAt))+'</p>';if(r.status==='rejected')return '<p class="err-text">반려 사유: '+esc(r.rejectReason||'')+'</p>';if(r.status==='revision')return '<p class="err-text">보완 요청('+esc(r.revisionBy||'총괄국')+'): '+esc(r.revisionReason||'')+'</p>';if(r.status==='pending')return '<p>결재 요청: '+esc(r.preparedBy||'')+' · '+esc(hm(r.requestedAt))+'</p>';return ''}
+function renderApproval(){
+ const office=R.office;if(!office){$('content').innerHTML='<div class="panel"><div class="empty">국 구분이 없는 서버입니다.</div></div>';return}
+ const reports=R.reports||[];let body='';
+ if(office.head){
+  const shown=reports.filter(r=>r.officeCode!==office.code).sort((a,b)=>b.half.localeCompare(a.half)||a.officeName.localeCompare(b.officeName,'ko'));
+  body='<div class="psub">관내국 국장이 결재한 상·하반기 보고입니다. 결재 전 보고는 보이지 않습니다. 총괄국 평가는 「위험성평가표」에서 결재란과 함께 출력합니다.</div>'+(shown.length?shown.map(r=>'<article class="report-card"><header><b>'+esc(r.officeName)+'</b> · '+esc(r.halfLabel)+' · 항목 '+r.itemCount+'건 · <span class="status-'+esc(r.status)+'">'+esc(reportStatusText(r))+'</span></header>'+reportNote(r)+'<div class="row-btns"><button class="btn" onclick="viewHalf(\''+esc(r.officeCode)+'\',\''+esc(r.half)+'\')">평가표 보기</button><button class="btn" onclick="printHalf(\''+esc(r.officeCode)+'\',\''+esc(r.half)+'\')">출력</button>'+(r.status==='approved'?'<button class="btn danger" onclick="reportAction(\''+esc(r.id)+'\',\'revision\')">보완 요청</button>':'')+'</div>'+reportHistory(r)+'</article>').join(''):'<div class="empty">결재된 관내국 보고가 아직 없습니다.</div>');
+ } else if(office.role==='head'){
+  const own=reports.slice().sort((a,b)=>(a.status==='pending'?0:1)-(b.status==='pending'?0:1)||b.half.localeCompare(a.half));
+  body='<div class="psub">'+esc(office.name)+' 담당자가 결재를 요청한 보고입니다. 결재하면 총괄국에 보입니다.</div>'+(own.length?own.map(r=>'<article class="report-card"><header><b>'+esc(r.halfLabel)+'</b> · 항목 '+r.itemCount+'건 · <span class="status-'+esc(r.status)+'">'+esc(reportStatusText(r))+'</span></header>'+reportNote(r)+'<div class="row-btns"><button class="btn" onclick="viewHalf(\''+esc(r.officeCode)+'\',\''+esc(r.half)+'\')">평가표 보기</button><button class="btn" onclick="printHalf(\''+esc(r.officeCode)+'\',\''+esc(r.half)+'\')">출력</button>'+(r.status==='pending'?'<button class="btn primary" onclick="reportAction(\''+esc(r.id)+'\',\'approve\')">결재</button><button class="btn danger" onclick="reportAction(\''+esc(r.id)+'\',\'reject\')">반려</button>':'')+'</div>'+reportHistory(r)+'</article>').join(''):'<div class="empty">결재 요청이 없습니다.</div>');
+ } else {
+  body='<div class="psub">반기별 위험성평가를 묶어 '+esc(office.name)+' 국장에게 결재를 요청합니다. 결재가 끝나면 총괄국에 보이고, 결재 대기·결재 완료 항목은 고정됩니다.</div>'+recentHalves().map(half=>{const r=reports.find(x=>x.half===half),count=halfItemsOf(office.code,half).length,canRequest=!r||['draft','rejected','revision'].includes(r.status);return '<article class="report-card"><header><b>'+esc(halfLabel(half))+'</b> · 평가 항목 '+count+'건 · <span class="status-'+esc(r?.status||'none')+'">'+esc(reportStatusText(r))+'</span></header>'+reportNote(r)+'<div class="row-btns"><button class="btn" onclick="viewHalf(\''+esc(office.code)+'\',\''+esc(half)+'\')">평가표 보기</button><button class="btn" onclick="printHalf(\''+esc(office.code)+'\',\''+esc(half)+'\')">출력</button>'+(canRequest?'<button class="btn primary" '+(count?'':'disabled')+' onclick="requestApproval(\''+esc(half)+'\')">국장 결재 요청</button>':'')+(r?.status==='pending'?'<button class="btn" onclick="reportAction(\''+esc(r.id)+'\',\'withdraw\')">결재 요청 취소</button>':'')+'</div>'+reportHistory(r)+'</article>'}).join('');
+ }
+ $('content').innerHTML='<div class="panel"><div class="ph">상·하반기 보고 · '+esc(office.name)+(office.role==='head'?' 국장':'')+'</div>'+body+'</div>';
+}
+async function requestApproval(half){if(!confirm(halfLabel(half)+' 위험성평가를 국장에게 결재 요청할까요? 결재 대기 중에는 항목을 고칠 수 없습니다.'))return;try{await api('/api/risk/office-reports',{method:'POST',body:JSON.stringify({half})});toast('국장에게 결재를 요청했습니다.');await load()}catch(e){toast(e.message)}}
+async function reportAction(id,action){let reason='';if(action==='reject'||action==='revision'){reason=prompt(action==='reject'?'반려 사유를 입력하세요.':'보완할 내용을 입력하세요.')||'';if(!reason.trim())return}else if(action==='approve'&&!confirm('이 보고를 결재할까요? 결재하면 총괄국에 보이고 항목이 고정됩니다.'))return;else if(action==='withdraw'&&!confirm('결재 요청을 취소할까요?'))return;try{await api('/api/risk/office-reports/'+encodeURIComponent(id)+'/'+action,{method:'POST',body:JSON.stringify({reason})});toast({approve:'결재했습니다.',reject:'반려했습니다.',revision:'보완을 요청했습니다.',withdraw:'결재 요청을 취소했습니다.'}[action]);await load()}catch(e){toast(e.message)}}
 /* ---------- 위험성평가표 (교재 서식) ---------- */
 function assessmentDate(it){return String(it.assessmentStartedAt||it.triagedAt||it.createdAt||'').slice(0,10)}
-function assessmentRows(){return R.registered.filter(it=>['assessing','assessed','done'].includes(it.status)&&assessmentDate(it)>=assessmentStart&&assessmentDate(it)<=assessmentEnd).sort((a,b)=>String(a.assessmentStartedAt||a.triagedAt||a.createdAt).localeCompare(String(b.assessmentStartedAt||b.triagedAt||b.createdAt)))}
+function assessmentRows(){const view=shownOffice();return R.registered.filter(it=>(view==='all'||itemOffice(it)===view)&&['assessing','assessed','done'].includes(it.status)&&assessmentDate(it)>=assessmentStart&&assessmentDate(it)<=assessmentEnd).sort((a,b)=>String(a.assessmentStartedAt||a.triagedAt||a.createdAt).localeCompare(String(b.assessmentStartedAt||b.triagedAt||b.createdAt)))}
 function assessmentProcess(it){return it.customProcess||it.assessmentTarget||procName(it.proc)||'미지정 공정'}
 function assessmentGroups(rows){const groups=new Map();rows.forEach(it=>{const key=assessmentProcess(it);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(it)});return [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'ko'))}
 function editableCell(it,field,value){const center=['dueDate','owner'].includes(field);return '<td class="'+(center?'center-edit':'l')+' direct-edit"><div contenteditable="true" role="textbox" tabindex="0" aria-label="'+esc(field)+' 직접 수정" data-id="'+esc(it.id)+'" data-field="'+field+'" onblur="saveRiskCell(this)">'+esc(value||'')+'</div></td>'}
@@ -293,12 +346,21 @@ function renderTable(){
  const groups=assessmentGroups(rows);
  const processes=groups.map(([name])=>name);
  if(!processes.includes(processOutput)) processOutput='';
- const grouped=groups.map(([name,items])=>{const evaluators=[...new Set(items.map(it=>it.evaluator||it.assessedBy).filter(Boolean))];return '<section class="process-group"><header><input class="process-name-edit" aria-label="공정명 직접 수정" value="'+esc(name)+'" data-ids="'+esc(JSON.stringify(items.map(x=>x.id)))+'" onchange="saveProcessGroup(this)"><span class="process-evaluator">안전관리 담당자: '+esc(evaluators.join(', ')||'-')+'</span></header>'+assessmentTable(items)+'</section>'}).join('');
+ const grouped=groups.map(([name,items])=>{const evaluators=[...new Set(items.map(it=>it.evaluator||it.assessedBy).filter(Boolean))];const locked=items.some(it=>it.readOnly);const office=shownOffice()==='all'?'<b class="office-tag">'+esc(officeName(itemOffice(items[0])))+'</b>':'';return '<section class="process-group"><header>'+office+(locked?'<b class="process-name-edit" style="background:none;border:0">'+esc(name)+'</b>':'<input class="process-name-edit" aria-label="공정명 직접 수정" value="'+esc(name)+'" data-ids="'+esc(JSON.stringify(items.map(x=>x.id)))+'" onchange="saveProcessGroup(this)">')+'<span class="process-evaluator">안전관리 담당자: '+esc(evaluators.join(', ')||'-')+'</span></header>'+assessmentTable(items)+'</section>'}).join('');
  const count=level=>rows.filter(it=>it.riskLevel===level).length;
  const label=assessmentStart+' ~ '+assessmentEnd;
- $('content').innerHTML='<div class="panel"><div class="ph">위험성평가표</div>'+criteriaHtml()+'<div class="assessment-toolbar"><button class="btn primary" onclick="openManualRisk()">위험성평가 추가</button><label>조회 시작<input type="date" value="'+esc(assessmentStart)+'" onchange="assessmentStart=this.value;renderTable()"></label><label>조회 종료<input type="date" value="'+esc(assessmentEnd)+'" onchange="assessmentEnd=this.value;renderTable()"></label><div class="period-presets"><button class="btn" onclick="setAssessmentRange(0)">일별</button><button class="btn" onclick="setAssessmentRange(3)">3개월</button><button class="btn" onclick="setAssessmentRange(6)">6개월</button><button class="btn" onclick="setAssessmentRange(12)">1년</button></div><button class="btn" onclick="downloadRiskExcel()">엑셀 다운로드</button><button class="btn" onclick="printAssessment()">위험성평가표 출력</button><select aria-label="출력할 공정" onchange="processOutput=this.value"><option value="">공정 선택</option>'+processes.map(name=>'<option value="'+esc(name)+'" '+(name===processOutput?'selected':'')+'>'+esc(name)+'</option>').join('')+'</select><button class="btn" onclick="printSelectedProcess()">공정별 출력</button></div><div class="psub">'+esc(label)+' 위험성평가 집계</div><div class="month-summary"><div><span>전체</span><b>'+rows.length+'</b></div><div><span>상</span><b>'+count('상')+'</b></div><div><span>중</span><b>'+count('중')+'</b></div><div><span>하</span><b>'+count('하')+'</b></div><div><span>개선완료</span><b>'+rows.filter(it=>it.status==='done').length+'</b></div></div><div class="assessment-layout">'+(grouped||'<div class="empty">선택한 기간의 평가 항목이 없습니다.</div>')+'</div></div>';
+ const canAdd=R.office?.role!=='head'&&(shownOffice()===(R.office?.code||HEAD_CODE));const lockNote=rows.some(it=>it.readOnly)?'<p class="workspace-note">'+(R.office?.role==='head'?'국장 계정은 평가표를 보고 「상·하반기 보고」 탭에서 결재합니다.':shownOffice()!==(R.office?.code||HEAD_CODE)?'관내국 국장이 결재한 보고입니다. 고칠 내용은 「상·하반기 보고」 탭에서 보완 요청합니다.':'결재 대기·결재 완료 보고에 든 항목은 고정됩니다.')+'</p>':'';
+ $('content').innerHTML='<div class="panel"><div class="ph">위험성평가표'+(R.office?' · '+esc(shownOffice()==='all'?'관내 전체':officeName(shownOffice())):'')+'</div>'+criteriaHtml()+lockNote+'<div class="assessment-toolbar">'+officeSelect()+(canAdd?'<button class="btn primary" onclick="openManualRisk()">위험성평가 추가</button>':'')+'<label>조회 시작<input type="date" value="'+esc(assessmentStart)+'" onchange="assessmentStart=this.value;renderTable()"></label><label>조회 종료<input type="date" value="'+esc(assessmentEnd)+'" onchange="assessmentEnd=this.value;renderTable()"></label><div class="period-presets"><button class="btn" onclick="setAssessmentRange(0)">일별</button><button class="btn" onclick="setAssessmentRange(3)">3개월</button><button class="btn" onclick="setAssessmentRange(6)">6개월</button><button class="btn" onclick="setAssessmentRange(12)">1년</button><button class="btn" onclick="setHalfRange(1)">상반기</button><button class="btn" onclick="setHalfRange(2)">하반기</button></div><button class="btn" onclick="downloadRiskExcel()">엑셀 다운로드</button><button class="btn" onclick="printAssessment()">위험성평가표 출력</button><select aria-label="출력할 공정" onchange="processOutput=this.value"><option value="">공정 선택</option>'+processes.map(name=>'<option value="'+esc(name)+'" '+(name===processOutput?'selected':'')+'>'+esc(name)+'</option>').join('')+'</select><button class="btn" onclick="printSelectedProcess()">공정별 출력</button></div><div class="psub">'+esc(label)+' 위험성평가 집계</div><div class="month-summary"><div><span>전체</span><b>'+rows.length+'</b></div><div><span>상</span><b>'+count('상')+'</b></div><div><span>중</span><b>'+count('중')+'</b></div><div><span>하</span><b>'+count('하')+'</b></div><div><span>개선완료</span><b>'+rows.filter(it=>it.status==='done').length+'</b></div></div><div class="assessment-layout">'+(grouped||'<div class="empty">선택한 기간의 평가 항목이 없습니다.</div>')+'</div></div>';
+}
+// Rows another office approved, rows in a report awaiting or holding approval, and every row for an office head are shown
+// without edit controls; the server refuses those changes anyway.
+function readOnlyRowHtml(it,index){
+ const st={assessing:'평가중',assessed:'평가완료',done:'개선완료'}[it.status]||'',result=it.doneAt||it.resultUpdatedAt,photo=it.photoUrl||it.beforePhotoUrl;
+ const lock={pending:'국장 결재 대기',approved:'결재 완료',revision:'보완 중'}[it.reportStatus]||'보기 전용';
+ return '<tr class="locked-row"><td>'+(index+1)+'</td><td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+'<div>'+esc(it.factor||'')+'</div><div class="screen-actions"><span>'+esc(st)+'</span></div></td><td>'+esc(levelText(it))+'</td><td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td><td class="result-cell">'+(result?'<button class="btn" title="이행결과서 보기" aria-label="이행결과서 보기" onclick="showResult(\''+esc(it.id)+'\')"><span class="file-icon">▤</span></button>':'미작성')+'</td><td class="l">'+esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))+'</td><td>'+esc(lock)+'</td></tr>';
 }
 function rowHtml(it,index,print=false){
+ if(!print&&it.readOnly) return readOnlyRowHtml(it,index);
  const options=['상','중','하'].map(x=>'<span>'+(it.riskLevel===x?'☑':'☐')+' '+x+'</span>').join(' ');
  const st={assessing:'평가중',assessed:'평가완료',done:'개선완료'}[it.status]||'',result=it.doneAt||it.resultUpdatedAt;
  const formLabel=print?'작성':(it.sourceReport?'평가·처리결과':'작성');
@@ -327,10 +389,12 @@ async function printRiskDocument(title,body,landscape=false){
  if(!w.closed){w.focus();w.print()}
 }
 function assessmentPrintTable(rows){return '<table class="ratable"><colgroup>'+[4,21,7,25,8,8,7,8,12].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead><tr>'+['번호','유해·위험요인','위험성 수준','개선대책','개선예정일','개선완료일','담당자','이행결과서','관련근거'].map(title=>'<th>'+title+'</th>').join('')+'</tr></thead><tbody>'+rows.map((it,index)=>'<tr>'+[index+1,it.factor||'',levelText(it),numberedText(it.reduction),it.dueDate||'',it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''),it.owner||'',it.doneAt||it.resultUpdatedAt?'작성 완료':'미작성',numberedText(RiskReferences.conciseReferences(it.referenceText))].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
-function printAssessment(){const rows=assessmentRows();if(!rows.length){toast('출력할 평가 항목이 없습니다.');return}const groups=new Map();rows.forEach(it=>{const name=assessmentProcess(it);if(!groups.has(name))groups.set(name,[]);groups.get(name).push(it)});return printRiskDocument('위험성평가표','<h1>위험성평가표</h1><p>조회기간 '+esc(assessmentStart)+' ~ '+esc(assessmentEnd)+'</p>'+[...groups].map(([name,items])=>'<section><h2>공정명: '+esc(name)+'</h2>'+assessmentPrintTable(items)+'</section>').join(''),true)}
-function printRiskProcess(name){const rows=assessmentRows().filter(it=>assessmentProcess(it)===name);return printRiskDocument('위험성평가표 · '+name,'<h1>위험성평가표</h1><h2>공정명: '+esc(name)+'</h2>'+assessmentPrintTable(rows),true)}
+// One document per office (관내 전체 prints each office on its own pages), each with its approval box at the top right.
+function officeDocuments(rows,section){const byOffice=new Map();rows.forEach(it=>{const code=itemOffice(it);if(!byOffice.has(code))byOffice.set(code,[]);byOffice.get(code).push(it)});return [...byOffice].map(([code,items],index)=>'<section class="office-doc"'+(index?' style="break-before:page"':'')+'>'+section(code,items)+'</section>').join('')}
+function printAssessment(){const rows=assessmentRows();if(!rows.length){toast('출력할 평가 항목이 없습니다.');return}return printRiskDocument('위험성평가표',officeDocuments(rows,(code,items)=>{const groups=new Map();items.forEach(it=>{const name=assessmentProcess(it);if(!groups.has(name))groups.set(name,[]);groups.get(name).push(it)});return docHead((R.office?officeName(code)+' ':'')+'위험성평가표',code,items,'<p>조회기간 '+esc(assessmentStart)+' ~ '+esc(assessmentEnd)+'</p>')+[...groups].map(([name,group])=>'<section><h2>공정명: '+esc(name)+'</h2>'+assessmentPrintTable(group)+'</section>').join('')}),true)}
+function printRiskProcess(name){const rows=assessmentRows().filter(it=>assessmentProcess(it)===name);return printRiskDocument('위험성평가표 · '+name,officeDocuments(rows,(code,items)=>docHead((R.office?officeName(code)+' ':'')+'위험성평가표',code,items,'<h2>공정명: '+esc(name)+'</h2>')+assessmentPrintTable(items)),true)}
 function printSelectedProcess(){if(!processOutput){toast('출력할 공정을 선택하세요.');return}printRiskProcess(processOutput)}
-async function downloadRiskExcel(){try{const query='?from='+encodeURIComponent(assessmentStart)+'&to='+encodeURIComponent(assessmentEnd);const response=await fetch('/api/risk/export.xlsx'+query,{headers:{Authorization:'Bearer '+token}});if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error||'엑셀 다운로드에 실패했습니다.')}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='위험성평가표-'+assessmentStart+'-'+assessmentEnd+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message)}}
+async function downloadRiskExcel(){try{const query='?from='+encodeURIComponent(assessmentStart)+'&to='+encodeURIComponent(assessmentEnd)+(R.office?'&office='+encodeURIComponent(shownOffice()):'');const response=await fetch('/api/risk/export.xlsx'+query,{headers:{Authorization:'Bearer '+token}});if(!response.ok){const data=await response.json().catch(()=>({}));throw Error(data.error||'엑셀 다운로드에 실패했습니다.')}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='위험성평가표-'+(R.office?(shownOffice()==='all'?'관내전체':officeName(shownOffice()))+'-':'')+assessmentStart+'-'+assessmentEnd+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message)}}
 
 function openManualRisk(){
  $('modalCard').innerHTML=`<h3>위험성평가 추가</h3><div class="psub">공정과 현장 사진을 등록하면 사진에서 유해·위험요인을 추정해 평가표 작성에 반영합니다. 유해·위험요인은 이후 직접 수정할 수 있습니다.</div><div class="fld"><label>공정명</label><input id="manual-process" placeholder="예: 접수, 소포, 집배"></div><div class="fld"><label>현장 사진(선택)</label><input type="file" accept="image/*" id="manual-photo"><small>사진이 있으면 AI가 위험유형과 유해·위험요인 초안을 제안합니다.</small></div><div class="row-btns"><button class="btn primary" onclick="submitManualRisk()">평가표에 추가</button><button class="btn" onclick="closeModal()">취소</button></div>`;
@@ -409,8 +473,10 @@ async function saveImprove(id){
   catch(e){ toast(e.message); }
 }
 function resultFormHtml(it){
+ const report=(R.reports||[]).find(r=>(r.itemIds||[]).includes(it.id));
+ const box='<table class="approval-box" aria-label="결재란"><tr><th>담당</th><th>국장</th></tr><tr><td>'+esc(report?.preparedBy||it.improvedBy||it.evaluator||it.assessedBy||'')+'</td><td>'+esc(report?.status==='approved'?report.approvedBy||'':'')+'</td></tr></table>';
  const photo=(url,label)=>'<div class="result-photo">'+(url?'<img src="'+esc(url)+'" alt="'+label+'">':'<span>( 사 진 )</span>')+'</div><div class="result-caption">'+label+'</div>';
- return '<article class="result-form"><h2>개선조치 이행 결과서</h2><div class="result-number">○ 관리번호 : '+esc(it.id||'')+'</div>'+
+ return '<article class="result-form"><div class="result-head">'+box+'</div><h2>개선조치 이행 결과서</h2><div class="result-number">○ 관리번호 : '+esc(it.id||'')+'</div>'+
  '<div class="result-photos"><div>'+photo(it.beforePhotoUrl||it.photoUrl,'개선전')+'</div><div>'+photo(it.afterPhotoUrl,'개선후')+'</div></div>'+
  '<table class="result-factor"><colgroup><col style="width:20%"><col style="width:52%"><col style="width:14%"><col style="width:14%"></colgroup><tbody><tr><th rowspan="2">유해위험 요인</th><td rowspan="2">'+esc(it.factor||'')+'</td><th>현재 위험성</th><th>개선 후 위험성</th></tr><tr><td>'+esc(levelText(it))+'</td><td>'+esc(levelText(it,true))+'</td></tr></tbody></table>'+
  '<table class="result-measures"><tbody><tr><th>감소대책</th><td>'+esc(it.reduction||'')+'</td></tr></tbody></table>'+
@@ -419,7 +485,7 @@ function resultFormHtml(it){
 }
 function showResult(id){
  const it=R.registered.find(x=>x.id===id);
- $('modalCard').innerHTML=resultFormHtml(it)+'<div class="row-btns"><button class="btn primary" onclick="openImprove(\''+esc(id)+'\')">결과서 수정</button><button class="btn" onclick="printResult(\''+esc(id)+'\')">인쇄</button><button class="btn" onclick="closeModal()">닫기</button></div>';
+ $('modalCard').innerHTML=resultFormHtml(it)+'<div class="row-btns">'+(it.readOnly?'':'<button class="btn primary" onclick="openImprove(\''+esc(id)+'\')">결과서 수정</button>')+'<button class="btn" onclick="printResult(\''+esc(id)+'\')">인쇄</button><button class="btn" onclick="closeModal()">닫기</button></div>';
  $('modal').classList.add('on');
 }
 function printResult(id){const it=R.registered.find(x=>x.id===id);return printRiskDocument('개선조치 이행 결과서',resultFormHtml(it))}

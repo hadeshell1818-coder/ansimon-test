@@ -1108,6 +1108,10 @@ function mountKnowledge(app, authorize, env) {
   app.use('/api/safety-knowledge', (req, res, next) => {
     const user = authorize(req);
     if (!user) return res.status(403).json({ error: '안전관리담당자 권한이 필요합니다.' });
+    // Reading, searching and drafting are open to every safety account; changing the library or backing it up is not
+    // when the caller marks the user knowledgeAdmin: false (branch offices and heads).
+    const readOnly = (req.method === 'GET' && req.path !== '/backup') || (req.method === 'POST' && req.path === '/recommend');
+    if (!readOnly && user.knowledgeAdmin === false) return res.status(403).json({ error: '근거 자료 적재·색인·백업은 총괄국 안전관리담당자가 합니다.' });
     req.knowledgeUser = user;
     res.setHeader('Cache-Control', 'no-store');
     next();
