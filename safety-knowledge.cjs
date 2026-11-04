@@ -65,7 +65,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       signal: AbortSignal.timeout(10000),
     }, SUPABASE_HINT);
     // A write (load, approval, deletion) makes cached document lists and word counts stale.
-    if (options.method && options.method !== 'GET' && !resource.startsWith('rpc/')) { documentsCache = null; frequencyCachedAt = 0; caseCount = null; }
+    if (options.method && options.method !== 'GET' && !resource.startsWith('rpc/')) { documentsCache = null; frequencyCachedAt = 0; caseCount = null; documentCountsCache = null; }
     let response = await attempt();
     // A statement timeout (57014) under load is retried once for reads and searches (GET or rpc), never for writes.
     const readOnly = !options.method || options.method === 'GET' || resource.startsWith('rpc/search_') || resource.startsWith('rpc/match_');
@@ -163,6 +163,28 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   // Word counts barely move between monthly loads, so they are kept for six hours.
   const FREQUENCY_TTL = 6 * 3600000;
   let documentsCache = null, documentsCachedAt = 0;
+  // Sections and cases per document for the library's 저장 현황 column. The embedded (count) subquery counted per
+  // document inside Supabase and passed its statement timeout once every row carried a vector (2026-11-04), which
+  // made the whole library look disconnected. Counts now come from the document_id column alone, in parallel pages,
+  // and are cached for ten minutes (cleared by any write).
+  let documentCountsCache = null;
+  async function documentCounts() {
+    if (documentCountsCache && Date.now() - documentCountsCache.at < 600000) return documentCountsCache.counts;
+    const counts = new Map();
+    const tally = async (resource, field) => {
+      const total = await countRows(resource, '?select=id');
+      const offsets = Array.from({ length: Math.ceil(total / 1000) }, (_, index) => index * 1000);
+      const pages = await Promise.all(offsets.map(offset => callResource(resource, `?select=document_id&order=id.asc&offset=${offset}&limit=1000`)));
+      for (const row of pages.flat()) {
+        const entry = counts.get(row.document_id) || { sections: 0, cases: 0 };
+        entry[field] += 1;
+        counts.set(row.document_id, entry);
+      }
+    };
+    await Promise.all([tally('safety_document_sections', 'sections'), tally('safety_import_rows', 'cases')]);
+    documentCountsCache = { at: Date.now(), counts };
+    return counts;
+  }
   // Approved documents (about 200 rows), cached for ten minutes; SQL Editor loads appear within that time.
   async function approvedDocuments() {
     if (!documentsCache || Date.now() - documentsCachedAt > 600000) {
@@ -454,10 +476,13 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       const externalSearchEnabled = Boolean(env.OPENAI_API_KEY && env.SAFETY_EXTERNAL_SEARCH !== 'off');
       const external = { externalSearchEnabled, referenceCatalog };
       if (!configured) return { ...external, connected: false, documents: [], message: `Supabase 미연결 · AI 외부 공식자료 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
-      const documents = await call('?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,created_at,original_file_name,storage_path,mime_type,file_size,safety_import_rows(count),safety_document_sections(count)&order=created_at.desc&limit=500');
+      const documents = await call('?select=id,title,source_url,publisher,category,kind,tags,jurisdiction,rights_note,review_status,created_at,original_file_name,storage_path,mime_type,file_size&order=created_at.desc&limit=500');
+      // Counting is best effort: if it fails the documents still show, with the counts left unknown (null).
+      const counts = await documentCounts().catch(error => { console.warn('자료별 저장 건수 확인 실패:', error.message); return null; });
       documents.forEach(doc => {
-        doc.case_count = doc.safety_import_rows?.[0]?.count || 0;
-        doc.section_count = doc.safety_document_sections?.[0]?.count || 0;
+        const count = counts?.get(doc.id);
+        doc.case_count = counts ? count?.cases || 0 : null;
+        doc.section_count = counts ? count?.sections || 0 : null;
       });
       const semantic = await this.embeddingStatus().catch(error => ({ ready: false, message: error.message }));
       return { ...external, connected: true, documents, semantic, keepAlive: keepAliveStatus, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };

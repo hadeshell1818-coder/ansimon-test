@@ -62,7 +62,7 @@ function renderSourceRows() {
         ? `사례 ${Number(item.case_count).toLocaleString()}건 저장`
         : item.section_count
           ? `본문 ${Number(item.section_count).toLocaleString()}개 저장`
-          : '저장 0건'}</td></tr>`;
+          : item.section_count === null ? '건수 확인 중' : '저장 0건'}</td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
 // Branch offices and their heads read and search the library; loading, indexing, backup and uploads are head office work.
