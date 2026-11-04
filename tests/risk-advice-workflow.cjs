@@ -33,7 +33,7 @@ async function main() {
     else { assert.match(body.messages.at(-1).content,/운반 작업/); result={factor:'운반 동선 충돌',chatReply:'수작업 조건에서 적재물 제거와 동선 분리를 검토하세요.',measures:['담당자가 출입구 앞 적재물을 옮기고 보행 통로 표시를 확인한다.'],citations:['external:0','invented'],rationale:'공개 지침을 우체국 통로에 적용',limitations:'통로 폭 현장 확인'}; }
     return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};
   };
-  const repo=createKnowledgeRepository({OPENAI_API_KEY:'test-key'},request);
+  const repo=createKnowledgeRepository({OPENAI_API_KEY:'test-key',SAFETY_DRAFT_REVIEW:'on'},request);
   const first=await repo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(first.needsClarification,true);assert.equal(calls.length,2);assert.equal(first.questions.length,2);
   assert.match(calls[1].body.messages[0].content,/질문 필요성을 재검토/);
@@ -59,7 +59,7 @@ async function main() {
   const chatDraft=calls.find(call=>call.body.messages?.[0]?.content.startsWith('feedback')&&JSON.parse(call.body.messages.at(-1).content).feedback);
   assert.ok(chatDraft);
   assert.equal(JSON.parse(chatDraft.body.messages.at(-1).content).currentDraft.measures,'차량 분리');
-  const failingRepo=createKnowledgeRepository({OPENAI_API_KEY:'test-key',SAFETY_SUPABASE_URL:'https://test.supabase.co',SAFETY_SUPABASE_SERVICE_KEY:'key'},request);
+  const failingRepo=createKnowledgeRepository({OPENAI_API_KEY:'test-key',SAFETY_DRAFT_REVIEW:'on',SAFETY_SUPABASE_URL:'https://test.supabase.co',SAFETY_SUPABASE_SERVICE_KEY:'key'},request);
   const fallback=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(fallback.sourceOrigin,'external');assert.ok(fallback.internalSearch.errors.length);
   internalMode=true;
@@ -73,14 +73,16 @@ async function main() {
   assert.ok(sectionQueries.some(url=>/locator=ilike\.\*운반\*/.test(url)),'조문 제목 검색');
   assert.ok(sectionQueries.some(url=>/and=\(body\.ilike\.\*운반\*,body\.ilike\.\*통로\*\)/.test(url)),'두 단어 동시 검색(일반어 작업·점검 등은 제외)');
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
-  const lastDraft=[...calls].reverse().find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
+  const lastDraft=[...calls].reverse().find(call=>call.body.messages?.some(message=>message.content.startsWith?.('당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 한국어 JSON')));
   assert.ok(JSON.parse(lastDraft.body.messages.at(-1).content).evidence.some(item=>item.ref==='sif:case'),'approved SIF case reaches the draft');
   assert.ok(calls.some(call=>decodeURIComponent(call.url).includes('/safety_import_rows?')&&decodeURIComponent(call.url).includes('review_status=eq.approved')),'only approved cases are searched');
   assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
-  const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
-  assert.ok(draftCall,'단계별 근거·해결책 설계 지시');
+  const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('당신은 우체국 산업안전 담당자의 위험성평가 작성 보조자입니다. 한국어 JSON')));
+  assert.ok(draftCall,'위험 원인부터 쓰는 초안 지시');
+  // Hazard-first draft (2026-11-04): the understanding call's cause and direct controls go to the draft; no statute ladder.
   const draftContext=JSON.parse(draftCall.body.messages.at(-1).content);
-  assert.deepEqual(draftContext.evidenceFramework.map(stage=>stage.level),['법','시행령','규칙','고시·공시','지침·매뉴얼·사례']);
+  assert.ok('cause' in draftContext && Array.isArray(draftContext.directControls),'원인과 직접 대책을 초안에 전달');
+  assert.ok(!('evidenceFramework' in draftContext));
   // The light review checks each numbered measure against only the sources that measure cites.
   const lightReview=calls.filter(call=>call.body.messages?.[0]?.content.startsWith('당신은 산업안전 위험성평가 초안의 품질')).map(call=>JSON.parse(call.body.messages.at(-1).content)).at(-1);
   assert.ok(lightReview.measures.length&&lightReview.measures.every(item=>item.no&&item.text),'번호 붙은 대책을 검토');
