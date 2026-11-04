@@ -23,12 +23,14 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `prepare-approved-jangheung.cjs` | 검토본 중 장흥우체국 위험성평가 → SQL |
 | `prepare-approved-postal-accident-cases.cjs <xlsx>` | 우체국 사고사례 엑셀(업로드용 시트) → SQL |
 | `prepare-approved-sif.cjs <xlsx>` | 승인된 SIF 아카이브 엑셀 → SQL |
-| `prepare-official-laws-from-web.cjs [제목…]` | Open API 없이 국가법령정보센터 공개 페이지에서 법령·고시 조문을 읽어 SQL 생성 (Playwright 필요). 파일은 300KB 이하로 나뉘며 `-01`, `-02` 순서대로 Supabase SQL Editor에서 실행. `--from-sql 파일…`은 이전 형식 SQL을 다시 받지 않고 새 형식으로 변환 |
-| `prepare-kosha-guides.cjs [out.sql]` | 산업안전포털(portal.kosha.or.kr)의 현행 KOSHA GUIDE 목록에서 우체국 시설·작업 관련 60건 PDF를 받아 글을 추출하고 `4.2 제목` 단위로 나눈 SQL 생성 (`curl`, `pdftotext` 필요; `KOSHA_PDF_DIR`로 받은 PDF 재사용). 그림으로만 된 PDF는 건너뛰고 실패로 표시. 월 1회 개정 검토 때 다시 실행 |
+| `prepare-official-laws-from-web.cjs [제목…]` | Open API 없이 국가법령정보센터 공개 페이지에서 법령·고시 조문을 읽어 SQL 생성 (Playwright 필요). 파일은 300KB 이하로 나뉘며 `-01`, `-02` 순서대로 Supabase SQL Editor에서 실행. `--from-sql 파일…`은 이전 형식 SQL을 다시 받지 않고 새 형식으로 변환. `OUT_JSON=파일`이면 `load-knowledge-rows.cjs`용 JSON도 씀 |
+| `prepare-kosha-guides.cjs [out.sql]` | 산업안전포털(portal.kosha.or.kr)의 현행 KOSHA GUIDE 목록에서 우체국 시설·작업 관련 81건 PDF를 받아 글을 추출하고 `4.2 제목` 단위로 나눈 SQL 생성 (`curl`, `pdftotext` 필요; `KOSHA_PDF_DIR`로 받은 PDF 재사용). 그림으로만 된 PDF는 건너뛰고 실패로 표시. `OUT_JSON=파일`이면 `load-knowledge-rows.cjs`용 JSON도 씀. 월 1회 개정 검토 때 다시 실행 |
+| `load-knowledge-rows.cjs 파일.json…` | 위 두 도구가 만든 JSON을 SQL Editor 없이 서버 키(REST)로 적재: 자료는 출처 주소로, 조문·항목은 (자료·버전·위치)로 갱신하고 평가 근거로 쓰이지 않은 옛 버전 항목은 지움. 적재 후 「의미 검색 색인 만들기」와 `supabase/loaded-sources.json` 갱신 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
 | `simulate-drafts.cjs` | 근거 검색·초안 시뮬레이션(사례별 후보·전달·인용 채점, 후보 저장 `--dump-pool`) |
 | `simulate-sectors.cjs` | 장흥 점검표 항목으로 만든 공정별 사례의 검색 순위·법령 판정 |
 | `rerank-eval.cjs`, `rerank_onnx.py`, `rerank-cohere.cjs` | 저장한 후보로 재순위 방식 비교(검색 순서·bge-reranker·Cohere) |
+| `backup-supabase.cjs` | Supabase 근거 자료 전체 백업(표별 JSON·행 수·체크섬·DB 구조 SQL·복원 SQL·zip, 의미 색인 벡터는 제외). `--to-sql 폴더`로 복원 SQL만 다시 생성, `--from-archive 파일.json.gz`로 근거자료실 「근거 자료 백업 내려받기」 파일을 같은 폴더 구성으로 풀기. 우체국 내부 자료가 들어 있으니 공개 저장소에 올리지 않음. 자료를 추가하면 다시 실행 |
 
 근거 검색(RAG)을 어떻게 개선했는지와 위 도구 사용법은 `docs/rag-learning-notes.md`에 정리했습니다.
 
@@ -67,11 +69,19 @@ AI 초안의 근거는 RAG 표준 순서로 고릅니다. ① 담당자 문장�
 
 1. https://dashboard.cohere.com 의 API Keys에서 키를 복사합니다. 장흥 샘플 단계는 체험(Trial) 키로 충분합니다(분당 10회 제한, 넘으면 그 건만 검색 순서로 대체). 실제 우체국 도입 때는 결제 정보를 등록한 **Production** 키로 바꿉니다(약관상 체험 키는 시험·평가용).
 2. Railway 서비스 Variables에 `COHERE_API_KEY`를 넣고 재배포합니다. 키가 있으면 재순위가 기본으로 켜집니다(`SAFETY_EVIDENCE_MODE=words`로 끌 수 있음).
-3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_KEEP`(초안에 넘길 개수, 기본 10).
+3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_KEEP`(초안에 넘길 개수, 기본 10), `SAFETY_RERANK_CASES`(그 10개 중 승인된 산업재해 사례 최대 개수, 기본 3).
 4. Cohere가 실패하거나 제한 시간을 넘기면 검색 순서 그대로 초안을 만들고, 초안 화면의 「근거자료·검색 결과」에 "근거 순위: …"로 사용 여부·사유를 표시합니다.
 5. 비용: 초안 1건 = 재순위 1회(검색 1회). 공개 요금 기준 검색 1,000회에 약 2달러라 월 수백 건이면 몇백 원 수준입니다(가입 시 공식 요금표 확인).
 
 검증(2026-11-01, 198사례·같은 후보·같은 판정): 상위 4개(법령 2+지침 2) 안에 맞는 근거가 있는 사례 검색 순서 70%·79% → Cohere 90%·87%, 직접 실행한 bge-reranker-v2-m3 91%·89%와 같은 수준이며 응답 0.3~0.6초(bge CPU 약 56초). 과정은 `docs/evidence-simulation-2026-11.md`에 있습니다.
+
+## Supabase 일시 정지 대비(깨우기 신호·백업)
+
+Supabase 무료 플랜은 7일 동안 사용이 없으면 프로젝트를 멈추고(멈춘 뒤 약 90일 안에 대시보드에서 복구), 자동 백업이 없습니다.
+
+1. 깨우기 신호: 서버가 켜진 뒤 1분, 그 뒤 24시간마다 근거 자료 표에서 1행을 읽습니다. `SAFETY_KEEPALIVE=off`로 끄고 `SAFETY_KEEPALIVE_HOURS`로 간격을 바꿉니다. 마지막 결과는 근거자료실에 표시됩니다. 서버(Railway)가 꺼져 있으면 신호도 가지 않습니다.
+2. 백업: 위험성평가 → 근거자료실 → 「근거 자료 백업 내려받기」(안전관리담당자만)가 자료·조문·사례·평가 근거 연결 전체를 `.json.gz` 한 파일로 내려받습니다(의미 색인 벡터 제외, 표마다 체크섬). 복원할 때는 `node scripts/backup-supabase.cjs --from-archive 파일.json.gz`로 복원 SQL을 만들어 SQL Editor에서 번호 순서대로 실행하고 「의미 검색 색인 만들기」를 다시 누릅니다.
+3. 백업 파일에는 우체국 내부 자료가 들어 있으니 GitHub 등 공개 장소에 올리지 않습니다.
 
 ## 공식 법령 적재 설정
 근거자료실의 「공식 법령 최신본 적재」는 국가법령정보센터 Open API를 씁니다.
