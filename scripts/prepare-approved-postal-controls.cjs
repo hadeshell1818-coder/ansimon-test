@@ -7,12 +7,16 @@ const inputPath = path.join(root, 'local-import', 'postal-hazard-controls-review
 const outputPath = path.join(root, 'local-import', 'approved-postal-hazard-controls.sql');
 const payload = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 const records = payload.records;
-if (records.length !== 401) throw new Error(`기대 항목 401건, 실제 ${records.length}건`);
+// The 28 Jangheung assessment items are their own document (scripts/prepare-approved-jangheung.cjs, split 2026-11-04).
+const checklist = records.filter(record => record.domain !== '장흥우체국 위험성평가');
+if (checklist.length !== 373) throw new Error(`기대 항목 373건, 실제 ${checklist.length}건`);
 
 const quote = value => `'${String(value ?? '').replace(/'/g, "''")}'`;
-const title = '우체국 작업 위험요인 및 개선대책 검색자료';
+// Title of the original form (user, 2026-11-04). Its 개선대책 lines are category texts added when the photos were
+// transcribed, not item-specific text from the form.
+const title = '우체국 유해위험요인 점검항목(서식)';
 const version = 'postal-hazard-controls-2026-09-29-v1';
-const sections = records.map(record => {
+const sections = checklist.map(record => {
   const body = [
     `자료 구분: ${record.domain}`,
     `작업명·공정: ${record.task}`,
@@ -31,11 +35,11 @@ const sections = records.map(record => {
   const contentHash = crypto.createHash('sha256').update(body).digest('hex');
   return { version, locator, body, content_hash: contentHash };
 });
-const tags = [...new Set(['우체국', '위험성평가', ...records.flatMap(record => [record.domain, record.task])])];
+const tags = [...new Set(['우체국', '위험성평가', '유해위험요인 점검항목', ...checklist.flatMap(record => [record.domain, record.task])])];
 const sectionsJson = JSON.stringify(sections);
 const rightsNote = '사용자 제공·검토 자료 및 사용자 승인에 따라 내부 위험성평가 검색용으로 적재. 법령·대책의 적용성은 평가 담당자가 현장 조건과 원문을 확인해야 함.';
 
-const sql = `-- User-approved searchable postal safety dataset: ${records.length} sections.
+const sql = `-- User-approved searchable postal safety dataset: ${checklist.length} sections.
 -- Idempotent upsert; executing again updates the same document/sections.
 begin;
 
