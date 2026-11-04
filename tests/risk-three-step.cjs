@@ -16,6 +16,7 @@ const ctx = vm.createContext({ RISK, Date, process, console,
 function load(start,end){ const i=source.indexOf(start); assert.ok(i>=0); const j=source.indexOf(end,i); assert.ok(j>i); vm.runInContext(source.slice(i,j),ctx); }
 load('const RISK_CRITERIA =', 'let RISK =');
 load('function itemForMgr(', '/* 이미지 서명');
+load('/* 국 구분(관내국)', '/* 공정:');
 load("app.post('/api/risk/items/manual'", "app.get('/api/risk/files/:id/:kind'");
 const criteria=vm.runInContext('RISK_CRITERIA',ctx);
 assert.deepEqual(Array.from(criteria.levels,x=>[x.value,x.allow]),[['상',false],['중',false],['하',true]]);

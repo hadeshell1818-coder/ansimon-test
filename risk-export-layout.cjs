@@ -27,13 +27,14 @@ function exportRows(items) {
   }
   return { rows, heights };
 }
-function configureExport(buffer) {
+// The first headerRows rows stay frozen: the title with the approval box (2 rows), a spacer and the column headers.
+function configureExport(buffer, headerRows = 4) {
   const zip = XLSX.CFB.read(buffer, { type: 'buffer' });
   for (let i = 0; i < zip.FullPaths.length; i++) {
     const entry = zip.FileIndex[i];
     if (!/xl\/worksheets\/sheet\d+\.xml$/.test(zip.FullPaths[i])) continue;
     let xml = entry.content.toString('utf8');
-    xml = xml.replace(/<sheetViews>[\s\S]*?<\/sheetViews>/, '').replace(/<dimension\b[^>]*\/>/, '$&<sheetViews><sheetView workbookViewId="0" zoomScale="100" zoomScaleNormal="100"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>');
+    xml = xml.replace(/<sheetViews>[\s\S]*?<\/sheetViews>/, '').replace(/<dimension\b[^>]*\/>/, `$&<sheetViews><sheetView workbookViewId="0" zoomScale="100" zoomScaleNormal="100"><pane ySplit="${headerRows}" topLeftCell="A${headerRows + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`);
     xml = xml.replace(/<pageMargins\b[^>]*\/>|<pageSetup\b[^>]*\/>/g, '').replace('</worksheet>', '<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>');
     xml = xml.replace(/<sheetPr\s*\/>/, '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
     if (!xml.includes('<sheetPr')) xml = xml.replace(/(<worksheet\b[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');

@@ -13,6 +13,7 @@ const context=vm.createContext({
  syncRiskSource(){},saveRisk(){},save(){},broadcastRisk(){},itemForMgr:it=>it,
 });
 function load(start,end){const i=source.indexOf(start);vm.runInContext(source.slice(i,source.indexOf(end,i)),context)}
+load('/* 국 구분(관내국)','/* 공정:');
 load("app.get('/api/risk/export.xlsx'",'/* 현장 사진신고 접수');
 load("app.patch('/api/risk/items/:id'",'/* 개선조치 완료');
 let payload;
@@ -25,5 +26,8 @@ routes['GET /api/risk/export.xlsx']({query:{from:'2026-10-01',to:new Date(Date.n
 assert.ok(Buffer.isBuffer(payload));
 const book=XLSX.read(payload,{type:'buffer'}),sheet=book.Sheets['소포'];
 assert.ok(sheet);const data=XLSX.utils.sheet_to_json(sheet,{header:1});
-assert.equal(data.slice(3).map(row=>row[3]).join('').replace(/\n/g,''),item.reduction);
+// Rows 0–1 hold the title and the approval box (담당 · 국장) at the top right; row 3 is the header, data from row 4.
+assert.deepEqual([data[0][7],data[0][8]],['담당','국장']);assert.equal(data[1][7],'담당자','the evaluator fills 담당; the head office leaves 국장 blank for signing');
+assert.equal(data[3][3],'개선대책');
+assert.equal(data.slice(4).map(row=>row[3]).join('').replace(/\n/g,''),item.reduction);
 console.log('PASS: API preserves detailed measures and clarification audit, exports actual compact workbook without losing content');

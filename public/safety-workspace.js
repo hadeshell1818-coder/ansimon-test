@@ -65,8 +65,23 @@ function renderSourceRows() {
           : '저장 0건'}</td></tr>`;
   }).join('') || '<tr><td colspan="3">검색 결과 없음</td></tr>';
 }
+// Branch offices and their heads read and search the library; loading, indexing, backup and uploads are head office work.
+function libraryAdmin() {
+  const office = typeof R !== 'undefined' ? R?.office : null;
+  return !office || (office.head && office.role !== 'head');
+}
 function renderLibrary() {
   const connected = Boolean(knowledgeState?.connected);
+  if (!libraryAdmin()) {
+    $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '자료 보기·검색' : 'Supabase 미연결'}</span></div>
+    <p class="workspace-note">AI 초안은 이 자료를 근거로 씁니다. 자료 적재·의미 색인·백업은 총괄국 안전관리담당자가 합니다.</p>
+    <label for="source-search">자료·본문 검색</label><br><input class="workspace-search" id="source-search" value="${esc(libraryQuery)}" placeholder="본문에서 찾을 표현 입력" oninput="libraryQuery=this.value;renderSourceRows();searchLibrary()">
+    <div id="library-search-results" class="evidence-list" aria-live="polite"></div>
+    <div class="workspace-scroll"><table class="workspace-table"><thead><tr><th>자료·제공기관</th><th>등록·검토 상태</th><th>저장 현황</th></tr></thead><tbody id="source-rows"></tbody></table></div>`;
+    renderSourceRows();
+    if (libraryQuery) searchLibrary();
+    return;
+  }
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
     <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
     ${semanticPanel(connected)}
