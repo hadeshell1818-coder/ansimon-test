@@ -138,6 +138,17 @@ where d.id = s.document_id and d.source_url = ${url} and s.version <> ${version}
   return [head, ...inserts, cleanup];
 }
 
+// The same document row as the SQL above, for loading through the Supabase REST API (scripts/load-knowledge-rows.cjs).
+function documentRow({ metadata }) {
+  return {
+    title: metadata.title, source_url: metadata.source_url, publisher: metadata.publisher, category: metadata.category, kind: metadata.kind,
+    tags: metadata.tags, jurisdiction: '대한민국', source_group: 'PUBLIC', review_status: 'approved', content_use_allowed: true,
+    rights_note: '국가법령정보센터 공식 공개 원문. 실제 적용 전 시행일과 개정 여부를 공식 원문에서 다시 확인',
+    effective_from: metadata.effective_from || null, effective_until: null, source_version: metadata.source_version, checked_at: new Date().toISOString(),
+    reviewed_by: '공식 원문 확인 · 웹 원문 적재', created_by: 'official-law-web-import',
+  };
+}
+
 // Splits statements into files of at most MAX_FILE_BYTES; a large document continues in the next file.
 function writeSqlFiles(documents, outPath) {
   const parts = [[]];
@@ -212,5 +223,7 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, process.env.OUT_FILE || 'approved-official-laws.sql');
   for (const file of writeSqlFiles(documents, out)) console.log(file);
+  // OUT_JSON=path also writes the rows for scripts/load-knowledge-rows.cjs (REST loading without the SQL Editor).
+  if (process.env.OUT_JSON) { fs.writeFileSync(process.env.OUT_JSON, JSON.stringify(documents.map(doc => ({ document: documentRow(doc), sections: doc.sections })))); console.log(process.env.OUT_JSON); }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

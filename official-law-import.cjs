@@ -595,6 +595,9 @@ const OFFICIAL_SAFETY_SOURCES = [
   { type: 'law', title: '실내공기질 관리법', category: 'general', tags: ['실내공기질', '먼지', '환기'] },
   { type: 'law', title: '실내공기질 관리법 시행규칙', category: 'general', tags: ['실내공기질', '유지기준'] },
   { type: 'administrative-rule', title: '근로자 건강증진활동 지침', category: 'general', tags: ['건강증진', '직무스트레스', '고객응대'] },
+  // 2026-11-04 MSDS registration at purchase (AGENTS 4-1): labels, MSDS contents and exposure limits of cleaning agents, oils, adhesives.
+  { type: 'administrative-rule', title: '화학물질의 분류·표시 및 물질안전보건자료에 관한 기준', category: 'chemicals', tags: ['MSDS', '물질안전보건자료', '경고표시', '그림문자', '세제', '소독제'] },
+  { type: 'administrative-rule', title: '화학물질 및 물리적 인자의 노출기준', category: 'chemicals', tags: ['노출기준', '화학물질', '소음', '고온', '환기'] },
 ];
 
 // Official titles differ only in spacing or middle-dot characters (·, ㆍ, ・) across listings.

@@ -47,6 +47,8 @@ const KOSHA_GUIDES = [
   ['D-C-14-2026', 'general', ['승강로', '엘리베이터']], ['A-G-19-2026', 'general', ['고시인성', '표시']],
   ['E-G-18-2026', 'general', ['밀폐공간', '정화조', '맨홀', '산소결핍']], ['X-68-2015', 'general', ['밀폐공간', '위험관리']],
   ['A-G-10-2025', 'general', ['급식실', '구내식당', '주방']], ['A-G-6-2025', 'general', ['급식실', '조리', '화상', '미끄러짐']],
+  // 2026-11-04: gas cylinder emergencies (LPG cylinders in kitchens). B-M-1·A-G-5·A-G-6·A-G-10 now come as text PDFs.
+  ['P-139-2013', 'general', ['가스용기', 'LPG', '가스누출', '비상조치']],
   // 2026-11-01 simulation gaps (motorcycles, kitchens, batteries, forklifts, warehouses, trucks, customer stress, gas).
   ['A-G-3-2025', 'general', ['오토바이', '이륜차', '배달', '집배']], ['A-G-5-2025', 'general', ['조리도구', '칼', '구내식당']],
   ['H-26-2020', 'general', ['조리', '급식', '화상']], ['W-26-2023', 'general', ['급식', '환기', '주방']],
@@ -197,6 +199,18 @@ where d.id = s.document_id and d.source_url = ${url} and s.version <> ${version}
   return [head, ...inserts, cleanup];
 }
 
+// The same document row as the SQL above, for loading through the Supabase REST API (scripts/load-knowledge-rows.cjs).
+function documentRow({ metadata }) {
+  return {
+    title: metadata.title, source_url: metadata.source_url, publisher: '한국산업안전보건공단', category: metadata.category, kind: 'guideline',
+    tags: metadata.tags, jurisdiction: '대한민국', source_group: 'PUBLIC', review_status: 'approved', content_use_allowed: true,
+    rights_note: metadata.transcribed ? '한국산업안전보건공단 공개 기술지원규정(KOSHA GUIDE). 원문 PDF가 그림으로만 되어 있어 화면을 보고 글로 옮김. 법령이 아닌 기술 권고이며 그림·표·수치와 최신 여부는 원문 PDF에서 확인'
+      : '한국산업안전보건공단 공개 기술지원규정(KOSHA GUIDE) 원문 PDF에서 추출한 글. 법령이 아닌 기술 권고이며 표·그림과 최신 여부는 원문 PDF에서 확인',
+    effective_from: metadata.effective_from || null, effective_until: null, source_version: metadata.source_version, checked_at: new Date().toISOString(),
+    reviewed_by: metadata.transcribed ? 'KOSHA 산업안전포털 원문 확인 · 그림 PDF 옮김' : 'KOSHA 산업안전포털 원문 확인 · PDF 글 추출', created_by: 'kosha-guide-import',
+  };
+}
+
 function writeSqlFiles(documents, outPath) {
   const parts = [[]];
   let size = 0;
@@ -246,9 +260,11 @@ function main() {
     } catch (error) { failures.push(`${number}: ${error.message}`); console.log(`실패 ${number}: ${error.message}`); }
   }
   for (const file of writeSqlFiles(documents, outPath)) console.log(`작성: ${path.relative(process.cwd(), file)}`);
+  // OUT_JSON=path also writes the rows for scripts/load-knowledge-rows.cjs (REST loading without the SQL Editor).
+  if (process.env.OUT_JSON) { fs.writeFileSync(process.env.OUT_JSON, JSON.stringify(documents.map(doc => ({ document: documentRow(doc), sections: doc.sections })))); console.log(`작성: ${process.env.OUT_JSON}`); }
   console.log(`자료 ${documents.length}건 · 실패 ${failures.length}건`);
   if (failures.length) console.log(failures.join('\n'));
 }
 
 if (require.main === module) main();
-module.exports = { KOSHA_GUIDES, cleanLines, guideSections, transcribedSections };
+module.exports = { KOSHA_GUIDES, cleanLines, guideSections, transcribedSections, documentRow };

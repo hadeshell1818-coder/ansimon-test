@@ -1075,7 +1075,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         ...(options.diagnostics ? { diagnostics: {
           mode: evidenceMode, queries, refinement,
           candidates: candidatePool.map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, matchedBy: item.matchedBy || 'words' })),
-          delivered: evidence.filter(item => item.ref.startsWith('doc:')).map(item => ({ ref: item.ref, title: item.title, locator: item.locator, type: item.type })),
+          delivered: evidence.filter(item => /^(doc|sif):/.test(item.ref)).map(item => ({ ref: item.ref, title: item.title || item.type, locator: item.locator || String(item.work || '').slice(0, 120), type: item.type })),
           rerank, draftCitations, reviewedCitations, draftMeasures: draftMeasures.map(item => ({ text: item.text, refs: item.refs })),
         } } : {}),
         externalSources: externalSearch.sources,
