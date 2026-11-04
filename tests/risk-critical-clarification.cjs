@@ -16,7 +16,7 @@ async function main(){
   else result=lateAmbiguity&&!draftHasMeasures?{factor:'파손 부품에 찔림',measures:[],citations:[]}:{factor:'파손 롤파레트 철망에 찔림',measures:['파손 롤파레트 사용 중지 후 격리·수리'],citations:['external:0']};
   return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(result)}}]})};
  };
- const repo=createKnowledgeRepository({OPENAI_API_KEY:'test'},request);
+ const repo=createKnowledgeRepository({OPENAI_API_KEY:'test',SAFETY_DRAFT_REVIEW:'on'},request);
  const first=await repo.recommendRisk({description:'파손된 철망·모서리에 긁히거나 찔릴 위험',process:'소포'});
  assert.equal(first.needsClarification,true);assert.equal(first.questions.length,1);assert.match(first.questions[0].question,/어떤 설비/);
  const answer=await repo.recommendRisk({description:'파손된 철망·모서리에 긁히거나 찔릴 위험',answers:[{question:first.questions[0].question,answer:'롤파레트'}]});

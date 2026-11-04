@@ -28,6 +28,7 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `load-knowledge-rows.cjs 파일.json…` | 위 두 도구가 만든 JSON을 SQL Editor 없이 서버 키(REST)로 적재: 자료는 출처 주소로, 조문·항목은 (자료·버전·위치)로 갱신하고 평가 근거로 쓰이지 않은 옛 버전 항목은 지움. 적재 후 「의미 검색 색인 만들기」와 `supabase/loaded-sources.json` 갱신 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
 | `simulate-drafts.cjs` | 근거 검색·초안 시뮬레이션(사례별 후보·전달·인용 채점, 후보 저장 `--dump-pool`) |
+| `simulate-direct-measures.cjs --label 이름` | 일상 표현 위험 36건(`seed-assets/direct-measure-cases.json`)으로 실제 초안을 만들고 gpt-4.1이 직접 대책 포함·맞는 대책 수·엉뚱한 근거를 채점(`--set 변수=값`으로 설정 비교) |
 | `simulate-sectors.cjs` | 장흥 점검표 항목으로 만든 공정별 사례의 검색 순위·법령 판정 |
 | `rerank-eval.cjs`, `rerank_onnx.py`, `rerank-cohere.cjs` | 저장한 후보로 재순위 방식 비교(검색 순서·bge-reranker·Cohere) |
 | `backup-supabase.cjs` | Supabase 근거 자료 전체 백업(표별 JSON·행 수·체크섬·DB 구조 SQL·복원 SQL·zip, 의미 색인 벡터는 제외). `--to-sql 폴더`로 복원 SQL만 다시 생성, `--from-archive 파일.json.gz`로 근거자료실 「근거 자료 백업 내려받기」 파일을 같은 폴더 구성으로 풀기. 우체국 내부 자료가 들어 있으니 공개 저장소에 올리지 않음. 자료를 추가하면 다시 실행 |
@@ -69,7 +70,7 @@ AI 초안의 근거는 RAG 표준 순서로 고릅니다. ① 담당자 문장�
 
 1. https://dashboard.cohere.com 의 API Keys에서 키를 복사합니다. 장흥 샘플 단계는 체험(Trial) 키로 충분합니다(분당 10회 제한, 넘으면 그 건만 검색 순서로 대체). 실제 우체국 도입 때는 결제 정보를 등록한 **Production** 키로 바꿉니다(약관상 체험 키는 시험·평가용).
 2. Railway 서비스 Variables에 `COHERE_API_KEY`를 넣고 재배포합니다. 키가 있으면 재순위가 기본으로 켜집니다(`SAFETY_EVIDENCE_MODE=words`로 끌 수 있음).
-3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_KEEP`(초안에 넘길 개수, 기본 10), `SAFETY_RERANK_CASES`(그 10개 중 승인된 산업재해 사례 최대 개수, 기본 3).
+3. 선택 설정: `SAFETY_RERANK_MODEL`(기본 `rerank-v3.5`), `SAFETY_RERANK_TIMEOUT_MS`(기본 3000), `SAFETY_RERANK_KEEP`(초안에 넘길 개수, 기본 10), `SAFETY_RERANK_CASES`(그 10개 중 승인된 산업재해 사례 최대 개수, 기본 3). 초안 모델은 `SAFETY_DRAFT_MODEL`(기본 `gpt-4.1-mini`), 초안 뒤 별도 검토는 `SAFETY_DRAFT_REVIEW=on`일 때만(기본 끔, 2026-11-04 측정에서 더 걸러낸 것 없이 약 4초 소요).
 4. Cohere가 실패하거나 제한 시간을 넘기면 검색 순서 그대로 초안을 만들고, 초안 화면의 「근거자료·검색 결과」에 "근거 순위: …"로 사용 여부·사유를 표시합니다.
 5. 비용: 초안 1건 = 재순위 1회(검색 1회). 공개 요금 기준 검색 1,000회에 약 2달러라 월 수백 건이면 몇백 원 수준입니다(가입 시 공식 요금표 확인).
 

@@ -39,7 +39,7 @@ async function main() {
     }
     return json([]);
   };
-  const env = { SAFETY_SUPABASE_URL: 'https://t.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'k', OPENAI_API_KEY: 'k', COHERE_API_KEY: 'co', SAFETY_EXTERNAL_SEARCH: 'off' };
+  const env = { SAFETY_SUPABASE_URL: 'https://t.supabase.co', SAFETY_SUPABASE_SERVICE_KEY: 'k', OPENAI_API_KEY: 'k', COHERE_API_KEY: 'co', SAFETY_EXTERNAL_SEARCH: 'off', SAFETY_DRAFT_REVIEW: 'on' };
   const repo = createKnowledgeRepository(env, request);
   const draftEvidence = () => JSON.parse(calls.filter(call => call.body.messages?.some(message => String(message.content).startsWith('당신은 우체국 산업안전'))).at(-1).body.messages.at(-1).content).evidence;
 

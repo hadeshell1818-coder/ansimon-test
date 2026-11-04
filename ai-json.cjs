@@ -6,13 +6,14 @@ function aiFailure(code, stage, message) {
   return error;
 }
 
-async function requestAiJson({ request = fetch, key, messages, maxTokens = 2000, stage = 'AI 작성', timeoutMs = 25000 }) {
+// model: gpt-4o-mini unless a stage asks for another (the risk draft uses SAFETY_DRAFT_MODEL, see safety-knowledge.cjs).
+async function requestAiJson({ request = fetch, key, messages, maxTokens = 2000, stage = 'AI 작성', timeoutMs = 25000, model = 'gpt-4o-mini' }) {
   for (let attempt = 0; attempt < 2; attempt++) {
     let response;
     try {
       response = await request('https://api.openai.com/v1/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' },
+        body: JSON.stringify({ model, response_format: { type: 'json_object' },
           max_tokens: attempt ? Math.min(maxTokens * 2, 6000) : maxTokens, messages }),
         signal: AbortSignal.timeout(timeoutMs),
       });
