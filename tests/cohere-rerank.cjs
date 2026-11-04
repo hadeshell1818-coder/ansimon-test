@@ -6,7 +6,8 @@ const { createKnowledgeRepository } = require('../safety-knowledge.cjs');
 // rerank falls back to the search order and says so; without a key the word search runs as before.
 async function main() {
   const calls = [];
-  let cohere = 'ok';
+  let cohere = 'ok', withCases = false;
+  const cases = Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, review_status: 'approved', work_name: '지게차 운전', incident_type: '부딪힘', incident_summary: `지게차 후진 중 작업자 충돌 ${i}`, reduction_measures: '후진경보기' }));
   const json = (data, status = 200) => ({ ok: status < 400, status, headers: { get: () => '0-0/100' }, json: async () => data, text: async () => JSON.stringify(data) });
   // One section per document so the three-per-document cap does not shrink the pool in this test.
   const docs = [...Array.from({ length: 10 }, (_, i) => ({ id: `rule-${i}`, title: `법령 ${i}`, kind: 'law', review_status: 'approved', source_version: 'v1' })),
@@ -26,6 +27,7 @@ async function main() {
     if (href.includes('/rpc/match_safety_sections')) return json([]);
     if (href.includes('/rpc/match_safety_cases')) return json([]);
     if (href.includes('/rpc/search_safety_sections')) return json(body.law_only ? laws : guides);
+    if (href.includes('/safety_import_rows?')) return json(withCases && href.includes('review_status=eq.approved') ? cases : []);
     if (href.includes('/safety_documents?')) return json(docs);
     if (body.messages) {
       const first = body.messages[0].content;
@@ -74,6 +76,14 @@ async function main() {
   calls.length = 0;
   assert.equal((await noKey.recommendRisk({ description: '지게차가 후진하는데 뒤에 사람 지나감' })).internalSearch.mode, 'words');
   assert.ok(!calls.some(call => call.href.includes('cohere')), 'no Cohere call without a key');
-  console.log('PASS: Cohere rerank orders the draft evidence (top 10 of any kind), falls back on failure or delay, off without a key');
+  // Approved SIF cases join the Cohere pool; at most 3 reach the draft so other industries cannot crowd out sources.
+  cohere = 'ok'; withCases = true; calls.length = 0;
+  await repo.recommendRisk({ description: '지게차가 후진하는데 뒤에 사람 지나감', refreshSources: true });
+  const pooled = calls.find(call => call.href === 'https://api.cohere.com/v2/rerank').body.documents;
+  assert.equal(pooled.length, 21, '16 sections + 5 cases are ranked together');
+  const withCaseEvidence = draftEvidence();
+  assert.deepEqual(withCaseEvidence.filter(item => item.type === 'SIF 사례').map(item => item.ref), ['sif:c4', 'sif:c3', 'sif:c2'], 'top cases in rerank order, capped at 3');
+  assert.equal(withCaseEvidence.length, 10, 'still 10 sources in total');
+  console.log('PASS: Cohere rerank orders the draft evidence (top 10 of any kind), falls back on failure or delay, off without a key, SIF cases ranked and capped at 3');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

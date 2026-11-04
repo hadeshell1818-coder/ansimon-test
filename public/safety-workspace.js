@@ -70,6 +70,7 @@ function renderLibrary() {
   $('content').innerHTML = `<div class="workspace-head"><h2>근거자료실</h2><span class="workspace-state">${connected ? '출처 목록 관리' : 'Supabase 미연결'}</span></div>
     <div class="row-btns"><button class="btn primary" id="import-official-laws" onclick="importOfficialLaws()" ${connected ? '' : 'disabled'}>공식 법령 최신본 적재</button><button class="btn" onclick="reloadLibrary()">새로고침</button></div>
     ${semanticPanel(connected)}
+    ${backupPanel(connected)}
     <details class="detailbox"><summary>외부 검색 참고자료 목록 · ${knowledgeState?.referenceCatalog?.titles?.length||0}종</summary><p>${esc(knowledgeState?.referenceCatalog?.note||'참고 목록 확인 중')}</p><p>AI 초안 작성 시 관련 자료의 공개 원문을 우선 검색합니다. 비공개 내부자료는 기관 승인 후 원문을 등록해 주세요.</p><ol>${(knowledgeState?.referenceCatalog?.titles||[]).map(title=>`<li>${esc(title)}</li>`).join('')}</ol></details>
     <p class="workspace-note">국가법령정보센터의 현행 산업안전보건법·시행령·시행규칙·안전보건규칙과 사업장 위험성평가 지침을 조문 단위로 저장합니다. 시행예정본과 연혁본은 제외합니다.</p>
     <form class="sif-import" id="sif-import-form" onsubmit="importSif(event)">
@@ -168,6 +169,32 @@ function searchLibrary() {
   }, 350);
 }
 // Semantic search: statutes and site reports rarely share words, so each section is stored with its meaning.
+// Keep-alive status (a free Supabase project pauses after a week without use) and the evidence backup download.
+function backupPanel(connected) {
+  const k = knowledgeState?.keepAlive;
+  const status = !connected ? 'Supabase 미연결' : !k ? '연결 유지 확인 대기(서버 시작 1분 뒤 첫 확인, 이후 하루 한 번)'
+    : `${k.ok ? '연결 유지 확인됨' : '연결 유지 확인 실패'} · ${new Date(k.at).toLocaleString('ko-KR')}${k.ok ? '' : ' · ' + k.message}`;
+  return `<section class="detailbox"><h3>자료실 연결 유지·백업</h3>
+    <p>무료 Supabase는 일주일 넘게 쓰지 않으면 멈춥니다. 서버가 하루 한 번 자료실을 확인해 멈추지 않게 합니다. 자료를 추가한 뒤에는 백업 파일을 내려받아 보관하세요(공개된 곳에 올리지 마세요).</p>
+    <p id="keepalive-status" role="status">${esc(status)}</p>
+    <div class="row-btns"><button class="btn" id="download-backup" onclick="downloadKnowledgeBackup()" ${connected ? '' : 'disabled'}>근거 자료 백업 내려받기</button></div>
+    <p id="backup-result" role="status"></p></section>`;
+}
+async function downloadKnowledgeBackup() {
+  const button = $('download-backup'), result = $('backup-result');
+  if (button) { button.disabled = true; button.textContent = '백업 만드는 중…'; }
+  if (result) result.textContent = '자료 전체를 모으는 중입니다(30초~1분).';
+  try {
+    const response = await fetch('/api/safety-knowledge/backup', { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `백업 실패 (${response.status})`);
+    const blob = await response.blob();
+    const name = (response.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'ansimon-evidence-backup.json.gz';
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    if (result) result.textContent = `내려받음: ${name} (${(blob.size / 1048576).toFixed(1)} MB). 복원 방법은 README의 backup-supabase.cjs 안내를 따르세요.`;
+  } catch (error) { if (result) result.textContent = error.message; }
+  finally { if (button) { button.disabled = false; button.textContent = '근거 자료 백업 내려받기'; } }
+}
 function semanticPanel(connected) {
   const sem = knowledgeState?.semantic || {};
   const counts = sem.sections ? `조문 ${Number(sem.sections.total - sem.sections.missing).toLocaleString()}/${Number(sem.sections.total).toLocaleString()} · 사례 ${Number(sem.cases.total - sem.cases.missing).toLocaleString()}/${Number(sem.cases.total).toLocaleString()} 색인` : '';

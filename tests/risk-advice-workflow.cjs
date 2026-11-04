@@ -13,7 +13,7 @@ async function main() {
     if (String(url).includes('supabase')) {
       if(!internalMode)throw Error('repository unavailable');
       const parsed=new URL(url),table=parsed.pathname.split('/').pop();
-      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'운반 작업 시 안전 통로 확보',locator:'제3조'},{id:'law-section-2',document_id:'law',body:'운반 작업 통로 정리',locator:'제22조'}]:[];
+      const result=table==='safety_documents'?[{id:'law',kind:'law',title:'법령',review_status:'approved'}]:table==='safety_document_sections'?[{id:'law-section',document_id:'law',body:'운반 작업 시 안전 통로 확보',locator:'제3조'},{id:'law-section-2',document_id:'law',body:'운반 작업 통로 정리',locator:'제22조'}]:table==='safety_import_rows'?[{id:'case',review_status:'approved',incident_summary:'운반 통로에서 대차와 작업자 충돌',reduction_measures:'운반 동선 분리'}]:[];
       return {ok:true,json:async()=>result};
     }
     if (String(url).endsWith('/responses')) {
@@ -63,7 +63,7 @@ async function main() {
   const fallback=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
   assert.equal(fallback.sourceOrigin,'external');assert.ok(fallback.internalSearch.errors.length);
   internalMode=true;
-  failingRepo.search=async()=>({cases:[{id:'case',review_status:'approved',reduction_measures:'운반 동선 분리'}],results:[{title:'운반 작업',kind:'guideline',review_status:'approved',sections:[{id:'section',body:'운반 보조기구 사용'}]}]});
+  // Approved SIF cases now come from the case table search (searchCases), not from the general search().
   const mixed=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험',refreshSources:true});
   assert.equal(mixed.sourceOrigin,'mixed');assert.equal(mixed.externalSearch.attempted,true);
   // Evidence search reads approved documents only and gathers sections by article title, body and word pairs.
@@ -73,6 +73,9 @@ async function main() {
   assert.ok(sectionQueries.some(url=>/locator=ilike\.\*운반\*/.test(url)),'조문 제목 검색');
   assert.ok(sectionQueries.some(url=>/and=\(body\.ilike\.\*운반\*,body\.ilike\.\*통로\*\)/.test(url)),'두 단어 동시 검색(일반어 작업·점검 등은 제외)');
   const enough=await failingRepo.recommendRisk({description:'소포 운반 작업 중 통로가 좁아 충돌 위험'});
+  const lastDraft=[...calls].reverse().find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
+  assert.ok(JSON.parse(lastDraft.body.messages.at(-1).content).evidence.some(item=>item.ref==='sif:case'),'approved SIF case reaches the draft');
+  assert.ok(calls.some(call=>decodeURIComponent(call.url).includes('/safety_import_rows?')&&decodeURIComponent(call.url).includes('review_status=eq.approved')),'only approved cases are searched');
   assert.equal(enough.sourceOrigin,'internal');assert.equal(enough.externalSearch.attempted,false);
   const draftCall=calls.find(call=>call.body.messages?.some(message=>message.content.startsWith?.('근거 검토와 해결책의 틀')));
   assert.ok(draftCall,'단계별 근거·해결책 설계 지시');

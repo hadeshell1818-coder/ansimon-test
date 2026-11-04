@@ -1,78 +1,53 @@
 #!/usr/bin/env node
 // Backup of the Supabase safety knowledge store (근거 자료) and conversion of a backup into restore SQL.
+// The export logic is shared with the evidence library's 「근거 자료 백업 내려받기」 button (../supabase-backup.cjs).
 //
 //   node scripts/backup-supabase.cjs [--out DIR] [--with-embeddings]
 //       Exports every table to DIR/<table>.json (default local-import/backup/supabase-YYYY-MM-DD), writes
 //       manifest.json (row counts, checksums), copies supabase/*.sql and loaded-sources.json, writes restore SQL
-//       (restore-sql/) and zips the folder.
-//       Embedding vectors are left out by default (about 100 MB as text; rebuilt with the app's
-//       「의미 검색 색인 만들기」 button after a restore).
+//       (restore-sql/) and zips the folder. Embedding vectors are left out by default (about 100 MB as text; rebuilt
+//       with the app's 「의미 검색 색인 만들기」 button after a restore).
+//   node scripts/backup-supabase.cjs --from-archive FILE.json.gz [--out DIR]
+//       Unpacks a file downloaded with the button into the same folder layout (tables, manifest, schema, restore SQL).
 //   node scripts/backup-supabase.cjs --to-sql DIR
-//       Writes DIR/restore-sql/NN-<table>.sql (each under 300 KB for the Supabase SQL Editor). Run them in order on
-//       a database where supabase/001~008 have been applied. Existing rows (same id) are kept, never overwritten.
+//       Writes DIR/restore-sql/NN-<table>.sql again from a backup folder.
 //
-// Needs SAFETY_SUPABASE_URL and SAFETY_SUPABASE_SERVICE_KEY (behind an HTTPS proxy add NODE_USE_ENV_PROXY=1).
+// Needs SAFETY_SUPABASE_URL and SAFETY_SUPABASE_SERVICE_KEY for a backup (behind an HTTPS proxy add NODE_USE_ENV_PROXY=1).
 // The backup holds internal post-office material: keep it out of the public Git repository.
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-
-// Restore order follows the foreign keys. safety_case_chunks is a view (003) and is not backed up.
-const TABLES = ['safety_documents', 'safety_document_sections', 'safety_import_rows', 'safety_assessment_evidence'];
-const VECTOR_COLUMNS = ['embedding', 'embedding_model'];
-const PAGE = 1000;
-const SQL_LIMIT = 280 * 1024;
-const TAG = '$ansimon_json$';
+const { TABLES, sha256, exportTables, restoreSql, unpackArchive } = require('../supabase-backup.cjs');
 
 const args = process.argv.slice(2);
 const option = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
-const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
+const today = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 
-async function backup() {
-  const base = process.env.SAFETY_SUPABASE_URL, key = process.env.SAFETY_SUPABASE_SERVICE_KEY;
-  if (!base || !key) throw new Error('SAFETY_SUPABASE_URL과 SAFETY_SUPABASE_SERVICE_KEY가 필요합니다.');
-  const withVectors = args.includes('--with-embeddings');
-  const day = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
-  const out = path.resolve(option('--out') || path.join(__dirname, '..', 'local-import', 'backup', `supabase-${day}`));
+function writeFolder(out, manifest, tables) {
   fs.mkdirSync(out, { recursive: true });
-  const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const get = async (url, extra = {}) => {
-    const response = await fetch(url, { headers: { ...headers, ...extra }, signal: AbortSignal.timeout(60000) });
-    if (!response.ok) throw new Error(`${response.status} ${(await response.text()).slice(0, 200)}`);
-    return response;
-  };
-  const manifest = { createdAt: new Date().toISOString(), supabaseHost: new URL(base).host, embeddingsIncluded: withVectors, tables: {} };
-  for (const table of TABLES) {
-    const sample = await (await get(`${base}/rest/v1/${table}?select=*&limit=1`)).json();
-    const columns = sample[0] ? Object.keys(sample[0]).filter(column => withVectors || !VECTOR_COLUMNS.includes(column)) : null;
-    const select = columns ? columns.map(encodeURIComponent).join(',') : '*';
-    const rows = [];
-    let expected = null;
-    for (let from = 0; ; from += PAGE) {
-      const response = await get(`${base}/rest/v1/${table}?select=${select}&order=id.asc`, { 'Range-Unit': 'items', Range: `${from}-${from + PAGE - 1}`, Prefer: 'count=exact' });
-      expected = Number(String(response.headers.get('content-range') || '').split('/')[1]);
-      const page = await response.json();
-      rows.push(...page);
-      if (page.length < PAGE) break;
-    }
-    if (Number.isFinite(expected) && expected !== rows.length) throw new Error(`${table}: ${expected}행 중 ${rows.length}행만 받았습니다.`);
-    const text = JSON.stringify(rows);
-    fs.writeFileSync(path.join(out, `${table}.json`), text);
-    manifest.tables[table] = { rows: rows.length, columns: columns || [], excludedColumns: withVectors ? [] : VECTOR_COLUMNS, sha256: sha256(text), bytes: Buffer.byteLength(text) };
-    console.log(`${table}: ${rows.length}행 (${(Buffer.byteLength(text) / 1048576).toFixed(1)} MB)`);
-  }
+  for (const table of TABLES) if (tables[table]) fs.writeFileSync(path.join(out, `${table}.json`), JSON.stringify(tables[table]));
   fs.mkdirSync(path.join(out, 'schema'), { recursive: true });
   const supabaseDir = path.join(__dirname, '..', 'supabase');
-  for (const file of fs.readdirSync(supabaseDir)) fs.copyFileSync(path.join(supabaseDir, file), path.join(out, 'schema', file));
+  for (const file of fs.readdirSync(supabaseDir)) {
+    const from = path.join(supabaseDir, file);
+    if (fs.statSync(from).isFile()) fs.copyFileSync(from, path.join(out, 'schema', file));
+  }
   fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
   fs.writeFileSync(path.join(out, 'README.md'), readme(manifest));
-  toSql(out);
+  writeSql(out, manifest, tables);
   try {
     execFileSync('zip', ['-qr', `${path.basename(out)}.zip`, path.basename(out)], { cwd: path.dirname(out) });
     console.log(`압축: ${out}.zip`);
   } catch (_) { console.log('zip이 없어 폴더로만 남겼습니다.'); }
   console.log(`백업 폴더: ${out}`);
+}
+
+function writeSql(dir, manifest, tables) {
+  const outDir = path.join(dir, 'restore-sql');
+  fs.mkdirSync(outDir, { recursive: true });
+  const files = restoreSql(manifest, tables);
+  for (const file of files) fs.writeFileSync(path.join(outDir, file.name), file.sql);
+  console.log(`복원 SQL: ${outDir} (${files.length}개, 번호 순서대로 실행)`);
 }
 
 function readme(manifest) {
@@ -97,40 +72,37 @@ ${rows}
 `;
 }
 
-function toSql(target) {
-  const dir = path.resolve(target);
+function loadFolder(dir) {
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
-  const outDir = path.join(dir, 'restore-sql');
-  fs.mkdirSync(outDir, { recursive: true });
-  let fileNo = 0;
+  const tables = {};
   for (const table of TABLES) {
-    const info = manifest.tables[table];
-    if (!info || !info.rows) continue;
-    const text = fs.readFileSync(path.join(dir, `${table}.json`), 'utf8');
-    if (sha256(text) !== info.sha256) throw new Error(`${table}.json 체크섬이 manifest와 다릅니다(파일 손상).`);
-    if (text.includes(TAG)) throw new Error(`${table}에 구분 문자열 ${TAG}가 있어 SQL로 바꿀 수 없습니다.`);
-    const rows = JSON.parse(text);
-    const columns = info.columns.map(column => `"${column.replace(/"/g, '""')}"`).join(', ');
-    const statement = chunk => `insert into public.${table} (${columns})\nselect ${columns} from jsonb_populate_recordset(null::public.${table}, ${TAG}${JSON.stringify(chunk)}${TAG}::jsonb)\non conflict (id) do nothing;\n`;
-    let chunk = [], size = 0, part = 0;
-    const flush = () => {
-      if (!chunk.length) return;
-      fileNo += 1; part += 1;
-      const name = `${String(fileNo).padStart(2, '0')}-${table}-${part}.sql`;
-      fs.writeFileSync(path.join(outDir, name), `-- ${table} ${part}부 (${chunk.length}행)\n${statement(chunk)}`);
-      chunk = []; size = 0;
-    };
-    for (const row of rows) {
-      const length = Buffer.byteLength(JSON.stringify(row)) + 1;
-      if (size + length > SQL_LIMIT) flush();
-      chunk.push(row); size += length;
-    }
-    flush();
-    console.log(`${table}: ${rows.length}행 → ${part}개 파일`);
+    const file = path.join(dir, `${table}.json`);
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    if (manifest.tables[table] && sha256(text) !== manifest.tables[table].sha256) throw new Error(`${table}.json 체크섬이 manifest와 다릅니다(파일 손상).`);
+    tables[table] = JSON.parse(text);
   }
-  console.log(`복원 SQL: ${outDir} (${fileNo}개, 번호 순서대로 실행)`);
+  return { manifest, tables };
 }
 
 (async () => {
-  if (args.includes('--to-sql')) toSql(option('--to-sql')); else await backup();
+  if (args.includes('--to-sql')) {
+    const dir = path.resolve(option('--to-sql'));
+    const { manifest, tables } = loadFolder(dir);
+    writeSql(dir, manifest, tables);
+    return;
+  }
+  if (args.includes('--from-archive')) {
+    const file = path.resolve(option('--from-archive'));
+    const { manifest, tables } = unpackArchive(fs.readFileSync(file));
+    const out = path.resolve(option('--out') || file.replace(/\.json\.gz$/i, '').replace(/\.gz$/i, ''));
+    writeFolder(out, manifest, tables);
+    return;
+  }
+  const { manifest, tables } = await exportTables({
+    url: process.env.SAFETY_SUPABASE_URL, key: process.env.SAFETY_SUPABASE_SERVICE_KEY, withVectors: args.includes('--with-embeddings'),
+    onTable: (table, rows, bytes) => console.log(`${table}: ${rows}행 (${(bytes / 1048576).toFixed(1)} MB)`),
+  });
+  const out = path.resolve(option('--out') || path.join(__dirname, '..', 'local-import', 'backup', `supabase-${today()}`));
+  writeFolder(out, manifest, tables);
 })().catch(error => { console.error('실패:', error.message); process.exitCode = 1; });

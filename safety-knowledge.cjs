@@ -159,6 +159,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
     return { words, phrases, approved: new Map(documents.map(doc => [doc.id, doc])), found, frequency, total: sectionTotal, rankedSearch };
   }
   let sectionTotal = 0, frequencyCachedAt = 0;
+  let keepAliveStatus = null;
   // Word counts barely move between monthly loads, so they are kept for six hours.
   const FREQUENCY_TTL = 6 * 3600000;
   let documentsCache = null, documentsCachedAt = 0;
@@ -176,6 +177,21 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   async function approvedCaseCount() {
     if (caseCount === null || Date.now() - caseCountAt > 3600000) { caseCount = await countRows('safety_import_rows', '?select=id&review_status=eq.approved').catch(() => null); caseCountAt = Date.now(); }
     return caseCount;
+  }
+  // SIF cases for a draft: one request per search word over the main case fields (approved cases only), ranked by how
+  // many words each case contains. The general search() sends three requests per query (documents, sections, cases)
+  // and only its cases were used for drafts.
+  const CASE_FIELDS = ['incident_summary', 'hazard_object', 'high_risk_situation', 'causal_factors', 'work_name', 'unit_work'];
+  const caseSearchText = item => CASE_FIELDS.map(field => item[field] || '').join(' ');
+  async function searchCases(queries) {
+    const base = [...new Set(queries.flatMap(query => String(query).split(/\s+/)))]
+      .map(term => term.replace(/[^가-힣a-zA-Z0-9-]/g, '')).filter(term => term.length >= 2 && !GENERIC_TERMS.has(term)).slice(0, 8);
+    const words = [...new Set(base.flatMap(term => [term, ...spellingVariants(term)]))].slice(0, 12);
+    if (!words.length) return [];
+    const lists = await Promise.all(words.map(word => callResource('safety_import_rows', `?select=${caseColumns}&review_status=eq.approved&or=(${CASE_FIELDS.map(field => `${field}.ilike.*${encodeURIComponent(word)}*`).join(',')})&limit=15`).catch(() => [])));
+    const byId = new Map(lists.flat().map(item => [item.id, item]));
+    return [...byId.values()].map(item => ({ item, score: words.filter(word => caseSearchText(item).includes(word)).length }))
+      .sort((a, b) => b.score - a.score).slice(0, 20).map(entry => entry.item);
   }
   // Search-word refinement: the AI writes search words without knowing which ones are useless in this corpus.
   // Words that are generic, appear in too many sections (e.g. 점검: 1,308 of 6,462) or match nothing are sent back
@@ -424,6 +440,16 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
   }
   return {
     configured,
+    // Keep-alive: a free Supabase project pauses after about a week with little activity, which would stop evidence
+    // search (and later logins). The server reads one document row a day; the result is shown in the evidence library.
+    async keepAlive() {
+      if (!configured) return null;
+      const at = new Date().toISOString();
+      try { await call('?select=id&limit=1'); keepAliveStatus = { ok: true, at, message: '자료실 연결 유지 확인' }; }
+      catch (error) { keepAliveStatus = { ok: false, at, message: error.message.slice(0, 200) }; }
+      return keepAliveStatus;
+    },
+    keepAliveStatus: () => keepAliveStatus,
     async list() {
       const externalSearchEnabled = Boolean(env.OPENAI_API_KEY && env.SAFETY_EXTERNAL_SEARCH !== 'off');
       const external = { externalSearchEnabled, referenceCatalog };
@@ -434,7 +460,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         doc.section_count = doc.safety_document_sections?.[0]?.count || 0;
       });
       const semantic = await this.embeddingStatus().catch(error => ({ ready: false, message: error.message }));
-      return { ...external, connected: true, documents, semantic, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
+      return { ...external, connected: true, documents, semantic, keepAlive: keepAliveStatus, message: `Supabase 연결됨 · 등록 자료 ${documents.length}건 · 내부·외부 자료 함께 검토 · 외부 검색 ${externalSearchEnabled ? '사용 가능' : '미설정'}` };
     },
     async embeddingStatus() {
       if (!configured) return { ready: false, message: 'Supabase 미연결' };
@@ -788,7 +814,6 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       }
       stage('search');
       const searchErrors = [];
-      const caseMap = new Map();
       // Meaning-based search first; when it is not set up the word search still runs and the gap is reported.
       let semantic = null, semanticError = '';
       const evidenceMode = evidenceModeFor(options.evidenceMode);
@@ -801,11 +826,23 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         return semanticSearch([riskText, body.process, passage || queries.join(' ')].filter(Boolean).join('\n'));
       })().catch(error => { semanticError = error.message; return null; }) : Promise.resolve(null);
       const gatheredPromise = configured && !reused ? gatherSections(queries).catch(error => { searchErrors.push(error.message); return null; }) : Promise.resolve(null);
-      // SIF cases are searched only when some are approved (none are until the officer approves the archive).
-      const casesPromise = configured && !reused ? approvedCaseCount().then(count => count === 0 ? [] : Promise.all(queries.map(query => this.search(query)
-        .catch(error => { searchErrors.push(error.message); return { results: [], cases: [] }; })))) : Promise.resolve([]);
-      const [gathered, semanticResult, found] = await Promise.all([gatheredPromise, semanticPromise, casesPromise]);
+      // SIF cases are searched only when some are approved.
+      const casesPromise = configured && !reused ? approvedCaseCount().then(count => count === 0 ? [] : searchCases(queries))
+        .catch(error => { searchErrors.push(error.message); return []; }) : Promise.resolve([]);
+      const [gathered, semanticResult, wordCases] = await Promise.all([gatheredPromise, semanticPromise, casesPromise]);
       semantic = semanticResult;
+      // Case candidates: meaning-search hits first (up to 10), then word-search hits. They join the Cohere pool below and
+      // at most SAFETY_RERANK_CASES (3) reach the draft, so cases from other industries cannot crowd out guides and laws.
+      let semanticCases = [];
+      if (!reused && semantic?.caseIds?.length) {
+        const ids = semantic.caseIds.slice(0, 10);
+        const rows = await callResource('safety_import_rows', `?select=${caseColumns}&id=in.(${ids.map(eq).join(',')})`).catch(() => []);
+        const order = new Map(ids.map((id, index) => [id, index]));
+        semanticCases = rows.sort((a, b) => order.get(a.id) - order.get(b.id));
+      }
+      const caseCandidates = [...new Map([...semanticCases, ...(wordCases || [])].map(item => [item.id, item])).values()].slice(0, 25);
+      const caseCap = Number(env.SAFETY_RERANK_CASES ?? 3);
+      let selectedCases = caseCandidates.slice(0, caseCap);
       const widePool = evidenceMode === 'rerank' || evidenceMode === 'cohere';
       let ranked = reused || !configured || !gathered ? { laws: [], guides: [] } : await searchApprovedSections(queries, semantic?.sections || [], { wide: widePool, gathered }).catch(error => { searchErrors.push(error.message); return { laws: [], guides: [] }; });
       const wordSearchPath = ranked.rankedSearch || null;
@@ -816,10 +853,19 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         // not fill a law slot when no statute fits (same recall as 6+4 on the 198 saved cases: 94% vs 95%).
         const keep = Number(env.SAFETY_RERANK_KEEP || 10);
         try {
-          const { ordered, ms } = await cohereRerank([riskText, body.process].filter(Boolean).join('\n'), candidatePool);
-          const top = ordered.slice(0, keep);
+          const casePool = caseCandidates.map(item => ({ id: `case-${item.id}`, pool: 'case', row: item, title: '산업재해 고위험요인 사례',
+            locator: [item.work_name, item.incident_type].filter(Boolean).join(' · '), body: caseText(item).slice(0, 800) }));
+          const { ordered, ms } = await cohereRerank([riskText, body.process].filter(Boolean).join('\n'), [...candidatePool, ...casePool]);
+          const top = [];
+          let caseCount = 0;
+          for (const item of ordered) {
+            if (top.length >= keep) break;
+            if (item.pool === 'case') { if (caseCount >= caseCap) continue; caseCount += 1; }
+            top.push(item);
+          }
           ranked = { laws: top.filter(item => item.pool === 'law'), guides: top.filter(item => item.pool === 'guide') };
-          rerank = { provider: 'cohere', candidates: candidatePool.length, kept: ranked.laws.length + ranked.guides.length, ms, error: '' };
+          selectedCases = top.filter(item => item.pool === 'case').map(item => item.row);
+          rerank = { provider: 'cohere', candidates: candidatePool.length + casePool.length, kept: top.length, ms, error: '' };
         } catch (error) {
           rerank = { provider: 'cohere', candidates: candidatePool.length, kept: 0, ms: 0, error: /TimeoutError|aborted/i.test(`${error.name} ${error.message}`) ? '재순위 응답 지연: 검색 순서 사용' : `재순위 실패: 검색 순서 사용 · ${error.message}` };
           ranked = { laws: ranked.laws.filter(item => !item.matchedBy).slice(0, 12), guides: ranked.guides.filter(item => !item.matchedBy).slice(0, 8) };
@@ -838,23 +884,13 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
           ranked = { laws: ranked.laws.filter(item => !item.matchedBy).slice(0, 12), guides: ranked.guides.filter(item => !item.matchedBy).slice(0, 8) };
         }
       }
-      if (semantic?.caseIds?.length) {
-        const ids = semantic.caseIds.map(eq).join(',');
-        const semanticCases = await callResource('safety_import_rows', `?select=${caseColumns}&id=in.(${ids})`).catch(() => []);
-        const order = new Map(semantic.caseIds.map((id, index) => [id, index]));
-        semanticCases.sort((a, b) => order.get(a.id) - order.get(b.id)).forEach(item => caseMap.set(item.id, item));
-      }
       const docMap = new Map(); const lawMap = new Map();
       for (const item of ranked.guides) docMap.set(item.id, item);
-      for (const result of found) {
-        // Document sections come from the ranked search (current versions only); this search supplies SIF cases.
-        for (const item of result.cases || []) caseMap.set(item.id, item);
-      }
       for (const section of ranked.laws) lawMap.set(section.id, { ...section, kind: 'law' });
       // Ranked law.go.kr sections are evidence already; do not repeat them as general document text.
       for (const id of lawMap.keys()) docMap.delete(id);
       const evidence = reused ? structuredClone(reused.evidence) : [
-        ...[...caseMap.values()].slice(0, 25).map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
+        ...selectedCases.map(item => ({ ref: `sif:${item.id}`, type: 'SIF 사례', status: item.review_status, work: [item.industry_large,item.industry_medium,item.work_category,item.work_name,item.unit_work].filter(Boolean).join(' · '), hazard: item.hazard_object || item.high_risk_situation, incident: item.incident_summary, causes: item.causal_factors, controls: item.reduction_measures })),
         ...[...lawMap.values()].slice(0, 16).map(item => ({ ref: `doc:${item.id}`, type: '승인된 법령', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
         ...[...docMap.values()].slice(0, 11).map(item => ({ ref: `doc:${item.id}`, type: '문서 본문', status: item.review_status, title: item.title, publisher: item.publisher, kind: item.kind, locator: item.locator, sourceUrl: item.source_url, excerpt: item.body })),
       ];
@@ -1083,6 +1119,27 @@ function mountKnowledge(app, authorize, env) {
   app.get('/api/safety-knowledge/search', async (req, res) => {
     try { res.json(await repository.search(req.query.q)); }
     catch (error) { res.status(503).json({ error: error.message }); }
+  });
+  // Keep-alive timer: first check a minute after start, then every SAFETY_KEEPALIVE_HOURS (24); off with SAFETY_KEEPALIVE=off.
+  if (repository.configured && (env || process.env).SAFETY_KEEPALIVE !== 'off') {
+    const hours = Math.max(1, Number((env || process.env).SAFETY_KEEPALIVE_HOURS || 24));
+    const ping = () => repository.keepAlive().then(result => { if (result && !result.ok) console.warn('Supabase 연결 유지 확인 실패:', result.message); });
+    setTimeout(ping, 60000).unref?.();
+    setInterval(ping, hours * 3600000).unref?.();
+  }
+  // Evidence backup download (safety manager only, like every /api/safety-knowledge route): all tables without
+  // embedding vectors as one gzip file; scripts/backup-supabase.cjs --from-archive turns it into restore SQL.
+  app.get('/api/safety-knowledge/backup', async (req, res) => {
+    if (!repository.configured) return res.status(503).json({ error: 'Supabase 미연결: 백업할 자료가 없습니다.' });
+    try {
+      const settings = env || process.env;
+      const { exportTables, packArchive } = require('./supabase-backup.cjs');
+      const data = await exportTables({ url: settings.SAFETY_SUPABASE_URL, key: settings.SAFETY_SUPABASE_SERVICE_KEY });
+      const day = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="ansimon-evidence-backup-${day}.json.gz"`);
+      res.send(packArchive(data));
+    } catch (error) { res.status(503).json({ error: `백업 실패: ${error.message}` }); }
   });
   // Draft progress for the screen: the page sends a progressId and polls the current stage while the draft runs.
   // Kept in memory for a minute after the draft ends and visible only to the user who started it.
