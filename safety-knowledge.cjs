@@ -55,9 +55,11 @@ function draftEvidence(item) {
   if (item?.kind !== 'checklist' || typeof item.excerpt !== 'string') return item;
   // Leaving the shared text out entirely was tried and dropped: it is often right for the category (conveyor guards,
   // forklift routes) and without it measures 4–5 filled with training (36 cases: fitting measures 4.78 → 4.28).
+  // Items with prepared answers (scripts/build-checklist-answers.cjs) carry 항목별 개선대책 written for that item.
   const excerpt = item.excerpt
     .replace(/점검 항목:/, '점검 항목(이 항목이 요구하는 것):')
-    .replace(/개선대책:/, '분류 공통 대책(같은 분류의 여러 점검 항목에 공통으로 붙은 문장이므로 점검 항목과 이 위험에 맞는 부분만 참고):');
+    .replace(/항목별 개선대책\(AI 작성·담당자 검토 전\):/, '항목별 개선대책(이 점검 항목에 맞춰 미리 작성, 담당자 검토 전 · 위험 설명에 맞으면 우선 활용):')
+    .replace(/(^|\n)개선대책:/, '$1분류 공통 대책(같은 분류의 여러 점검 항목에 공통으로 붙은 문장이므로 점검 항목과 이 위험에 맞는 부분만 참고):');
   return { ...item, excerpt };
 }
 
@@ -1103,7 +1105,9 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
         const item = evidence.find(entry => entry.ref === ref);
         if (!item) continue;
         const label = referenceLabel(item);
-        const key = item.kind === 'checklist' ? `${field(item.excerpt, '유해·위험요인')}|${field(item.excerpt, '개선대책')}` : label;
+        // Identical checklist items (same hazard and same control text) are listed once; prepared items differ by control.
+        const control = field(item.excerpt, '개선대책') || (String(item.excerpt || '').match(/항목별 개선대책[^:\n]*:\s*([^\n]*)/) || [])[1] || field(item.excerpt, '점검 항목');
+        const key = item.kind === 'checklist' ? `${field(item.excerpt, '유해·위험요인')}|${control}` : label;
         let entry = references.find(other => other.key === key);
         if (!entry) { entry = { no: references.length + 1, ref, refs: [], label, type: item.type, key, measures: [] }; references.push(entry); }
         entry.refs.push(ref);
