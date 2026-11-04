@@ -1084,7 +1084,7 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
           // The inspection question names the specific requirement ("전기콘센트에 문어발식 연결을 하지 않고 있는가?");
           // the hazard field is a category shared by dozens of items ("전기설비 결함·충전부 접촉").
           const hazard = field(item.excerpt, '점검 항목') || field(item.excerpt, '유해·위험요인');
-          return `${/장흥우체국/.test(group) ? '장흥우체국 기존 위험성평가' : '우체국 작업 위험요인 점검표'}${work ? `(${work})` : ''}: ${hazard}`.slice(0, 160);
+          return `${/장흥우체국/.test(group) ? '장흥우체국 기존 위험성평가' : '우체국 유해위험요인 점검항목(서식)'}${work ? ` · ${work}` : ''}: ${hazard}`.slice(0, 160);
         }
         if (item.kind === 'incident') {
           const name = field(item.excerpt, '점검 항목') || locator.split(' · ').slice(2).join(' · ');
