@@ -291,10 +291,10 @@ async function apply() {
     const body = stripped.replace(/(?:^|\n)(개선대책|장흥 원문 조치|분류 공통 문장\(자료 정리 때 붙임, 참고\)):\s*([^\n]*)/, (match, name, text) =>
       `\n${lines.join('\n')}\n${name === '개선대책' ? (/원문 조치/.test(text) ? '장흥 원문 조치' : '분류 공통 문장(자료 정리 때 붙임, 참고)') : name}: ${text}`).replace(/^\n/, '');
     if (body === section.body) continue;
-    await rest(`safety_document_sections?id=eq.${section.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ body, content_hash: crypto.createHash('sha256').update(body).digest('hex') }) });
+    await rest(`safety_document_sections?id=eq.${section.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ body, content_hash: crypto.createHash('sha256').update(body).digest('hex'), embedding: null }) });
     changed += 1;
   }
-  console.log(`반영 ${changed}개 (바뀐 것 없는 ${sections.length - changed}개 제외). 근거자료실에서 「의미 검색 색인 만들기」로 바뀐 항목의 벡터를 다시 만드세요.`);
+  console.log(`반영 ${changed}개 (바뀐 것 없는 ${sections.length - changed}개 제외). 바뀐 항목의 벡터는 비웠으니 근거자료실 「의미 검색 색인 만들기」로 다시 만드세요.`);
 }
 
 (args.includes('--sheet') ? Promise.resolve(sheet()) : args.includes('--apply') ? apply() : args.includes('--refine') ? refine() : args.includes('--recheck-cases') ? recheckCases() : build())
