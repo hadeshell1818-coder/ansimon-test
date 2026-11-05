@@ -925,8 +925,26 @@ async function viewReportDetail(id){
     if(r.memo) body+=row('설명', r.memo);
   }
   if(r.riskOutcome){
-    body+=row('위험성 검토', `${escON(r.riskOutcome.status||'진행 중')}${r.riskOutcome.updatedAt?' · 최근 갱신 '+fmtDate(r.riskOutcome.updatedAt):''}`);
-    body+=row('처리결과', r.riskOutcome.result?`<div style="white-space:pre-line">${escON(r.riskOutcome.result)}</div>`:'안전관리담당자가 검토 중입니다. 처리결과는 확인 후 공유됩니다.');
+    // 위험성평가 공유(산업안전보건법 제36조제4항): 평가 후에는 위험요인·위험성 수준·개선대책·개선예정일을 「진행 중」으로,
+    // 이행결과서가 작성되면 이행결과서 전체를 「처리 완료」로 보여 준다.
+    const o=r.riskOutcome, pre=t=>`<div style="white-space:pre-line">${escON(t)}</div>`;
+    body+=row('위험성평가', `<b>${escON(o.status||'위험성평가 대기')}</b>${o.updatedAt?' · 최근 갱신 '+fmtDate(o.updatedAt):''}`);
+    if(o.stage){
+      if(o.factor) body+=row('유해·위험요인', pre(o.factor));
+      if(o.riskLevel) body+=row('위험성 수준', escON(o.riskLevel));
+      if(o.reduction) body+=row('개선대책', pre(o.reduction));
+      if(o.stage==='planned') body+=row('개선예정일', o.dueDate?escON(o.dueDate):'정해지면 표시됩니다');
+      if(o.stage==='done'){
+        body+=row('개선 완료일', escON(o.completedDate||'-'));
+        if(o.afterRiskLevel) body+=row('개선 후 위험성', escON(o.afterRiskLevel));
+        if(o.supervisor) body+=row('담당자(관리감독자)', escON(o.supervisor));
+        if(o.improvementSteps) body+=row('조치 실행 과정', pre(o.improvementSteps));
+        if(o.resultNote) body+=row('조치 결과·확인', pre(o.resultNote));
+        const ph=(u,l)=>u?`<figure style="margin:0;flex:1"><img src="${escON(u)}" alt="${l}" style="width:100%;border-radius:8px;border:1px solid var(--line)"><figcaption style="font-size:11px;text-align:center">${l}</figcaption></figure>`:'';
+        if(o.beforePhotoUrl||o.afterPhotoUrl) body+=row('개선 전·후', `<div style="display:flex;gap:8px">${ph(o.beforePhotoUrl,'개선 전')}${ph(o.afterPhotoUrl,'개선 후')}</div>`);
+      }
+    } else if(o.result) body+=row('처리결과', pre(o.result));
+    else body+=row('처리결과', '안전관리담당자가 위험성평가를 하면 결과가 여기에 표시됩니다.');
   }
   if(r.reason) body+=row('처리 메모', r.reason);
   if(r.aiMode==='manual') body+=row('분류 방식', '담당자가 사진을 보고 직접 지정함');

@@ -43,8 +43,8 @@ async function main() {
   // The light review answers by number: it drops doc:a26 (계단의 강도) from measure 1 and the illogical measure 4.
   assert.deepEqual(advice.measureLinks.map(item => item.refs), [['doc:g64', 'doc:c5'], ['doc:a3', 'doc:c6'], []]);
   assert.deepEqual(advice.references.map(item => item.label), ['KOSHA GUIDE A-G-2-2025 작업장 내 통로(경사로, 계단, 발판사다리) 선정 및 설치 - 6.4 계단 디딤면의 미끄럼 방지',
-    '우체국 유해위험요인 점검항목(서식) · 청사·사무실·출퇴근: 계단 점검 5', '산업안전보건기준에 관한 규칙 제3조(전도의 방지)']);
-  assert.deepEqual(advice.references.map(item => item.measures), [[1], [1, 2], [2]], 'the two identical checklist items are one reference supporting measures 1 and 2');
+    '우체국 유해위험요인 점검항목', '산업안전보건기준에 관한 규칙 제3조(전도의 방지)']);
+  assert.deepEqual(advice.references.map(item => item.measures), [[1], [1, 2], [2]], 'the checklist is named once by its title, supporting measures 1 and 2');
   assert.ok(advice.references.every(item => !/항목 \d/.test(item.label)), 'no storage address in 관련근거');
   assert.deepEqual(advice.measures, ['계단 디딤판에 미끄럼방지 테이프 부착', '계단 주변 물기 즉시 제거', '직원 안전교육'], 'plain text; general measures stay, the illogical one is dropped');
   assert.equal(advice.review.droppedMeasures, 1); assert.deepEqual(advice.review.additionalChecks, ['계단 디딤면 상태를 현장에서 확인']);

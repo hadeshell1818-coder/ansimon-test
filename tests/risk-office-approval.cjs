@@ -8,9 +8,10 @@ const layout = require('../risk-export-layout.cjs');
 const { mountKnowledge } = require('../safety-knowledge.cjs');
 
 // Office split (AGENTS.md 1-1): the head office (장흥) and branch offices share one site. A branch sees only its own
-// items; its half-year report goes to its own head; once approved the head office sees it per office. Items in a
-// pending or approved report are fixed until the head office asks for revision. Printed and exported forms carry an
-// approval box (담당 · 국장) at the top right.
+// items; each assessment goes to its own head for approval one by one (2026-11-05: no half-year bundles); once
+// approved the head office sees it at once. Pending or approved items are fixed until the head office asks for
+// revision; the 이행결과서 can still be written after approval. Printed and exported forms carry an approval box
+// (담당 · 국장) at the top right; 관내 전체 exports as one sheet with every office one after another.
 const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 const USERS = {
   hq: { id: 'hq', kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', officeCode: 'jangheung', officeRole: 'manager' },
@@ -28,7 +29,7 @@ const RISK = { items: [
 ] };
 const app = express(); app.use(express.json());
 const context = vm.createContext({
-  app, RISK, Date, SAFETY_OFFICE: '장흥우체국', PROCESSES: [], HAZARD_TYPES: {}, procById: () => null,
+  app, RISK, Date, SAFETY_OFFICE: '장흥우체국', USERS, path: require('node:path'), savePhoto() { throw new Error('no photo in test'); }, PROCESSES: [], HAZARD_TYPES: {}, procById: () => null,
   userFromReq: req => USERS[req.headers['x-user']] || null, itemForMgr: it => ({ ...it }), ensureRiskDemo() {},
   saveRisk() {}, save() {}, broadcastRisk() {}, syncRiskSource() {},
   XLSXStyle: XLSX, RISK_EXPORT_WIDTHS: layout.WIDTHS, riskExportRows: layout.exportRows, configureRiskExport: layout.configureExport,
@@ -39,7 +40,8 @@ load('const RISK_CRITERIA =', 'let RISK =');
 load("app.use(['/api/risk/state'", '/* 현장 사진신고 접수');
 load("app.post('/api/risk/items/:id/triage'", '/* 안전보건담당자가 현장에서');
 load("app.patch('/api/risk/items/:id'", '/* 개선조치 완료');
-load('/* 관내국 상·하반기 보고', '/* 청 누적보고');
+load('/* 개선조치 완료', '/* 관내국 건별 결재');
+load('/* 관내국 건별 결재', '/* 청 누적보고');
 const isSafetyMgr = vm.runInContext('isSafetyMgr', context), isHeadOfficeManager = vm.runInContext('isHeadOfficeManager', context);
 // Library: branch accounts get knowledgeAdmin false, as server.js passes it.
 mountKnowledge(app, req => { const u = USERS[req.headers['x-user']]; return isSafetyMgr(u) ? { ...u, knowledgeAdmin: isHeadOfficeManager(u) } : null; }, { SAFETY_KEEPALIVE: 'off' });
@@ -71,41 +73,49 @@ async function main() {
     assert.equal((await call('ddHead', 'PATCH', '/api/risk/items/D1', { owner: '국장' })).status, 403);
     assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { owner: '대덕 담당' })).status, 200);
 
-    // Half-year report: only the branch manager requests; the head office and the head cannot.
-    assert.equal((await call('hq', 'POST', '/api/risk/office-reports', { half: '2026-H2' })).status, 400);
-    assert.equal((await call('ddHead', 'POST', '/api/risk/office-reports', { half: '2026-H2' })).status, 403);
-    assert.equal((await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H1' })).status, 400, 'no items in the first half');
-    let report = (await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H2' })).body.report;
-    assert.equal(report.status, 'pending'); assert.deepEqual([...report.itemIds].sort(), ['D1', 'D2']); assert.equal(report.preparedBy, '대덕 담당자');
+    // Per-item approval: only the branch manager requests; the head office item and the head cannot.
+    const act = (user, id, action, reason) => call(user, 'POST', `/api/risk/items/${id}/approval/${action}`, reason === undefined ? {} : { reason });
+    assert.equal((await act('hq', 'H1', 'request')).status, 400, 'head office items use the printed box only');
+    assert.equal((await act('ddHead', 'D1', 'request')).status, 403);
+    assert.equal((await act('dd', 'D2', 'request')).status, 400, 'a risk level is needed before approval');
+    let approval = (await act('dd', 'D1', 'request')).body.approval;
+    assert.equal(approval.status, 'pending'); assert.equal(approval.requestedBy, '대덕 담당자');
     assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { owner: 'x' })).status, 409, 'fixed while awaiting approval');
-    assert.equal((await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H2' })).status, 409);
+    assert.equal((await act('dd', 'D1', 'request')).status, 409);
     assert.deepEqual(await ids('hq'), ['H1'], 'pending is not visible to the head office');
-    assert.equal((await call('ys', 'POST', `/api/risk/office-reports/${report.id}/approve`)).status, 404, 'another branch cannot see it');
-    assert.equal((await call('dd', 'POST', `/api/risk/office-reports/${report.id}/approve`)).status, 403, 'the preparer cannot approve');
+    assert.equal((await act('ys', 'D1', 'approve')).status, 404, 'another branch cannot see it');
+    assert.equal((await act('dd', 'D1', 'approve')).status, 403, 'the requester cannot approve');
+    assert.equal((await call('ddHead', 'GET', '/api/risk/state')).body.registered.find(it => it.id === 'D1').approval.status, 'pending');
 
     // Withdraw, request again, reject (reason required), request again, approve.
-    assert.equal((await call('dd', 'POST', `/api/risk/office-reports/${report.id}/withdraw`)).body.report.status, 'draft');
+    assert.equal((await act('dd', 'D1', 'withdraw')).body.approval.status, null);
     assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { owner: '대덕 담당' })).status, 200);
-    await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H2' });
-    assert.equal((await call('ddHead', 'POST', `/api/risk/office-reports/${report.id}/reject`, { reason: '' })).status, 400);
-    report = (await call('ddHead', 'POST', `/api/risk/office-reports/${report.id}/reject`, { reason: '대책 보완' })).body.report;
-    assert.equal(report.status, 'rejected'); assert.equal(report.rejectReason, '대책 보완');
-    await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H2' });
-    report = (await call('ddHead', 'POST', `/api/risk/office-reports/${report.id}/approve`)).body.report;
-    assert.equal(report.status, 'approved'); assert.equal(report.approvedBy, '대덕 국장');
-    assert.deepEqual(report.history.map(h => h.action), ['request', 'withdraw', 'request', 'reject', 'request', 'approve']);
+    await act('dd', 'D1', 'request');
+    assert.equal((await act('ddHead', 'D1', 'reject', '')).status, 400);
+    approval = (await act('ddHead', 'D1', 'reject', '대책 보완')).body.approval;
+    assert.equal(approval.status, 'rejected'); assert.equal(approval.rejectReason, '대책 보완');
+    assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { reduction: '1. 미끄럼 방지' })).status, 200, 'a rejected item can be fixed');
+    await act('dd', 'D1', 'request');
+    approval = (await act('ddHead', 'D1', 'approve')).body.approval;
+    assert.equal(approval.status, 'approved'); assert.equal(approval.approvedBy, '대덕 국장');
+    assert.deepEqual(approval.history.map(h => h.action), ['request', 'withdraw', 'request', 'reject', 'request', 'approve']);
 
-    // Approved: the head office sees the branch items (read-only) and the report; other branches still do not.
-    assert.deepEqual(await ids('hq'), ['D1', 'D2', 'H1']);
+    // Approved: the head office sees this one item at once (read-only); D2 (not approved) stays hidden; other branches never see it.
+    assert.deepEqual(await ids('hq'), ['D1', 'H1']);
     const hqState = (await call('hq', 'GET', '/api/risk/state')).body;
     assert.equal(hqState.registered.find(it => it.id === 'D1').readOnly, true);
     assert.equal(hqState.registered.find(it => it.id === 'H1').readOnly, false);
-    assert.deepEqual(hqState.reports.map(r => [r.officeName, r.halfLabel, r.status]), [['장흥대덕우체국', '2026년 하반기', 'approved']]);
+    assert.equal(hqState.offices.find(o => o.code === 'daedeok').headName, '대덕 국장', 'the office head is named for the approval box');
     assert.deepEqual(await ids('ys'), ['Y1']);
     assert.equal((await call('hq', 'PATCH', '/api/risk/items/D1', { owner: '총괄' })).status, 403);
     assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { owner: 'x' })).status, 409, 'fixed after approval');
+    const ddState = (await call('dd', 'GET', '/api/risk/state')).body.registered.find(it => it.id === 'D1');
+    assert.equal(ddState.canImprove, true, 'the 이행결과서 is written after approval');
+    const improve = await call('dd', 'POST', '/api/risk/items/D1/improve', { afterRiskLevel: '하', completedDate: '2026-08-20', resultNote: '미끄럼 방지 테이프 부착', improvementSteps: '8.20 부착' });
+    assert.equal(improve.status, 200, JSON.stringify(improve.body));
+    assert.equal(RISK.items.find(it => it.id === 'D1').resultNote, '미끄럼 방지 테이프 부착');
 
-    // Export: branch approval box carries the preparer and the head; the head office box leaves 국장 blank.
+    // Export: branch approval box carries the writer and the head; the head office box leaves 국장 blank.
     const sheetRows = async (user, query) => {
       const res = await call(user, 'GET', '/api/risk/export.xlsx' + query);
       assert.equal(res.status, 200);
@@ -117,26 +127,31 @@ async function main() {
     assert.deepEqual([branchSheet[0][7], branchSheet[0][8], branchSheet[1][7], branchSheet[1][8]], ['담당', '국장', '대덕 담당자', '대덕 국장']);
     const [hqSheet] = await sheetRows('hq', '?from=2026-07-01&to=2026-12-31');
     assert.deepEqual([hqSheet[1][7], hqSheet[1][8] ?? ''], ['안전보건담당자', '']);
-    assert.equal((await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=all')).length, 2, 'all offices: head office and approved branch sheets');
+    // 관내 전체: one sheet, the head office first and each approved branch after it, each with its own title and box.
+    const all = await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=all');
+    assert.equal(all.length, 1, 'one sheet for the whole jurisdiction');
+    const titles = all[0].map(row => row[0]).filter(v => /위험성평가표$/.test(String(v || '')));
+    assert.deepEqual(titles, ['장흥우체국 위험성평가표', '장흥대덕우체국 위험성평가표']);
+    assert.ok(all[0].some(row => row[1] === '대덕 계단 넘어짐') && !all[0].some(row => row[1] === '대덕 이륜차 전도'), 'only approved branch items');
     assert.equal((await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=yongsan'))[0].length <= 4, true, 'unapproved branch exports nothing');
 
     // Revision: only the head office asks (reason required); the branch edits and requests approval again.
-    assert.equal((await call('dd', 'POST', `/api/risk/office-reports/${report.id}/revision`, { reason: 'x' })).status, 403);
-    assert.equal((await call('hq', 'POST', `/api/risk/office-reports/${report.id}/revision`, { reason: '' })).status, 400);
-    report = (await call('hq', 'POST', `/api/risk/office-reports/${report.id}/revision`, { reason: '개선예정일 기재' })).body.report;
-    assert.equal(report.status, 'revision');
-    assert.deepEqual(await ids('hq'), ['D1', 'D2', 'H1'], 'still visible to the head office during revision');
+    assert.equal((await act('dd', 'D1', 'revision', 'x')).status, 403);
+    assert.equal((await act('hq', 'D1', 'revision', '')).status, 400);
+    approval = (await act('hq', 'D1', 'revision', '개선예정일 기재')).body.approval;
+    assert.equal(approval.status, 'revision');
+    assert.deepEqual(await ids('hq'), ['D1', 'H1'], 'still visible to the head office during revision');
     assert.equal((await call('dd', 'PATCH', '/api/risk/items/D1', { dueDate: '12.31' })).status, 200);
-    await call('dd', 'POST', '/api/risk/office-reports', { half: '2026-H2' });
-    report = (await call('ddHead', 'POST', `/api/risk/office-reports/${report.id}/approve`)).body.report;
-    assert.equal(report.status, 'approved');
+    await act('dd', 'D1', 'request');
+    approval = (await act('ddHead', 'D1', 'approve')).body.approval;
+    assert.equal(approval.status, 'approved');
 
     // Library: branch accounts read and draft, but cannot back up or change the library.
     assert.equal((await call('dd', 'GET', '/api/safety-knowledge/backup')).status, 403);
     assert.equal((await call('ddHead', 'POST', '/api/safety-knowledge/index-embeddings')).status, 403);
     assert.notEqual((await call('dd', 'GET', '/api/safety-knowledge')).status, 403);
     assert.notEqual((await call('hq', 'GET', '/api/safety-knowledge/backup')).status, 403);
-    console.log('PASS: office scope, head view-only, half-year request/withdraw/reject/approve, head office sees approved branches read-only, revision, approval box in export, library limits');
+    console.log('PASS: office scope, head view-only, per-item request/withdraw/reject/approve, head office sees each approved item at once read-only, 이행결과서 after approval, revision, approval box, 관내 전체 one sheet, library limits');
   } finally { await new Promise(r => server.close(r)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
