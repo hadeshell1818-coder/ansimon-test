@@ -315,19 +315,22 @@ function showApp(){
 }
 
 /* ===== 간결한 홈 · 신고내역은 별도 화면 ===== */
+// 외근(집배원, 소통실 명부에 있음)은 전체 메뉴, 내근 직원은 신고·내역만 본다(M-01i: 배달위험 알림·날씨·귀국보고 없음).
+const isFieldStaff=()=>!!(me&&me.field);
 function home(){
   cur={};
+  const field=isFieldStaff();
   $('cw').innerHTML=`
     ${installBanner()}
-    ${sfPushPromptHtml()}
-    <section id="carrier-weather" class="weather-card" aria-label="오늘의 배달 날씨"></section>
+    ${field?sfPushPromptHtml():''}
+    ${field?`<section id="carrier-weather" class="weather-card" aria-label="오늘의 배달 날씨"></section>
     <section class="home-section delivery" aria-label="배달위험 알림">
       <div class="home-section-title">배달위험 알림</div>
       <div class="home-grid">
         <button class="home-tile" onclick="sfCall()"><span class="tile-icon">☎</span>관제실 전화</button>
         <button class="home-tile" onclick="sfVoiceScreen()"><span class="tile-icon">🎙</span>음성신고</button>
       </div>
-    </section>
+    </section>`:''}
     <section class="home-section reporting" aria-label="안심·복지 신고">
       <div class="home-section-title">안심·복지 신고</div>
       <div class="home-grid">
@@ -335,12 +338,12 @@ function home(){
         <button class="home-tile" onclick="pickCat('welfare')"><span class="tile-icon">♡</span>복지신고</button>
       </div>
     </section>
-    <section class="home-section returning" aria-label="귀국보고">
+    ${field?`<section class="home-section returning" aria-label="귀국보고">
       <div class="home-section-title">귀국보고</div>
       <div class="home-grid">
         <button class="home-tile" onclick="openReturnReport()"><span class="tile-icon">✓</span>귀국보고</button>
       </div>
-    </section>
+    </section>`:''}
     <button class="history-link" onclick="showReportHistory()">내 신고내역 · 처리현황 <span>›</span></button>
     <div class="home-emergency-note">급박한 생명·신체 위험은 119 또는 112에 먼저 신고하세요.</div>`;
   CarrierWeather.mount(api);
@@ -391,7 +394,7 @@ function installBanner(){
 function refreshInstallBanner(){
   const old=document.querySelector('.install-banner'), html=installBanner();
   if(old){ if(html) old.outerHTML=html; else old.remove(); }
-  else if(html && $('cw') && $('carrier-weather')) $('cw').insertAdjacentHTML('afterbegin',html);
+  else if(html && $('cw') && document.querySelector('#cw .home-section')) $('cw').insertAdjacentHTML('afterbegin',html);
 }
 async function installApp(){
   if(!installPrompt) return;
