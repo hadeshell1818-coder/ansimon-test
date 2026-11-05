@@ -467,23 +467,39 @@ function showAutoLocating(){
   </div>`;
   if(!navigator.geolocation){ return quickSubmit(34.6816,126.9072); }
   let settled=false;
-  const fallback=setTimeout(()=>{ if(settled)return; settled=true; quickSubmit(34.6816,126.9072); },9000);
-  navigator.geolocation.getCurrentPosition(
+  const fallback=setTimeout(()=>{ if(settled)return; settled=true; quickSubmit(34.6816,126.9072); },19000);
+  getPositionWithRetry(
     p=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(p.coords.latitude,p.coords.longitude); },
-    ()=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(34.6816,126.9072); },
-    {enableHighAccuracy:true,timeout:7000,maximumAge:60000});
+    ()=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(34.6816,126.9072); });
+}
+// Why a position failed, in words the reporter can act on (permission denied / no fix / timeout). Indoors GPS alone
+// often times out, so a failed high-accuracy request is retried once with network (Wi-Fi/cell) location.
+function geoFailureText(error){
+  if(!error||error.code===undefined) return '위치를 확인하지 못했습니다.';
+  if(error.code===1) return '위치 권한이 꺼져 있습니다. 휴대폰 설정에서 이 앱(브라우저)의 위치 권한을 허용하고 휴대폰 위치 기능을 켠 뒤 다시 시도하세요.';
+  if(error.code===2) return '휴대폰이 현재 위치를 잡지 못했습니다(위치 기능이 꺼져 있거나 실내). 위치 기능을 켜고 다시 시도하세요.';
+  return '위치 확인 시간이 지났습니다(실내에서는 GPS가 늦습니다). 다시 시도하거나 위치 없이 접수할 수 있습니다.';
+}
+function getPositionWithRetry(onOk,onFail){
+  navigator.geolocation.getCurrentPosition(onOk,error=>{
+    if(error&&error.code===1) return onFail(error);
+    navigator.geolocation.getCurrentPosition(onOk,onFail,{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+  },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
 }
 function captureInternalLocation(){
   const status=$('internalLocationStatus');
-  if(!navigator.geolocation){ if(status)status.textContent='위치 권한을 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
+  if(!navigator.geolocation){ if(status)status.textContent='이 브라우저에서는 위치를 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
+  if(!window.isSecureContext){ if(status)status.textContent='보안 연결(https)이 아니라 위치를 사용할 수 없습니다. 위치 없이 접수할 수 있습니다.'; return; }
+  if(status)status.textContent='📍 현재 위치 확인 중…';
   try{
-    navigator.geolocation.getCurrentPosition(position=>{
+    getPositionWithRetry(position=>{
       cur.lat=position.coords.latitude; cur.lng=position.coords.longitude;
       if(status)status.textContent='📍 위치 확인 완료 · 주소 확인 중…';
       cur.locationPromise=resolveInternalAddress(cur.lat,cur.lng);
-    },()=>{
-      if(status)status.textContent='위치를 확인하지 못했습니다. 설명을 입력하거나 위치 없이 접수할 수 있습니다.';
-    },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+    },error=>{
+      console.warn('internal report geolocation failed',error&&error.code,error&&error.message);
+      if(status)status.innerHTML=`${geoFailureText(error)} 설명을 입력하거나 위치 없이 접수할 수 있습니다. <a href="#" onclick="captureInternalLocation();return false" style="font-weight:800;color:var(--gps)">다시 시도</a>`;
+    });
   }catch(error){
     console.warn('internal report geolocation unavailable',error);
     if(status)status.textContent='위치 권한을 사용할 수 없습니다. 위치 없이 계속 접수할 수 있습니다.';
@@ -522,7 +538,7 @@ async function resolveInternalAddress(lat,lng){
       }finally{clearTimeout(timer);}
     }
   }catch(error){console.warn('internal address lookup failed',error);}
-  if(status&&!cur.addr)status.textContent='📍 주소를 확인하지 못했습니다. GPS 좌표로 접수할 수 있습니다.';
+  if(status&&!cur.addr)status.textContent=`📍 위치 확인 완료(좌표 ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}) · 주소 이름은 찾지 못해 좌표로 접수합니다.`;
 }
 /* 갤러리 선택 시: 촬영 당시 위치를 알 수 없으므로 지도/주소로 직접 지정 (기존 위치선택 UI 재사용) */
 function showManualLocationPicker(){
