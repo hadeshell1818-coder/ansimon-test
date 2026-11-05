@@ -177,7 +177,11 @@ for (let i=11;i<=16;i++) {
 }
 function publicUser(id) { const u = USERS[id]; if (!u) return null;
   return { id, kind: u.kind, name: u.name, org: u.org, zone: u.zone || null, region: u.region, type: u.type, role: u.role,
-    officeCode: u.officeCode || null, officeRole: u.officeRole || null, test: !!u.test }; }
+    officeCode: u.officeCode || null, officeRole: u.officeRole || null, test: !!u.test,
+    // 외근(집배원) = has a delivery zone or is on the control-room roster (1-1절: 소통실 명부가 곧 외근). Other app
+    // accounts (직원) are 내근: the app shows the inside-staff menu without 배달위험 알림·날씨·귀국보고; the server already
+    // refuses 음성신고·귀국보고 for anyone off the roster.
+    field: u.kind === 'carrier' && (!!u.zone || !!rosterById(id)) }; }
 
 /* ===================== 세션(토큰) ===================== */
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
