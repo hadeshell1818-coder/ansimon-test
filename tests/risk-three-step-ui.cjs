@@ -30,8 +30,10 @@ async function main(){
   assert.equal(await page.getByRole('button',{name:'3개월',exact:true}).count(),1);
   assert.equal(await page.getByRole('button',{name:'공정별 출력',exact:true}).count(),1);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-desktop.png'),fullPage:true});
-  await page.getByRole('button',{name:/^(작성|평가·처리결과)$/}).click();
-  assert.equal(await page.locator('#e-level').count(),0);
+  // A written assessment opens with what was written (2026-11-05): risk level, measures and references are in the form.
+  await page.getByRole('button',{name:/^(작성|보기·수정)$/}).click();
+  assert.equal(await page.locator('#e-level').inputValue(),'상');
+  assert.equal(await page.locator('#e-reduction').count(),1);
   assert.equal(await page.locator('#e-red').count(),0);
   assert.equal(await page.getByRole('button',{name:'AI로 초안 작성',exact:true}).count(),1);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
@@ -39,12 +41,18 @@ async function main(){
   assert.equal(await page.locator('.result-photo').count(),2);
   assert.match(await page.locator('.result-plan').innerText(),/담당자\(관리감독자\)/);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-result.png'),fullPage:true});
+  // The print window closes itself after printing (afterprint). Making the PDF fires afterprint too, so the test records
+  // the close instead of letting it happen, then closes the window itself.
+  await page.evaluate(()=>{const open=window.open;window.open=(...args)=>{const w=open.apply(window,args);if(w){w.print=()=>{};w.close=()=>{w.__closedAfterPrint=true}}return w}});
   const popupEvent=page.waitForEvent('popup');
   await page.getByRole('button',{name:'인쇄',exact:true}).click();
   const popup=await popupEvent;await popup.waitForLoadState();
+  await popup.evaluate(()=>{window.__closedAfterPrint=false});
   await popup.pdf({path:path.join(os.tmpdir(),'risk-three-step-result.pdf'),preferCSSPageSize:true});
   assert.equal(await popup.locator('.result-form').count(),1);
   assert.equal(await popup.locator('.ratable').count(),0,'result print must exclude the background assessment');
+  await popup.evaluate(()=>dispatchEvent(new Event('afterprint')));
+  assert.equal(await popup.evaluate(()=>window.__closedAfterPrint),true,'the print window closes after printing');
   await popup.close();
   await page.getByRole('button',{name:'닫기',exact:true}).click();
   await page.setViewportSize({width:390,height:844});

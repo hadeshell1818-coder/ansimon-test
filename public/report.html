@@ -467,23 +467,39 @@ function showAutoLocating(){
   </div>`;
   if(!navigator.geolocation){ return quickSubmit(34.6816,126.9072); }
   let settled=false;
-  const fallback=setTimeout(()=>{ if(settled)return; settled=true; quickSubmit(34.6816,126.9072); },9000);
-  navigator.geolocation.getCurrentPosition(
+  const fallback=setTimeout(()=>{ if(settled)return; settled=true; quickSubmit(34.6816,126.9072); },19000);
+  getPositionWithRetry(
     p=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(p.coords.latitude,p.coords.longitude); },
-    ()=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(34.6816,126.9072); },
-    {enableHighAccuracy:true,timeout:7000,maximumAge:60000});
+    ()=>{ if(settled)return; settled=true; clearTimeout(fallback); quickSubmit(34.6816,126.9072); });
+}
+// Why a position failed, in words the reporter can act on (permission denied / no fix / timeout). Indoors GPS alone
+// often times out, so a failed high-accuracy request is retried once with network (Wi-Fi/cell) location.
+function geoFailureText(error){
+  if(!error||error.code===undefined) return '위치를 확인하지 못했습니다.';
+  if(error.code===1) return '위치 권한이 꺼져 있습니다. 휴대폰 설정에서 이 앱(브라우저)의 위치 권한을 허용하고 휴대폰 위치 기능을 켠 뒤 다시 시도하세요.';
+  if(error.code===2) return '휴대폰이 현재 위치를 잡지 못했습니다(위치 기능이 꺼져 있거나 실내). 위치 기능을 켜고 다시 시도하세요.';
+  return '위치 확인 시간이 지났습니다(실내에서는 GPS가 늦습니다). 다시 시도하거나 위치 없이 접수할 수 있습니다.';
+}
+function getPositionWithRetry(onOk,onFail){
+  navigator.geolocation.getCurrentPosition(onOk,error=>{
+    if(error&&error.code===1) return onFail(error);
+    navigator.geolocation.getCurrentPosition(onOk,onFail,{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+  },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
 }
 function captureInternalLocation(){
   const status=$('internalLocationStatus');
-  if(!navigator.geolocation){ if(status)status.textContent='위치 권한을 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
+  if(!navigator.geolocation){ if(status)status.textContent='이 브라우저에서는 위치를 사용할 수 없어 신고 위치 없이 계속합니다.'; return; }
+  if(!window.isSecureContext){ if(status)status.textContent='보안 연결(https)이 아니라 위치를 사용할 수 없습니다. 위치 없이 접수할 수 있습니다.'; return; }
+  if(status)status.textContent='📍 현재 위치 확인 중…';
   try{
-    navigator.geolocation.getCurrentPosition(position=>{
+    getPositionWithRetry(position=>{
       cur.lat=position.coords.latitude; cur.lng=position.coords.longitude;
       if(status)status.textContent='📍 위치 확인 완료 · 주소 확인 중…';
       cur.locationPromise=resolveInternalAddress(cur.lat,cur.lng);
-    },()=>{
-      if(status)status.textContent='위치를 확인하지 못했습니다. 설명을 입력하거나 위치 없이 접수할 수 있습니다.';
-    },{enableHighAccuracy:true,timeout:8000,maximumAge:60000});
+    },error=>{
+      console.warn('internal report geolocation failed',error&&error.code,error&&error.message);
+      if(status)status.innerHTML=`${geoFailureText(error)} 설명을 입력하거나 위치 없이 접수할 수 있습니다. <a href="#" onclick="captureInternalLocation();return false" style="font-weight:800;color:var(--gps)">다시 시도</a>`;
+    });
   }catch(error){
     console.warn('internal report geolocation unavailable',error);
     if(status)status.textContent='위치 권한을 사용할 수 없습니다. 위치 없이 계속 접수할 수 있습니다.';
@@ -522,7 +538,7 @@ async function resolveInternalAddress(lat,lng){
       }finally{clearTimeout(timer);}
     }
   }catch(error){console.warn('internal address lookup failed',error);}
-  if(status&&!cur.addr)status.textContent='📍 주소를 확인하지 못했습니다. GPS 좌표로 접수할 수 있습니다.';
+  if(status&&!cur.addr)status.textContent=`📍 위치 확인 완료(좌표 ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}) · 주소 이름은 찾지 못해 좌표로 접수합니다.`;
 }
 /* 갤러리 선택 시: 촬영 당시 위치를 알 수 없으므로 지도/주소로 직접 지정 (기존 위치선택 UI 재사용) */
 function showManualLocationPicker(){
@@ -909,8 +925,26 @@ async function viewReportDetail(id){
     if(r.memo) body+=row('설명', r.memo);
   }
   if(r.riskOutcome){
-    body+=row('위험성 검토', `${escON(r.riskOutcome.status||'진행 중')}${r.riskOutcome.updatedAt?' · 최근 갱신 '+fmtDate(r.riskOutcome.updatedAt):''}`);
-    body+=row('처리결과', r.riskOutcome.result?`<div style="white-space:pre-line">${escON(r.riskOutcome.result)}</div>`:'안전관리담당자가 검토 중입니다. 처리결과는 확인 후 공유됩니다.');
+    // 위험성평가 공유(산업안전보건법 제36조제4항): 평가 후에는 위험요인·위험성 수준·개선대책·개선예정일을 「진행 중」으로,
+    // 이행결과서가 작성되면 이행결과서 전체를 「처리 완료」로 보여 준다.
+    const o=r.riskOutcome, pre=t=>`<div style="white-space:pre-line">${escON(t)}</div>`;
+    body+=row('위험성평가', `<b>${escON(o.status||'위험성평가 대기')}</b>${o.updatedAt?' · 최근 갱신 '+fmtDate(o.updatedAt):''}`);
+    if(o.stage){
+      if(o.factor) body+=row('유해·위험요인', pre(o.factor));
+      if(o.riskLevel) body+=row('위험성 수준', escON(o.riskLevel));
+      if(o.reduction) body+=row('개선대책', pre(o.reduction));
+      if(o.stage==='planned') body+=row('개선예정일', o.dueDate?escON(o.dueDate):'정해지면 표시됩니다');
+      if(o.stage==='done'){
+        body+=row('개선 완료일', escON(o.completedDate||'-'));
+        if(o.afterRiskLevel) body+=row('개선 후 위험성', escON(o.afterRiskLevel));
+        if(o.supervisor) body+=row('담당자(관리감독자)', escON(o.supervisor));
+        if(o.improvementSteps) body+=row('조치 실행 과정', pre(o.improvementSteps));
+        if(o.resultNote) body+=row('조치 결과·확인', pre(o.resultNote));
+        const ph=(u,l)=>u?`<figure style="margin:0;flex:1"><img src="${escON(u)}" alt="${l}" style="width:100%;border-radius:8px;border:1px solid var(--line)"><figcaption style="font-size:11px;text-align:center">${l}</figcaption></figure>`:'';
+        if(o.beforePhotoUrl||o.afterPhotoUrl) body+=row('개선 전·후', `<div style="display:flex;gap:8px">${ph(o.beforePhotoUrl,'개선 전')}${ph(o.afterPhotoUrl,'개선 후')}</div>`);
+      }
+    } else if(o.result) body+=row('처리결과', pre(o.result));
+    else body+=row('처리결과', '안전관리담당자가 위험성평가를 하면 결과가 여기에 표시됩니다.');
   }
   if(r.reason) body+=row('처리 메모', r.reason);
   if(r.aiMode==='manual') body+=row('분류 방식', '담당자가 사진을 보고 직접 지정함');
