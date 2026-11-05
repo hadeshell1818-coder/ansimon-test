@@ -793,6 +793,17 @@ function createKnowledgeRepository(env = process.env, request = fetch) {
       }
       return [...ranked.laws.map(item => ({ ...item, kind: 'law' })), ...ranked.guides.map(item => ({ ...item, kind: 'guide' }))].map(item => ({ ref: `doc:${item.id}`, title: item.title, locator: item.locator, kind: item.kind, matchedBy: item.matchedBy || 'words', ...(withBody ? { body: item.body } : {}) }));
     },
+    // SIF case candidates for a text (meaning-search hits first, then word-search hits), as a draft gathers them; used
+    // by scripts/build-checklist-answers.cjs --refine to check each checklist item against similar accidents.
+    async rankCases(queries, { semanticText = '', limit = 8 } = {}) {
+      if (!configured) return [];
+      const [wordCases, semantic] = await Promise.all([searchCases(queries).catch(() => []),
+        semanticText && semanticAvailable() ? semanticSearch(semanticText).catch(() => null) : null]);
+      const ids = (semantic?.caseIds || []).slice(0, 10);
+      const rows = ids.length ? await callResource('safety_import_rows', `?select=${caseColumns}&review_status=eq.approved&id=in.(${ids.map(eq).join(',')})`).catch(() => []) : [];
+      const order = new Map(ids.map((id, index) => [id, index]));
+      return [...new Map([...rows.sort((a, b) => order.get(a.id) - order.get(b.id)), ...wordCases].map(item => [item.id, item])).values()].slice(0, limit);
+    },
     // Stage ① only, for the simulation: the same search-word extraction a draft runs first.
     async extractQueries(description, process = '') {
       if (!env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY가 필요합니다.');

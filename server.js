@@ -166,6 +166,9 @@ if (process.env.PW_TEST_OFFICE) {
   const testOfficeHash = requiredPassword('PW_TEST_OFFICE');
   USERS.daedeok1 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 담당자', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국 안전 담당자(시험용)', officeCode: 'daedeok', officeRole: 'manager', test: true };
   USERS.daedeok2 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 국장', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국장(시험용)', officeCode: 'daedeok', officeRole: 'head', test: true };
+  // A branch employee for the app (2026-11-05): their internal hazard reports land in the 대덕 inbox. Not on the control
+  // room roster (still the fixed head-office six), so no return reports or zone alerts until the staff list arrives.
+  USERS.daedeok3 = { pwHash: testOfficeHash, kind: 'carrier', name: '대덕 직원', org: '장흥대덕우체국', region: '장흥군', type: null, role: '직원(시험용)', officeCode: 'daedeok', test: true };
 }
 // Prototype accounts use per-account passwords when configured, otherwise existing PW_JIP.
 for (let i=11;i<=16;i++) {
