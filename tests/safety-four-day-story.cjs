@@ -42,13 +42,16 @@ async function main(){
   assert.equal(result.daily.length,4);assert.equal(result.summary.bodyIssues,1);assert.equal(result.summary.normalReturns,23);
   assert.equal(result.summary.voice,3);assert.match(await page.locator('.situation-table').innerText(),/방금 접수된 음성신고/);
   assert.match(await page.locator('.situation-table').innerText(),/용산교도소/);assert.equal(await page.locator('.situation-table tbody tr').count(),17);
-  await page.evaluate(()=>{const open=window.open;window.open=(...args)=>{const w=open(...args);w.print=()=>{};return w}});
-  let promise=page.waitForEvent('popup');await page.evaluate(()=>printReturnEvidence());let popup=await promise;await popup.waitForLoadState();
-  let printed=await popup.locator('body').innerText();for(const term of ['2026-09-29','2026-10-02','허리 근육통 호소','파스 지급','다행히 큰 문제 없다고 함.'])assert.ok(printed.includes(term),term);await popup.close();
+  // Prints go through a hidden frame in the page (no about:blank window); the test stands in for the print dialog.
+  await page.evaluate(()=>{window.printed=0;window.printFrame=()=>{window.printed++}});
+  await page.evaluate(()=>printReturnEvidence());await page.waitForFunction(()=>window.printed===1);let popup=page.frame({name:'print-frame'});
+  let printed=await popup.locator('body').innerText();for(const term of ['2026-09-29','2026-10-02','허리 근육통 호소','파스 지급','다행히 큰 문제 없다고 함.'])assert.ok(printed.includes(term),term);
+  assert.equal(page.context().pages().length,1,'no extra window');
   await page.evaluate(()=>showTab('health'));await page.waitForFunction(()=>managementLedgerData.health?.length===25);
   assert.ok(await page.evaluate(()=>managementLedgerData.health.some(r=>r.id==='live-carrier')),'Actual ledger records survive configured records');
-  promise=page.waitForEvent('popup');await page.evaluate(()=>printManagementLedger('health','prototype-jip14'));popup=await promise;await popup.waitForLoadState();
-  printed=await popup.locator('body').innerText();assert.equal(await popup.locator('tbody tr').count(),4);assert.match(printed,/파스 지급/);assert.match(printed,/다행히 큰 문제 없다고 함/);await popup.close();
+  await page.evaluate(()=>printManagementLedger('health','prototype-jip14'));await page.waitForFunction(()=>window.printed===2);popup=page.frame({name:'print-frame'});
+  printed=await popup.locator('body').innerText();assert.equal(await popup.locator('tbody tr').count(),4);assert.match(printed,/파스 지급/);assert.match(printed,/다행히 큰 문제 없다고 함/);
+  await popup.evaluate(()=>dispatchEvent(new Event('afterprint')));await page.waitForFunction(()=>!document.getElementById('print-frame'));
   assert.deepEqual(errors,[]);console.log('PASS: 4-day cross-month period, 24 returns, scoped risk recipients, linked next-day health result, situation and ledger/return prints');
  }finally{await browser?.close();await new Promise(r=>server.close(r))}
 }

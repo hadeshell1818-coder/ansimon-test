@@ -12,7 +12,7 @@ vm.runInContext(html.slice(html.indexOf('function postalGroup('),html.indexOf('a
 assert.ok(ui.rosterZoneFields('new','dd').includes('대덕읍·회진면'));
 ui.updateRosterTowns('new');assert.ok(fields.newRZone.innerHTML.includes('장흥읍'));assert.ok(!fields.newRZone.innerHTML.includes('관산읍'));
 let printed='';
-const printing=vm.createContext({evidenceData:{period:'기간'},situationRows:()=>[0,1].map(i=>({kind:'알림',actor:'소통실',content:'내용',audience:'6명',detail:'DETAIL_'+i,audio:'/audio'+i})),window:{open:()=>({document:{write:s=>printed=s,close(){}},focus(){}})},document:{querySelector:s=>({open:s.includes('"1"')})},esc:String,evidenceTime:String,toast(){},setTimeout(){},URL,location:{href:'https://example.test/safety'},Date});
+const printing=vm.createContext({evidenceData:{period:'기간'},situationRows:()=>[0,1].map(i=>({kind:'알림',actor:'소통실',content:'내용',audience:'6명',detail:'DETAIL_'+i,audio:'/audio'+i})),openPrintFrame:()=>({document:{write:s=>printed=s,close(){}},focus(){}}),finishPrintFrame(){},document:{querySelector:s=>({open:s.includes('"1"')})},esc:String,evidenceTime:String,toast(){},setTimeout(){},URL,location:{href:'https://example.test/safety'},Date});
 vm.runInContext(html.slice(html.indexOf('function printSituationEvidence('),html.indexOf('\n',html.indexOf('function printSituationEvidence('))),printing);
 printing.printSituationEvidence();assert.ok(!printed.includes('DETAIL_0'));assert.ok(!printed.includes('/audio0'));assert.ok(printed.includes('DETAIL_1'));assert.ok(printed.includes('/audio1'));
 const examples=vm.createContext({});vm.runInContext(fs.readFileSync('public/safety-pilot-demo.js','utf8')+'\nglobalThis.fixture=PILOT_DEMO;',examples);
