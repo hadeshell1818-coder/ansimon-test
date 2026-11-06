@@ -22,7 +22,9 @@ const context = vm.createContext({
   },
   esc: value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])),
   evidenceTime: value => value ? String(value) : '-', actionStatusLabel: value => value || '미기록',
-  window: { open: () => blocked ? null : { document: { write: text => { output = text; }, close: () => { closed++; } }, print: () => { printed++; } } },
+  // Prints go through a hidden frame in the page (2026-11-06); the frame window is stubbed here.
+  openPrintFrame: () => ({ document: { write: text => { output = text; }, close: () => { closed++; } }, print: () => { printed++; } }),
+  finishPrintFrame: w => w.print(),
   toast: value => { notice = value; }, setTimeout: callback => callback(),
 });
 vm.runInContext(html.slice(html.indexOf('function evidenceReturnRow('), html.indexOf('function evidenceReturnTable(')), context);
@@ -39,10 +41,9 @@ assert.equal(printed, 1); assert.equal(closed, 1);
 context.evidenceData.returns = []; context.evidenceData.daily = [];
 context.printReturnEvidence();
 assert.ok(output.includes('선택 기간에 귀국보고 기록이 없습니다.'));
-blocked = true; context.printReturnEvidence();
-assert.ok(notice.includes('출력 창이 차단'));
+assert.ok(!html.includes("window.open('','_blank')"), 'no popup window for printing');
 assert.ok(html.includes('onclick="printReturnEvidence()">귀국보고 출력'));
-console.log('PASS: inline syntax, return print summaries/details, missing/absence, both actions, history, demo, escaping, empty results and blocked popup');
+console.log('PASS: inline syntax, return print summaries/details, missing/absence, both actions, history, demo, escaping, empty results, printed in a frame (no popup)');
 
 assert.ok(!output.includes('가상 운영 기록'));
 assert.ok(!output.includes('샘플 자료'));

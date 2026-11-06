@@ -59,11 +59,12 @@ const ui = vm.createContext({ Date, URLSearchParams, S: { roster: Array.from({le
     const res = call('/api/safety/ledger', { user, query });
     return { ...res.body, rows: [...res.body.rows, { ...res.body.rows[0], id: 'c2', name: '다른직원' }] };
   },
-  window: { open: () => blocked ? null : ({ closed: false, focus() {}, print() { prints++; },
-    document: { write: text => printed = text, close() {}, fonts: { ready: Promise.resolve() } } }) },
 });
+// Prints go through a hidden frame in the page (2026-11-06); the frame window is stubbed after the page code loads.
 vm.runInContext(fs.readFileSync('public/safety-pilot-demo.js', 'utf8'), ui);
 vm.runInContext(html.slice(html.indexOf('function pilotRosterPerson('), html.lastIndexOf('</script>')), ui);
+ui.openPrintFrame = () => ({ closed: false, focus() {}, print() { prints++; }, document: { write: text => printed = text, close() {}, fonts: { ready: Promise.resolve() } } });
+ui.finishPrintFrame = w => w.print();
 (async () => {
   await ui.runManagementLedger('health');
   assert.match(elements.healthLedgerView.innerHTML, /개별 출력/);
@@ -82,9 +83,6 @@ vm.runInContext(html.slice(html.indexOf('function pilotRosterPerson('), html.las
   assert.match(printed, /장비관리대장/);
   assert.match(printed, /&lt;img/);
   assert.doesNotMatch(printed, /<img|발목|치료 완료|진료 안내|다른직원/);
-  blocked = true;
-  await ui.printManagementLedger('health', 'c1');
-  assert.match(message, /팝업/);
   elements.includePilotDemo.checked = true;
   await ui.clearLedgerDates('health');
   assert.ok(ui.managementLedgerData.health.some(r => r.demo));
