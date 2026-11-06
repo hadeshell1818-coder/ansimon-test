@@ -384,12 +384,17 @@ function setAssessmentRange(months){
  else {start=new Date(end.getFullYear(),end.getMonth()-(months-1),1);}
  assessmentStart=localDate(start); assessmentEnd=localDate(end); renderTable();
 }
-// Printing opens a separate window with the form and its styles. That window closes itself after the print dialog
-// (afterprint), so no blank about:blank tab is left behind (2026-11-05). fitOnePage (the 이행결과서): when the form and
+// Printing uses a hidden frame inside this page, not a new window, so no about:blank tab is left behind after printing
+// (2026-11-06: some browsers kept the popup open even with an afterprint close). The frame is removed after printing
+// and before the next print. fitOnePage (the 이행결과서): when the form and
 // its 조치 과정·추가 증빙 run past one A4 page, the page is scaled down to fit, but never below 60 % so text stays
 // readable; a longer record still prints on two pages.
 async function printRiskDocument(title,body,landscape=false,{fitOnePage=false}={}){
- const w=window.open('','_blank');if(!w){toast('팝업을 허용해 주세요.');return}
+ document.getElementById('print-frame')?.remove();
+ const frame=document.createElement('iframe');frame.id='print-frame';frame.name='print-frame';frame.title=title;frame.setAttribute('aria-hidden','true');
+ frame.style.cssText='position:fixed;left:-10000px;top:0;width:'+(landscape?297:210)+'mm;height:'+(landscape?210:297)+'mm;border:0';
+ document.body.appendChild(frame);
+ const w=frame.contentWindow;
  const pageW=landscape?297:210,pageH=landscape?210:297,margin=12;
  w.document.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>'+esc(title)+'</title><style>'+document.getElementById('risk-form-style').textContent+' @page{size:A4 '+(landscape?'landscape':'portrait')+';margin:'+margin+'mm}*{box-sizing:border-box}body{padding-right:1mm;font-family:Arial,"Malgun Gothic",sans-serif;font-size:11px;color:#111;margin:0}h1{font-size:21px;text-align:center}table{width:100%;table-layout:fixed;border-collapse:collapse}th,td{border:1px solid #555;padding:7px;overflow-wrap:anywhere;white-space:pre-wrap}th{background:#eee}thead{display:table-header-group}tr{break-inside:avoid}.screen-actions{display:none}.ratable td{height:64px}.ratable th,.ratable td{text-align:center;vertical-align:middle}.result-form{max-width:none}.result-photo{height:62mm}.result-photo img{max-height:58mm}.result-form h2{padding:10px;margin:8px 0}.result-number{margin:10px 0;padding:8px}.result-photos{margin:10px 0}.result-form table{margin:10px 0}.result-measures td{height:auto}.result-appendix{margin:12px 0 0}.result-appendix h3{margin:6px 0;font-size:14px}.result-appendix h4{margin:6px 0 2px;font-size:12px}.result-appendix p{margin:0 0 4px}.result-appendix img{max-width:48%;max-height:55mm;margin:4px 1% 0 0;object-fit:contain;vertical-align:top}h2{break-after:avoid;page-break-after:avoid}#print-root{width:'+(pageW-2*margin)+'mm}</style></head><body><div id="print-root">'+body+'</div></body></html>');
  w.document.close();
@@ -400,8 +405,11 @@ async function printRiskDocument(title,body,landscape=false,{fitOnePage=false}={
   const available=(pageH-2*margin)*mm-4,height=root.scrollHeight;
   if(height>available){const scale=available/height;if(scale>=0.6)root.style.zoom=String(Math.floor(scale*1000)/1000)}
  }
- if(!w.closed){w.addEventListener('afterprint',()=>{try{w.close()}catch(_){}});w.focus();w.print()}
+ w.addEventListener('afterprint',()=>setTimeout(()=>frame.remove(),0));
+ printFrame(w);
 }
+// Separate so tests can stand in for the browser's print dialog.
+function printFrame(w){w.focus();w.print()}
 function assessmentPrintTable(rows){return '<table class="ratable"><colgroup>'+[4,21,7,25,8,8,7,8,12].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead><tr>'+['번호','유해·위험요인','위험성 수준','개선대책','개선예정일','개선완료일','담당자','이행결과서','관련근거'].map(title=>'<th>'+title+'</th>').join('')+'</tr></thead><tbody>'+rows.map((it,index)=>'<tr>'+[index+1,it.factor||'',levelText(it),numberedText(it.reduction),it.dueDate||'',it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''),it.owner||'',it.doneAt||it.resultUpdatedAt?'작성 완료':'미작성',numberedText(RiskReferences.conciseReferences(it.referenceText))].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
 // One document per office (관내 전체 prints each office on its own pages), each with its approval box at the top right.
 // 관내 전체: the head office first and each branch after it in the office order, one after another without a page break,

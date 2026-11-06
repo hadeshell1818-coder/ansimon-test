@@ -41,19 +41,17 @@ async function main(){
   assert.equal(await page.locator('.result-photo').count(),2);
   assert.match(await page.locator('.result-plan').innerText(),/담당자\(관리감독자\)/);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-result.png'),fullPage:true});
-  // The print window closes itself after printing (afterprint). Making the PDF fires afterprint too, so the test records
-  // the close instead of letting it happen, then closes the window itself.
-  await page.evaluate(()=>{const open=window.open;window.open=(...args)=>{const w=open.apply(window,args);if(w){w.print=()=>{};w.close=()=>{w.__closedAfterPrint=true}}return w}});
-  const popupEvent=page.waitForEvent('popup');
+  // Printing goes through a hidden frame in the page, so no about:blank window is left behind; the frame is removed
+  // after printing (afterprint). The test stands in for the browser's print dialog.
+  await page.evaluate(()=>{window.printed=0;window.printFrame=()=>{window.printed++}});
   await page.getByRole('button',{name:'인쇄',exact:true}).click();
-  const popup=await popupEvent;await popup.waitForLoadState();
-  await popup.evaluate(()=>{window.__closedAfterPrint=false});
-  await popup.pdf({path:path.join(os.tmpdir(),'risk-three-step-result.pdf'),preferCSSPageSize:true});
-  assert.equal(await popup.locator('.result-form').count(),1);
-  assert.equal(await popup.locator('.ratable').count(),0,'result print must exclude the background assessment');
-  await popup.evaluate(()=>dispatchEvent(new Event('afterprint')));
-  assert.equal(await popup.evaluate(()=>window.__closedAfterPrint),true,'the print window closes after printing');
-  await popup.close();
+  await page.waitForFunction(()=>window.printed===1);
+  const frame=page.frame({name:'print-frame'});
+  assert.equal(await frame.locator('.result-form').count(),1);
+  assert.equal(await frame.locator('.ratable').count(),0,'result print must exclude the background assessment');
+  assert.equal(page.context().pages().length,1,'no extra window');
+  await frame.evaluate(()=>dispatchEvent(new Event('afterprint')));
+  await page.waitForFunction(()=>!document.getElementById('print-frame'));
   await page.getByRole('button',{name:'닫기',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflow');

@@ -61,13 +61,15 @@ async function main(){
   await page.getByText('수정 대책과 검토 대화를 저장했습니다.',{exact:true}).waitFor();
   assert.equal(item.aiAdvice.conversation.length,2);
   await page.getByRole('button',{name:'닫기',exact:true}).click();
-  await page.evaluate(()=>{window.originalOpen=window.open;window.open=(...args)=>{const w=window.originalOpen(...args);w.print=()=>{};return w}});
-  const popupPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'위험성평가표 출력',exact:true}).click();
-  const popup=await popupPromise;await popup.waitForLoadState();
-  assert.equal(await popup.locator('thead th').count(),9);
-  assert.match(await popup.locator('body').innerText(),/담당자가 작업 전 출입구/);
-  await popup.screenshot({path:path.join(__dirname,'../risk-assessment-print-preview.png'),fullPage:true});
-  await popup.close();assert.deepEqual(errors,[]);
+  // Printing goes through a hidden frame in the page (no new window); the test stands in for the print dialog.
+  await page.evaluate(()=>{window.printed=0;window.printFrame=()=>{window.printed++}});
+  await page.getByRole('button',{name:'위험성평가표 출력',exact:true}).click();
+  await page.waitForFunction(()=>window.printed===1);
+  const frame=page.frame({name:'print-frame'});
+  assert.equal(await frame.locator('thead th').count(),9);
+  assert.match(await frame.locator('body').innerText(),/담당자가 작업 전 출입구/);
+  assert.equal(page.context().pages().length,1,'no extra window');
+  assert.deepEqual(errors,[]);
   console.log('PASS: browser busy label, clarification/answer roundtrip, saved advice and sources, 9-column assessment print');
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 }
