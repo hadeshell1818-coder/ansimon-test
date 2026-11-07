@@ -34,6 +34,7 @@
   .lg-in{border:1px solid #2E3742;background:#141A21;color:#fff;border-radius:12px;padding:14px 15px;font-size:15px;font-family:inherit;margin-bottom:10px;width:100%;}
   .lg-in:focus{outline:none;border-color:var(--post);}
   .lg-btn{width:100%;border:none;background:var(--post);color:#fff;font-size:15px;font-weight:800;padding:15px;border-radius:12px;}
+  .lg-link{background:none;border:0;color:#9AA4AE;text-decoration:underline;font-size:13px;margin-top:12px;font-family:inherit}.lg-consent{display:flex;gap:8px;align-items:flex-start;color:#C9D1D9;font-size:12px;line-height:1.5;margin:4px 0 6px;text-align:left}#signup{width:100%;margin-top:14px;border-top:1px solid #2E3742;padding-top:14px}
   .lg-err{color:#FF7B7B;font-size:12px;font-weight:700;min-height:16px;margin:2px 0 6px;}
   .lg-note{font-size:11px;color:#7A828B;margin-top:16px;text-align:center;}
 
@@ -209,7 +210,19 @@
   <input class="lg-in" id="lpw" type="password" placeholder="비밀번호" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="lg-err" id="lerr"></div>
   <button class="lg-btn" onclick="doLogin()">로그인</button>
-  <div class="lg-note">승인된 우체국 직원 계정으로 로그인하세요.</div>
+  <div class="lg-note">아이디는 이름입니다(같은 이름이 있으면 「이름(국)」).</div>
+  <button class="lg-link" id="signupOpen" onclick="toggleSignup(true)">처음 가입</button>
+  <div id="signup" class="hidden">
+    <div class="lg-s">직원 명단의 이름·휴대폰 번호로 가입하고 비밀번호를 정합니다.</div>
+    <input class="lg-in" id="sname" placeholder="이름" autocomplete="name">
+    <input class="lg-in" id="sphone" type="tel" inputmode="numeric" placeholder="휴대폰 번호(010…)" autocomplete="tel">
+    <input class="lg-in" id="spw" type="password" placeholder="비밀번호(8자 이상)" autocomplete="new-password">
+    <input class="lg-in" id="spw2" type="password" placeholder="비밀번호 확인" autocomplete="new-password">
+    <label class="lg-consent"><input type="checkbox" id="sconsent"> 안심ON 계정과 업무 기록을 위해 이름·휴대폰 번호·소속·담당업무·배달구역을 수집·이용하는 데 동의합니다(재직 중 사용, 사용 중지 뒤 기관 기준에 따라 삭제).</label>
+    <div class="lg-err" id="serr"></div>
+    <button class="lg-btn" onclick="doSignup()">가입하기</button>
+    <button class="lg-link" onclick="toggleSignup(false)">로그인으로 돌아가기</button>
+  </div>
 </div>
 
 <div class="app hidden" id="app">
@@ -283,7 +296,7 @@ async function doLogin(){
   sfUnlockAudio();
   const id=$('lid').value.trim(), pw=$('lpw').value;
   try{
-    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pw})});
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pw,site:'app'})});
     const d=await r.json();
     if(!r.ok){ $('lerr').textContent=d.error||'로그인 실패'; return; }
     if(d.user.kind!=='carrier'){ $('lerr').textContent='집배원·직원 계정으로 로그인하세요.'; return; }
@@ -291,6 +304,18 @@ async function doLogin(){
     $('lid').value='';$('lpw').value='';$('lerr').textContent='';
     showApp();
   }catch(e){ $('lerr').textContent='서버 연결 실패'; }
+}
+function toggleSignup(on){$('signup').classList.toggle('hidden',!on);$('signupOpen').classList.toggle('hidden',on);$('serr').textContent='';if(on)$('sname').focus()}
+async function doSignup(){
+  const name=$('sname').value.trim(),phone=$('sphone').value.trim(),password=$('spw').value,consent=$('sconsent').checked;
+  if(password!==$('spw2').value){$('serr').textContent='비밀번호 확인이 다릅니다.';return}
+  try{
+    const r=await fetch('/api/staff/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,phone,password,consent})});
+    const d=await r.json();
+    if(!r.ok){$('serr').textContent=d.error||'가입하지 못했습니다.';return}
+    $('spw').value='';$('spw2').value='';toggleSignup(false);$('lid').value=d.loginId;$('lpw').value='';$('lpw').focus();
+    $('lerr').textContent='가입했습니다. 아이디 「'+d.loginId+'」와 정한 비밀번호로 로그인하세요.';
+  }catch(e){$('serr').textContent='서버 연결 실패'}
 }
 function logout(){
   if(token) fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+token}}).catch(()=>{});
