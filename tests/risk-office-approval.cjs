@@ -42,8 +42,10 @@ const RISK = { items: [
   item('D2', 'daedeok', 'dd', { status: 'assessing', customProcess: '집배', factor: '대덕 이륜차 전도' }),
 ] };
 const app = express(); app.use(express.json());
+// The full 결재선 is what the head office uses commercially (RISK_APPROVAL_CHAIN=full); the simple test-period line is
+// checked near the end by clearing the switch.
 const context = vm.createContext({
-  app, RISK, Date, SAFETY_OFFICE: '장흥우체국', USERS, path: require('node:path'), savePhoto() { throw new Error('no photo in test'); }, PROCESSES: [], HAZARD_TYPES: {}, procById: () => null,
+  process: { env: { RISK_APPROVAL_CHAIN: 'full' } }, app, RISK, Date, SAFETY_OFFICE: '장흥우체국', USERS, path: require('node:path'), savePhoto() { throw new Error('no photo in test'); }, PROCESSES: [], HAZARD_TYPES: {}, procById: () => null,
   userFromReq: req => USERS[req.headers['x-user']] ? { id: req.headers['x-user'], ...USERS[req.headers['x-user']] } : null, itemForMgr: it => ({ ...it }), ensureRiskDemo() {},
   saveRisk() {}, save() {}, broadcastRisk() {}, syncRiskSource() {},
   XLSXStyle: XLSX, RISK_EXPORT_WIDTHS: layout.WIDTHS, riskExportRows: layout.exportRows, configureRiskExport: layout.configureExport,
@@ -225,12 +227,37 @@ async function main() {
     assert.equal((await call('hq', 'PUT', '/api/risk/roles/post', { collector: true })).status, 400);
     assert.equal((await call('hq', 'GET', '/api/risk/roles')).body.history.length, 1);
 
+    // Test period (default, no RISK_APPROVAL_CHAIN): the head office ends at the writer's 과장 — 우편팀장 → 영업과장,
+    // 소통팀장·서무팀장 → 우편물류과장 (who also fills the 우편물류과장 cell); no 서무팀장 확인, no 총괄국장. The 서무팀장 sees all.
+    context.process.env = {};
+    RISK.items.push(
+      item('S1', 'jangheung', 'post', { customProcess: '창구 정리', factor: '창구 서랍 모서리', riskLevel: '하', ...written }),
+      item('S2', 'jangheung', 'comm', { customProcess: '발착', factor: '도크 단차', riskLevel: '중', ...written }),
+      item('S3', 'jangheung', 'hq', { customProcess: '시설 점검', factor: '창고 조명 고장', riskLevel: '하', ...written }));
+    for (const [who, id] of [['post', 'S1'], ['comm', 'S2'], ['hq', 'S3']]) assert.equal((await act(who, id, 'both', 'request')).status, 200, id);
+    assert.deepEqual(chainOf('S1'), ['sales:supervisor']);
+    assert.deepEqual(chainOf('S2'), ['logi:supervisor+logistics']);
+    assert.deepEqual(chainOf('S3'), ['logi:supervisor+logistics']);
+    assert.ok(['S1', 'S2', 'S3'].every(id => !steps(id).assessment.chain.some(step => step.id === 'chief')));
+    assert.ok((await ids('hq')).includes('S1') && (await ids('hq')).includes('S2'), 'the 서무팀장 sees items given to other teams');
+    assert.ok(!(await ids('chief')).includes('S1'), 'the 총괄국장 is not on the line for now');
+    assert.equal((await act('sales', 'S1', 'both', 'approve')).status, 200);
+    assert.equal((await act('logi', 'S2', 'both', 'approve')).status, 200);
+    assert.equal((await act('logi', 'S3', 'both', 'approve')).status, 200);
+    assert.ok(['S1', 'S2', 'S3'].every(id => steps(id).assessment.status === 'approved' && steps(id).result.status === 'approved'), 'one approval finishes it');
+    const simple = await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=jangheung');
+    const simpleOf = process => simple.find(rows => String(rows[2]?.[0] || '').includes(`□ 공정명: ${process}`));
+    assert.deepEqual(simpleOf('창구 정리')[1].slice(5, 9).map(v => v ?? ''), ['우편팀장', '영업과장', '', '']);
+    assert.deepEqual(simpleOf('발착')[1].slice(5, 9).map(v => v ?? ''), ['소통팀장', '우편물류과장', '우편물류과장', '']);
+    assert.deepEqual(simpleOf('시설 점검')[1].slice(5, 9).map(v => v ?? ''), ['서무팀장', '우편물류과장', '우편물류과장', '']);
+    RISK.items.splice(-3);
+
     // Library: branch accounts read and draft, but cannot back up or change the library.
     assert.equal((await call('dd', 'GET', '/api/safety-knowledge/backup')).status, 403);
     assert.equal((await call('ddHead', 'POST', '/api/safety-knowledge/index-embeddings')).status, 403);
     assert.notEqual((await call('dd', 'GET', '/api/safety-knowledge')).status, 403);
     assert.notEqual((await call('hq', 'GET', '/api/safety-knowledge/backup')).status, 403);
-    console.log('PASS: roles and visibility, 배분, writer-only edits, one 결재 for the 평가표 with its 이행결과서 on the 결재선 (과장 → 서무팀장 → 우편물류과장 → 총괄국장, no double signing), turn checks, several at once, reject/resend/withdraw, stamped 4-cell box, branch 국장 approval, 보완 요청, settings, library limits');
+    console.log('PASS: test-period line (과장 결재로 끝), roles and visibility, 배분, writer-only edits, one 결재 for the 평가표 with its 이행결과서 on the 결재선 (과장 → 서무팀장 → 우편물류과장 → 총괄국장, no double signing), turn checks, several at once, reject/resend/withdraw, stamped 4-cell box, branch 국장 approval, 보완 요청, settings, library limits');
   } finally { await new Promise(r => server.close(r)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1927,10 +1927,13 @@ function riskItemDenied(u, it, { part = 'assessment' } = {}) {
   }
   return null;
 }
-// 결재선 for one document (2026-11-07 2nd user decision). Head office: the writer's 과장 (supervisor) → the 서무팀장
-// (collector) confirms → the collector's 결재자 (우편물류과장) → the 총괄국장. Nobody signs twice: a person who appears
-// again keeps only the later step, with both roles (e.g. 소통팀장's 과장 is the 우편물류과장), and the writer is skipped.
-// Branch: the writer's 결재자, the 국장, approves.
+// 결재선 for one document. Test period (2026-11-07 user decision, default): head office ends at the writer's 과장 —
+// 우편팀장 → 영업과장, 소통팀장·서무팀장 → 우편물류과장 (who also fills the 우편물류과장 cell). The full line saved for
+// commercial use (RISK_APPROVAL_CHAIN=full): the writer's 과장 (supervisor) → the 서무팀장 (collector) confirms → the
+// collector's 결재자 (우편물류과장) → the 총괄국장. Nobody signs twice: a person who appears again keeps only the later
+// step, with both roles (e.g. 소통팀장's 과장 is the 우편물류과장), and the writer is skipped. The 서무팀장 (collector)
+// sees every item of the office either way. Branch: the writer's 결재자, the 국장, approves.
+const fullApprovalChain = () => typeof process !== 'undefined' && !!process.env && process.env.RISK_APPROVAL_CHAIN === 'full';
 const officeCollectors = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).collector);
 const officeChiefs = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).chief);
 function approvalChain(writer) {
@@ -1939,8 +1942,12 @@ function approvalChain(writer) {
   const raw = [{ account: supervisor, role: code === HEAD_OFFICE_CODE ? 'supervisor' : 'chief' }];
   if (code === HEAD_OFFICE_CODE) {
     const collector = officeCollectors(code)[0], logistics = collector && accountById(riskRole(collector).supervisorId), chief = officeChiefs(code)[0];
-    if (!chief) return { error: '총괄국장 계정이 설정되지 않았습니다. 설정 화면에서 지정하세요.' };
-    raw.push({ account: collector, role: 'collector' }, { account: logistics, role: 'logistics' }, { account: chief, role: 'chief' });
+    if (!fullApprovalChain()) {
+      if (logistics && logistics.id === supervisor.id) raw.push({ account: logistics, role: 'logistics' });
+    } else {
+      if (!chief) return { error: '총괄국장 계정이 설정되지 않았습니다. 설정 화면에서 지정하세요.' };
+      raw.push({ account: collector, role: 'collector' }, { account: logistics, role: 'logistics' }, { account: chief, role: 'chief' });
+    }
   }
   const steps = [];
   for (const { account, role } of raw.filter(x => x.account && x.account.id !== writer.id)) {
