@@ -59,6 +59,9 @@ async function main() {
   assert.deepEqual(bareParsed.rows.map(r => [r.line, r.name, r.duty, r.zone, r.team, r.officeCode]), [[1, '가나다', '우편물류과장', '', '', 'jangheung'], [2, '나다라', '집배', '장흥읍', '1팀', 'jangheung'], [3, '다라마', '집배', '대덕읍', '', 'daedeok']]);
   const titleOnly = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(titleOnly, XLSX.utils.aoa_to_sheet([['직원', '연락']]), '시트1');
   assert.match(S.parseRosterBook(XLSX.write(titleOnly, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES).errors[0], /첫 줄: 직원 \| 연락/, 'says what it read');
+  // 한 칸에 번호가 두 줄(휴대폰·사무실)로 적힌 경우: 첫 휴대폰 번호를 쓴다.
+  assert.equal(S.normPhone('061-860-0000\n010-1111-0001'), '01011110001');
+  assert.equal(S.normPhone('010-1111-0001, 010-2222-0002'), '01011110001');
   assert.equal(S.officeFor('장흥총괄', OFFICES).code, 'jangheung');
   assert.equal(S.officeFor('장흥대덕우체국', OFFICES).code, 'daedeok');
 

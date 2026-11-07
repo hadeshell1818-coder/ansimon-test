@@ -78,6 +78,9 @@ async function main() {
     assert.ok(config.roster.some(r => r.name === '심청'), 'the 대덕 carrier too');
     assert.ok(!config.roster.some(r => r.name === '전우치'), 'inside staff are not on the roster');
     assert.ok(config.roster.some(r => r.test && r.name === '집배원1(시험)'));
+    const health = (await call('GET', '/api/health')).body.staff;
+    assert.deepEqual([health.ready, health.count, health.rosterSource], [true, 4, 'staff'], 'health shows counts only');
+    assert.equal((await call('GET', '/api/safety/state', null, ctl)).body.rosterSource, 'staff');
     assert.equal((await call('POST', '/api/safety/config/zones', { name: 'x' }, ctl)).status, 409);
     // The carrier's app sees itself on the roster (return report and team alerts possible).
     const state = await call('GET', '/api/safety/state', null, app.body.token);
