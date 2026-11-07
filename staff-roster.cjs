@@ -278,18 +278,22 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
     return { id: accountId(s) };
   }
 
+  // 같은 이름으로 번호를 바꿔 가며 가입을 시도하는 것을 막는다: 30분 안에 10번 틀리면 그 이름은 30분 동안 가입 불가.
+  const signupFails = new Map();
+  const failSignup = (n, result) => { const now = Date.now(), list = (signupFails.get(n) || []).filter(t => now - t < LOCK_MS); list.push(now); signupFails.set(n, list); return result; };
   async function signup({ name, phone, password, consent, device }) {
     if (!ready) return { status: 503, error: lastError || '직원 명단을 불러오지 못했습니다.' };
     const n = clean(name), p = normPhone(phone);
+    if ((signupFails.get(n) || []).filter(t => Date.now() - t < LOCK_MS).length >= MAX_FAILS * 2) return { status: 429, error: '이 이름으로 가입 시도가 너무 많습니다. 30분 뒤 다시 하거나 담당자(서무팀장)에게 문의하세요.' };
     if (!consent) return { status: 400, error: '개인정보 수집·이용에 동의해야 가입할 수 있습니다.' };
     if (typeof password !== 'string' || password.length < 8 || password.length > 72) return { status: 400, error: '비밀번호는 8자 이상으로 정하세요.' };
     const s = staff.find(x => x.name === n && x.phone === p);
-    if (!s || s.disabled) return { status: 404, error: '명단에서 이름·휴대폰 번호를 찾지 못했습니다. 번호를 확인하거나 담당자(서무팀장)에게 문의하세요.' };
-    if (s.pwHash) return { status: 409, error: '이미 가입되어 있습니다. 본인이 아니면 담당자(서무팀장)에게 연락하세요.' };
+    if (!s || s.disabled) return failSignup(n, { status: 404, error: '명단에서 이름·휴대폰 번호를 찾지 못했습니다. 번호를 확인하거나 담당자(서무팀장)에게 문의하세요.' });
+    if (s.pwHash) return failSignup(n, { status: 409, error: '이미 가입되어 있습니다. 본인이 아니면 담당자(서무팀장)에게 연락하세요.' });
     const at = new Date(now()).toISOString();
     await save(s.id, { pwHash: await bcrypt.hash(password, 10), joinedAt: at, consentAt: at, joinDevice: clean(device).slice(0, 200), failedCount: 0, lockedUntil: null });
     await store.log([{ staffId: s.id, staffName: s.name, action: 'signup', detail: { device: clean(device).slice(0, 200) } }]);
-    register(); onChange();
+    signupFails.delete(n); register(); onChange();
     return { loginId: s.loginId, name: s.name };
   }
 

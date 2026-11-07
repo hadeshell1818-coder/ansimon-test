@@ -253,9 +253,10 @@ setInterval(() => {
 // });
 const loginLimiter = (req, res, next) => next(); // no-op (데모 기간 한정)
 
+// 같은 공용 IP(우체국 Wi-Fi)에서 교육·실습 때 여러 명이 함께 신고해도 막히지 않게 분당 60회.
 const reportLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 12,
+  limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: '신고 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
@@ -2717,9 +2718,10 @@ app.get('/api/risk/files/:id/:kind', (req, res) => {
 /* 내근직원 판정 헬퍼: carrier 외 우체국 소속 계정(jip2=영업과 직원 등)도 사진신고 허용 */
 function isStaffLike(u) { return u && (u.kind === 'carrier' || (u.org && String(u.org).includes(SAFETY_OFFICE))); }
 
-/* 예시 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건 */
+/* 예시 위험성평가 샘플: 대기함 1건 + 평가중 1건 + 완료 1건. 소통실 예시(SAFETY_DEMO)와 같이 기본 꺼짐 — 재배포로 기록이
+   비었을 때 지어낸 사람 이름의 샘플이 실제 접수함에 섞이지 않게 RA_DEMO=on일 때만 만든다(2026-11-07 운영 시뮬레이션). */
 function ensureRiskDemo() {
-  if (process.env.RA_DEMO === 'off' || RISK.demoDisabled) return;
+  if (process.env.RA_DEMO !== 'on' || RISK.demoDisabled) return;
   if (RISK.items.length) return;
   const now = Date.now();
   const mk = o => Object.assign({ id: nextRiskId(), createdAt: new Date(now - (o.ago || 0) * 864e5).toISOString(),
@@ -2821,7 +2823,9 @@ function applyStaffRoster() {
   });
 })();
 const isStaffAdmin = u => isSafetyMgr(u) && !!u.staffAdmin;
-const signupLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: '가입 시도가 너무 많습니다. 10분 뒤 다시 하세요.' } });
+// 가입은 조회·교육 시간에 한 사무실(같은 공용 IP)에서 수십 명이 함께 한다 → IP 제한은 넉넉히(10분 200회) 두고,
+// 번호 추측 공격은 이름별 실패 횟수(10회 → 30분)로 막는다(staff-roster.cjs signup).
+const signupLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 200, standardHeaders: true, legacyHeaders: false, message: { error: '가입 시도가 너무 많습니다. 10분 뒤 다시 하세요.' } });
 const staffSend = (res, r) => r && r.error ? res.status(r.status || 400).json({ error: r.error, errors: r.errors }) : res.json(r);
 app.post('/api/staff/signup', signupLimiter, async (req, res) => {
   try { staffSend(res, await staffDir.signup({ ...(req.body || {}), device: req.headers['user-agent'] || '' })); }
