@@ -40,7 +40,7 @@ async function main() {
   const supa = await fakeSupabase(), dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ansimon-staff-'));
   const pw = 'test-password-123', port = 3900 + Math.floor(Math.random() * 500);
   const env = { ...process.env, PORT: String(port), DATA_DIR: dataDir, SAFETY_SUPABASE_URL: supa.url, SAFETY_SUPABASE_SERVICE_KEY: 'service-key', SAFETY_KEEPALIVE: 'off', OPENAI_API_KEY: '', COHERE_API_KEY: '', PHOTO_SIGNING_KEY: 'x'.repeat(40) };
-  for (const name of ['PW_JIP', 'PW_JIP2', 'PW_JIP3', 'PW_JIP4', 'PW_JIP5', 'PW_JANG1', 'PW_JANG2', 'PW_JANG3', 'PW_KWANG1', 'PW_KWANG2', 'PW_KWANG3', 'PW_BO1', 'PW_BO2', 'PW_BO3']) env[name] = pw;
+  for (const name of ['PW_DEV', 'PW_JIP', 'PW_JIP2', 'PW_JIP3', 'PW_JIP4', 'PW_JIP5', 'PW_JANG1', 'PW_JANG2', 'PW_JANG3', 'PW_KWANG1', 'PW_KWANG2', 'PW_KWANG3', 'PW_BO1', 'PW_BO2', 'PW_BO3']) env[name] = pw;
   const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = ''; child.stdout.on('data', d => { output += d; }); child.stderr.on('data', d => { output += d; });
   const base = `http://127.0.0.1:${port}`;
@@ -111,6 +111,14 @@ async function main() {
     const jeonRisk = await login('전우치', 'jeon-pass1', 'risk');
     assert.equal(jeonRisk.status, 200); assert.equal(jeonRisk.body.user.kind, 'safety_mgr');
     assert.equal((await call('GET', '/api/risk/state', null, jeonRisk.body.token)).status, 200);
+    // 개발자 계정: 한 아이디로 위험성평가(직원 명단 관리 포함)·소통실·앱에 들어간다.
+    const devRisk = await login('dev', pw, 'risk');
+    assert.equal(devRisk.body.user.kind, 'safety_mgr'); assert.equal(devRisk.body.user.staffAdmin, true);
+    assert.equal((await call('GET', '/api/staff', null, devRisk.body.token)).status, 200);
+    const devSafety = await login('dev', pw, 'safety');
+    assert.equal(devSafety.body.user.kind, 'safety');
+    assert.equal((await call('GET', '/api/safety/config', null, devSafety.body.token)).status, 200);
+    assert.equal((await login('dev', pw, 'app')).body.user.kind, 'carrier');
     // Fixed accounts still work as before.
     assert.equal((await login('jip', pw, 'app')).status, 200);
     console.log('PASS: server + Supabase REST stand-in: admin upload, app signup/login by name, team roster for the control room (edits refused there), 소통실 right and risk role for the same person, fixed accounts unchanged');

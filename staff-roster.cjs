@@ -186,14 +186,46 @@ function memoryStaffStore() {
   };
 }
 
+// 담당업무 → 기본 권한(총괄국). sup: 결재자의 담당업무.
+const HEAD_DUTY_ROLES = {
+  서무팀장: { admin: true, risk: { collector: true, writer: true, title: '서무팀장', sup: '우편물류과장', processes: ['시설 등', '청사·사무실'] } },
+  우편팀장: { risk: { writer: true, title: '우편팀장', sup: '영업과장', processes: ['접수(창구)'] } },
+  소통팀장: { control: true, risk: { writer: true, title: '소통팀장', sup: '우편물류과장', processes: ['구분', '발착', '집배'] } },
+  영업과장: { risk: { approver: true, title: '영업과장' } },
+  우편물류과장: { risk: { approver: true, title: '우편물류과장' } },
+  총괄국장: { risk: { chief: true, title: '총괄국장' } },
+  국장: { risk: { chief: true, title: '총괄국장' } },
+};
+// 관내국: 담당자 = 그 국의 총괄 안전담당자·공정 담당자(결재자 국장), 국장 = 결재자.
+const BRANCH_DUTY_ROLES = {
+  담당자: { risk: { collector: true, writer: true, title: '담당자', sup: '국장' } },
+  국장: { risk: { approver: true, title: '국장' } },
+};
+
 /* 명단 + 계정. USERS에 `st<번호>` 계정으로 올리고, 로그인한 화면에 따라 kind를 붙인다. */
 function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => {}, now = () => Date.now() }) {
   let staff = [], ready = false, lastError = '';
   const accountId = s => `st${s.id}`;
   const byAccount = id => staff.find(s => accountId(s) === id) || null;
   const officeOf = code => offices.find(o => o.code === code) || offices[0];
-  const riskAccess = s => !!s && (!!s.roles.admin || ['collector', 'writer', 'approver', 'chief'].some(k => s.roles.risk && s.roles.risk[k]));
-  const canControl = s => !!s && !!s.roles.control && officeOf(s.officeCode).head;
+  /* 담당업무로 정하는 기본 권한(2026-11-07 사용자 결정). 관리자가 손으로 바꾼 값(s.roles)이 항목별로 우선한다.
+   * 결재자는 같은 국에서 그 담당업무를 가진 사람으로 정한다(사람이 바뀌어도 새 명단의 담당업무를 따라감). */
+  const dutyKey = value => clean(value).replace(/\s/g, '');
+  const findDuty = (officeCode, duty) => staff.find(x => !x.disabled && x.officeCode === officeCode && dutyKey(x.duty) === duty);
+  function autoRoles(s) {
+    const head = officeOf(s.officeCode).head, duty = dutyKey(s.duty);
+    const rule = head ? HEAD_DUTY_ROLES[duty] : BRANCH_DUTY_ROLES[duty];
+    if (!rule) return {};
+    const { sup, ...risk } = rule.risk || {}, supervisor = sup && findDuty(s.officeCode, sup);
+    return { ...(rule.control ? { control: true } : {}), ...(rule.admin ? { admin: true } : {}), risk: { ...risk, ...(sup ? { supervisorId: supervisor ? accountId(supervisor) : null } : {}) } };
+  }
+  function rolesOf(s) {
+    const auto = autoRoles(s), own = s.roles || {};
+    return { control: Object.hasOwn(own, 'control') ? !!own.control : !!auto.control, admin: Object.hasOwn(own, 'admin') ? !!own.admin : !!auto.admin,
+      risk: { ...(auto.risk || {}), ...((own.risk && typeof own.risk === 'object') ? own.risk : {}) }, auto: !!(auto.risk || auto.control || auto.admin) };
+  }
+  const riskAccess = s => { if (!s) return false; const r = rolesOf(s); return r.admin || ['collector', 'writer', 'approver', 'chief'].some(k => r.risk[k]); };
+  const canControl = s => !!s && rolesOf(s).control && officeOf(s.officeCode).head;
   function register() {
     for (const id of Object.keys(users)) if (users[id] && users[id].staff) delete users[id];
     for (const s of staff) {
@@ -201,7 +233,7 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
       const office = officeOf(s.officeCode);
       users[accountId(s)] = { staff: true, staffId: s.id, kind: 'carrier', pwHash: s.pwHash, name: s.name, loginId: s.loginId, org: office.name, officeCode: office.code,
         dept: s.dept, duty: s.duty, team: s.team, deliveryZone: s.zone, phone: s.phone, region: '장흥군', type: null, role: s.duty || s.dept || '직원',
-        riskRole: (s.roles.risk && typeof s.roles.risk === 'object') ? s.roles.risk : {}, control: canControl(s), staffAdmin: !!s.roles.admin, riskAccess: riskAccess(s) };
+        riskRole: rolesOf(s).risk, control: canControl(s), staffAdmin: rolesOf(s).admin, riskAccess: riskAccess(s) };
     }
   }
   async function load() {
@@ -264,7 +296,8 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
   // Admin view of one person (the phone stays with the admin; 2단계 인증은 나중).
   const adminRow = s => ({ id: s.id, account: accountId(s), name: s.name, loginId: s.loginId, phone: formatPhone(s.phone), officeCode: s.officeCode, officeName: officeOf(s.officeCode).name, dept: s.dept, duty: s.duty, zone: s.zone, team: s.team,
     field: !!s.zone, joined: !!s.pwHash, joinedAt: s.joinedAt, lastLoginAt: s.lastLoginAt, locked: !!(s.lockedUntil && Date.parse(s.lockedUntil) > now()), disabled: s.disabled,
-    control: !!s.roles.control, admin: !!s.roles.admin, risk: riskAccess(s) });
+    control: rolesOf(s).control, admin: rolesOf(s).admin, risk: riskAccess(s), riskTitle: riskSummary(s), autoRoles: rolesOf(s).auto });
+  const riskSummary = s => { const r = rolesOf(s).risk; return [r.collector && '총괄 안전담당', r.writer && '공정 담당', r.approver && '결재자', r.chief && '총괄국장'].filter(Boolean).join('·'); };
 
   async function previewImport(buffer, XLSX) {
     if (!ready) await load();
@@ -312,9 +345,10 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
       patch.disabled = body.disabled; detail.disabled = [s.disabled, body.disabled];
     }
     const roles = { ...s.roles };
-    for (const key of ['control', 'admin']) if (typeof body[key] === 'boolean' && body[key] !== !!s.roles[key]) {
+    const current = rolesOf(s);
+    for (const key of ['control', 'admin']) if (typeof body[key] === 'boolean' && body[key] !== current[key]) {
       if (key === 'admin' && !body.admin && accountId(s) === by.id) return { status: 400, error: '자기 관리자 권한은 뺄 수 없습니다. 다른 관리자에게 요청하세요.' };
-      roles[key] = body[key]; detail[key] = [!!s.roles[key], body[key]];
+      roles[key] = body[key]; detail[key] = [current[key], body[key]];
     }
     if ('control' in detail || 'admin' in detail) patch.roles = roles;
     if (!Object.keys(patch).length) return { ok: true, staff: adminRow(s) };
@@ -418,4 +452,4 @@ function rosterFromStaff(list, offices) {
   return { zones, groups: groupList, roster };
 }
 
-module.exports = { parseRosterBook, diffRoster, assignLoginIds, officeFor, normPhone, supabaseStaffStore, memoryStaffStore, createStaffDirectory, rosterFromStaff, placesFrom, townsOf, COLUMNS };
+module.exports = { parseRosterBook, diffRoster, assignLoginIds, officeFor, normPhone, supabaseStaffStore, memoryStaffStore, createStaffDirectory, rosterFromStaff, placesFrom, townsOf, COLUMNS, HEAD_DUTY_ROLES, BRANCH_DUTY_ROLES };
