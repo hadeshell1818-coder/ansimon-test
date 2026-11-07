@@ -149,6 +149,27 @@ async function main() {
   assert.ok(!dir.list().find(s => s.name === '마바사').disabled, 'not disabled while error rows are skipped');
   assert.equal((await dir.adminUpdate(dir.list().find(s => s.name === '마바사').id, { officeCode: 'nowhere' }, admin)).status, 400);
   assert.ok(changes > 0);
+  // 담당업무로 권한 자동 지정(2026-11-07 사용자 결정): 가입 전에 정해져 가입하면 바로 쓴다. 손으로 바꾼 값이 우선.
+  const roleStore = S.memoryStaffStore(), roleUsers = {};
+  const roleDir = S.createStaffDirectory({ store: roleStore, users: roleUsers, offices: OFFICES, bcrypt });
+  await roleDir.load();
+  await roleDir.applyImport(book([
+    ['장흥우체국', '물류과', '서무', '010-2000-0001', '서무팀장', '', ''], ['장흥우체국', '영업과', '우편', '010-2000-0002', '우편팀장', '', ''],
+    ['장흥우체국', '물류과', '소통', '010-2000-0003', '소통팀장', '', ''], ['장흥우체국', '영업과', '영과', '010-2000-0004', '영업과장', '', ''],
+    ['장흥우체국', '물류과', '물과', '010-2000-0005', '우편물류과장', '', ''], ['장흥우체국', '영업과', '금융', '010-2000-0006', '금융팀장', '', ''],
+    ['회진우체국', '', '회담', '010-2000-0007', '담당자', '', ''], ['회진우체국', '', '회국', '010-2000-0008', '국장', '', '']]), XLSX, admin);
+  const acct = name => Object.entries(roleUsers).find(([, u]) => u.name === name);
+  const [seomuId, seomu] = acct('서무'), [, post] = acct('우편'), [, comm] = acct('소통'), [salesId] = acct('영과'), [logiId, logi] = acct('물과'), [, fin] = acct('금융'), [, hd] = acct('회담'), [hgId] = acct('회국');
+  assert.deepEqual([seomu.riskRole.collector, seomu.riskRole.writer, seomu.riskRole.supervisorId, seomu.staffAdmin], [true, true, logiId, true]);
+  assert.deepEqual([post.riskRole.writer, post.riskRole.supervisorId, post.riskRole.processes], [true, salesId, ['접수(창구)']]);
+  assert.deepEqual([comm.riskRole.supervisorId, comm.control], [logiId, true], '소통팀장 also gets the control room');
+  assert.equal(logi.riskRole.approver, true);
+  assert.equal(fin.riskAccess, false, 'other duties use the app only');
+  assert.deepEqual([hd.riskRole.collector, hd.riskRole.supervisorId], [true, hgId], 'a branch 담당자 sends to that office 국장');
+  assert.equal(roleDir.viewFor(seomuId, 'risk').kind, 'safety_mgr', 'usable right after signing up');
+  await roleDir.adminUpdate(roleDir.list().find(x => x.name === '소통').id, { control: false }, admin);
+  assert.equal(Object.values(roleUsers).find(u => u.name === '소통').control, false, 'a manual change wins over the duty default');
+  assert.equal(roleDir.list().find(x => x.name === '서무').riskTitle, '총괄 안전담당·공정 담당');
   console.log('PASS: roster Excel (merged cells, short office names, row errors), login ids for same names, team/zone groups for the control room, signup by name+phone, per-screen access, 5-fail lock, unlock/reset, re-upload diff and disable');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

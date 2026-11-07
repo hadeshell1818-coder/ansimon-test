@@ -167,6 +167,13 @@ if (process.env.PW_JIP5) {
 } else {
   console.warn('⚠️ PW_JIP5 미설정 — 안전보건담당자(jip5) 계정이 비활성화됩니다.');
 }
+/* 개발자 계정(2026-11-07 사용자 요청): 문제를 찾고 고치려고 앱·소통실·위험성평가 어디든 들어가 전체를 본다.
+ * 비밀번호는 Railway 변수 PW_DEV(10자 이상), 아이디는 dev. 위험성평가에서는 모든 국의 모든 건을 보고(결재선에는 들지 않음),
+ * 직원 명단·설정·근거자료실 관리도 한다. 정식 운영 전에 변수를 지워 계정을 없앤다. */
+if (process.env.PW_DEV) {
+  USERS.dev = { pwHash: requiredPassword('PW_DEV'), kind: 'safety_mgr', name: '개발자', org: '장흥우체국', region: '장흥군', type: null, role: '개발자(전체 보기)', officeCode: 'jangheung',
+    developer: true, staffAdmin: true, riskRole: { title: '개발자', collector: true } };
+}
 /* 시험 계정(2026-11-04/07): 장흥대덕우체국 담당자·국장·직원과 장흥우체국 공정 담당자·과장·총괄국장이 비밀번호
  * PW_TEST_OFFICE 하나를 함께 쓴다. 역할·결재 흐름을 시험하는 용도이며, 직원 명단으로 계정을 만들 때 이 블록과 변수를
  * 지운다(AGENTS.md 1-1절). 직함과 역할은 기본값이고 총괄 안전담당자가 설정 화면에서 바꾼다. 이름은 결재란·담당자(성명)에
@@ -218,7 +225,12 @@ function sessionFromToken(token) {
   return session;
 }
 // Fixed accounts have one kind. A staff (명단) account gets its kind from the screen it signed in on (app·소통실·위험성평가).
-function accountView(id, site) { try { return staffDir.viewFor(id, site); } catch { return Object.hasOwn(USERS, id) ? USERS[id] : null; } }
+function accountView(id, site) {
+  const base = Object.hasOwn(USERS, id) ? USERS[id] : null;
+  // 개발자 계정은 들어간 화면의 권한을 그대로 받는다(앱=직원, 소통실, 위험성평가).
+  if (base && base.developer) return { ...base, kind: site === 'safety' ? 'safety' : site === 'app' ? 'carrier' : 'safety_mgr' };
+  try { return staffDir.viewFor(id, site); } catch { return base; }
+}
 function userFromReq(req) {
   const session = sessionFromToken(tokenFromReq(req));
   const u = session && accountView(session.uid, session.site);
@@ -1929,6 +1941,7 @@ const RISK_DOCS = ['assessment', 'result'];
 const inChain = (it, id) => RISK_DOCS.some(doc => (approvalsOf(it)[doc]?.chain || []).some(step => step.id === id));
 function riskItemVisible(u, it) {
   if (!isSafetyMgr(u)) return false;
+  if (u.developer) return true;
   const role = riskRole(u), own = itemOfficeCode(it) === userOfficeCode(u);
   if (own) {
     // Reviewers (과장·국장·총괄국장) see an item only once it is sent up to them (2026-11-07 user decision).
@@ -1958,7 +1971,8 @@ function riskItemDenied(u, it, { part = 'assessment' } = {}) {
 // step, with both roles (e.g. 소통팀장's 과장 is the 우편물류과장), and the writer is skipped. The 서무팀장 (collector)
 // sees every item of the office either way. Branch: the writer's 결재자, the 국장, approves.
 const fullApprovalChain = () => typeof process !== 'undefined' && !!process.env && process.env.RISK_APPROVAL_CHAIN === 'full';
-const officeCollectors = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).collector);
+// 그 국의 총괄 안전담당자: 명단 직원을 시험 계정보다 앞에 두고, 개발자 계정은 넣지 않는다.
+const officeCollectors = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).collector && !a.developer).sort((a, b) => (b.staff ? 1 : 0) - (a.staff ? 1 : 0));
 const officeChiefs = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).chief);
 function approvalChain(writer) {
   const code = userOfficeCode(writer), supervisor = accountById(riskRole(writer).supervisorId);
