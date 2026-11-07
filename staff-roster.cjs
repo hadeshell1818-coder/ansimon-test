@@ -21,7 +21,7 @@ const COLUMNS = {
 const FIELDS = ['officeCode', 'dept', 'phone', 'duty', 'zone', 'team'];
 const MAX_FAILS = 5, LOCK_MS = 30 * 60 * 1000;
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-const normPhone = value => String(value ?? '').replace(/\D/g, '');
+const normPhone = value => { const digits = String(value ?? '').replace(/\D/g, ''); return /^1[016789]\d{7,8}$/.test(digits) ? '0' + digits : digits; };
 const validPhone = phone => /^01\d{8,9}$/.test(phone);
 const shortOffice = office => office.name.replace(/우체국$/, '');
 const formatPhone = phone => phone.length === 11 ? `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}` : phone.length === 10 ? `${phone.slice(0, 3)}-${phone.slice(3, 6)}-${phone.slice(6)}` : phone;
@@ -36,20 +36,39 @@ function officeFor(name, offices) {
   return tail.length === 1 ? tail[0] : null;
 }
 
-// 엑셀(첫 시트) → 명단 행. 합친 셀(!merges)은 그 범위 모두 같은 값으로 채운다(팀·국이 여러 줄에 걸친 경우).
+// 칸 이름은 띄어쓰기·보이지 않는 공백(NBSP·전각 공백·BOM)을 빼고 비교하고, 비슷한 이름도 받는다("성명", "휴대폰번호" 등).
+const headerText = value => String(value ?? '').replace(/[\s\u00a0\u200b-\u200d\u2060\u3000\ufeff*]/g, '');
+const FUZZY = { name: /^(이름|성명|성함|직원명|직원성명)/, phone: /(휴대|핸드폰|전화|연락처|^hp|^h\.p)/i, office: /(우체국|관서|국명|소속국)/, dept: /^(부서|소속과|과명|부서명)/, zone: /(구역|집배구)/, team: /^(팀|조)/, duty: /(업무|직무)/ };
+function headerColumns(row) {
+  const cells = row.map(headerText), col = {}, used = new Set();
+  const pick = (key, test) => { if (col[key] >= 0) return; const i = cells.findIndex((cell, index) => cell && !used.has(index) && test(cell)); if (i >= 0) { col[key] = i; used.add(i); } };
+  for (const [key, names] of Object.entries(COLUMNS)) pick(key, cell => names.includes(cell));
+  for (const key of ['name', 'phone', 'zone', 'team', 'office', 'dept', 'duty']) pick(key, cell => FUZZY[key].test(cell));
+  for (const key of Object.keys(COLUMNS)) if (!(col[key] >= 0)) col[key] = -1;
+  return col;
+}
+// 엑셀 → 명단 행. 칸 이름 줄이 있는 첫 시트를 쓰고(위쪽 30줄 안), 합친 셀(!merges)은 그 범위 모두 같은 값으로 채운다
+// (팀·국이 여러 줄에 걸친 경우). 숫자로 저장돼 앞의 0이 빠진 휴대폰 번호(1012345678)는 0을 붙여 읽는다.
 function parseRosterBook(buffer, XLSX, offices) {
   const book = XLSX.read(buffer, { type: 'buffer' });
-  const sheet = book.Sheets[book.SheetNames[0]];
-  if (!sheet) return { rows: [], errors: ['엑셀에 시트가 없습니다.'] };
-  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: true });
-  for (const merge of sheet['!merges'] || []) {
-    const value = grid[merge.s.r]?.[merge.s.c];
-    for (let r = merge.s.r; r <= merge.e.r; r++) for (let c = merge.s.c; c <= merge.e.c; c++) { grid[r] = grid[r] || []; grid[r][c] = value; }
+  if (!book.SheetNames.length) return { rows: [], errors: ['엑셀에 시트가 없습니다.'] };
+  let grid = null, headerRow = -1, col = null;
+  for (const sheetName of book.SheetNames) {
+    const sheet = book.Sheets[sheetName];
+    const rowsOf = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: true, raw: false });
+    for (const merge of sheet['!merges'] || []) {
+      const value = rowsOf[merge.s.r]?.[merge.s.c];
+      for (let r = merge.s.r; r <= merge.e.r; r++) for (let c = merge.s.c; c <= merge.e.c; c++) { rowsOf[r] = rowsOf[r] || []; rowsOf[r][c] = value; }
+    }
+    const found = rowsOf.slice(0, 30).findIndex(row => { const c = headerColumns(row || []); return c.name >= 0 && c.phone >= 0; });
+    if (found >= 0) { grid = rowsOf; headerRow = found; col = headerColumns(rowsOf[found]); break; }
   }
-  const headerRow = grid.slice(0, 15).findIndex(row => row.some(cell => COLUMNS.name.includes(clean(cell))) && row.some(cell => COLUMNS.phone.includes(clean(cell))));
-  if (headerRow < 0) return { rows: [], errors: ['첫 줄에서 「이름」과 「전화번호」 칸을 찾지 못했습니다. 칸 이름: 우체국명 | 부서 | 이름 | 전화번호 | 담당업무 | 배달구역 | 팀이름'] };
-  const header = grid[headerRow].map(clean), col = {};
-  for (const [key, names] of Object.entries(COLUMNS)) col[key] = header.findIndex(cell => names.includes(cell));
+  if (!grid) {
+    // 무엇을 읽었는지 보여 준다(전화번호처럼 보이는 숫자가 있는 줄은 개인정보라 보여 주지 않음).
+    const first = XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, defval: '', raw: false }).find(row => row.some(cell => clean(cell)));
+    const seen = first && !first.some(cell => /\d{3,}/.test(String(cell))) ? ` 첫 시트 「${book.SheetNames[0]}」의 첫 줄: ${first.map(clean).filter(Boolean).slice(0, 10).join(' | ')}.` : ` 시트: ${book.SheetNames.join(', ')}.`;
+    return { rows: [], errors: [`칸 이름 줄에서 「이름」과 「전화번호」를 찾지 못했습니다.${seen} 칸 이름: 우체국명 | 부서 | 이름 | 전화번호 | 담당업무 | 배달구역 | 팀이름`] };
+  }
   const missing = ['office', 'name', 'phone'].filter(key => col[key] < 0);
   if (missing.length) return { rows: [], errors: [`「${missing.map(key => COLUMNS[key][0]).join('」·「')}」 칸이 없습니다.`] };
   const rows = [], errors = [], seen = new Map();

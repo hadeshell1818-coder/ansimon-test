@@ -41,6 +41,18 @@ async function main() {
   assert.equal(bad.errors.length, 3); assert.match(bad.errors[0], /휴대폰/); assert.match(bad.errors[1], /서울/); assert.match(bad.errors[2], /같은 사람/);
   const noHeader = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(noHeader, XLSX.utils.aoa_to_sheet([['성명만']]), 'x');
   assert.match(S.parseRosterBook(XLSX.write(noHeader, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES).errors[0], /이름.*전화번호/);
+  // 실제 엑셀에서 흔한 모양(2026-11-07 첫 업로드에서 칸 이름을 못 찾음): 제목 줄, 띄어 쓴 칸 이름·NBSP·전각 공백,
+  // 명단이 두 번째 시트, 숫자로 저장돼 앞의 0이 빠진 휴대폰 번호, 비슷한 칸 이름(성명·휴대폰번호).
+  const messy = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(messy, XLSX.utils.aoa_to_sheet([['표지'], ['장흥우체국 직원 현황']]), '표지');
+  XLSX.utils.book_append_sheet(messy, XLSX.utils.aoa_to_sheet([['장흥우체국 직원 명단'], [], ['우 체 국 명', '부\u00a0서', '성 명', '휴대폰 번호\u3000', '담당 업무', '배달 구역', '팀 이름'],
+    ['장흥', '우편물류과', '가나다', 1011110001, '집배', '장흥읍', '1팀'], ['대덕', '', '나다라', '010.1111.0002', '집배', '대덕읍', '']]), '명단');
+  const messyParsed = S.parseRosterBook(XLSX.write(messy, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES);
+  assert.deepEqual(messyParsed.errors, []);
+  assert.deepEqual(messyParsed.rows.map(r => [r.name, r.phone, r.officeCode, r.team, r.zone, r.duty]), [['가나다', '01011110001', 'jangheung', '1팀', '장흥읍', '집배'], ['나다라', '01011110002', 'daedeok', '', '대덕읍', '집배']]);
+  assert.equal(messyParsed.rows[0].line, 4, 'line numbers count the title rows');
+  const titleOnly = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(titleOnly, XLSX.utils.aoa_to_sheet([['직원', '연락']]), '시트1');
+  assert.match(S.parseRosterBook(XLSX.write(titleOnly, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES).errors[0], /첫 줄: 직원 \| 연락/, 'says what it read');
   assert.equal(S.officeFor('장흥총괄', OFFICES).code, 'jangheung');
   assert.equal(S.officeFor('장흥대덕우체국', OFFICES).code, 'daedeok');
 
