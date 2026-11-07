@@ -125,7 +125,8 @@ async function main() {
     assert.match(await approver.page.locator('.approval-banner').innerText(), /결재할 문서 1건[\s\S]*창구 의자 바퀴 미끄러짐/);
     assert.match(await cell(approver.page, '창구 의자 바퀴 미끄러짐').innerText(), /결재중[\s\S]*영업과장 검토 대기/);
     await approver.page.locator('.approval-banner').getByRole('button', { name: '검토', exact: true }).click();
-    await toast(approver.page, '결재(검토)했습니다');
+    await toast(approver.page, '결재했습니다');
+    assert.equal(await approver.page.evaluate(() => stepVerb({ id: 'sales', roles: ['supervisor'] }, { chain: [{ id: 'sales' }] })), '결재', 'the last step of the test-period line says 결재');
     assert.ok(approver.sent.some(p => p.path === '/api/risk/items/H1/approval/both/approve'));
     assert.equal(await approver.page.locator('.three-step select').count(), 0);
     assert.equal(await approver.page.locator('[contenteditable="true"]').count(), 0);
