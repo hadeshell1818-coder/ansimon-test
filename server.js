@@ -20,6 +20,7 @@ const rateLimit = require('express-rate-limit');
 const webpush = require('web-push');
 const XLSXStyle = require('xlsx-js-style');
 const { requestAiJson } = require('./ai-json.cjs');
+const staffRoster = require('./staff-roster.cjs');
 const { WIDTHS: RISK_EXPORT_WIDTHS, exportRows: riskExportRows, configureExport: configureRiskExport } = require('./risk-export-layout.cjs');
 
 const app = express();
@@ -158,7 +159,9 @@ if (process.env.PW_JIP4) {
 if (process.env.PW_JIP5) {
   USERS.jip5 = { pwHash: requiredPassword('PW_JIP5'), kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', region: '장흥군', type: null, role: '안전보건담당자', officeCode: 'jangheung',
     // 총괄 안전담당자(장흥: 서무팀장) and the writer for the processes other teams do not cover. Real names come with the staff list.
-    riskRole: { title: '서무팀장', collector: true, writer: true, supervisorId: 'jhlogi', processes: ['시설 등', '청사·사무실'] } };
+    riskRole: { title: '서무팀장', collector: true, writer: true, supervisorId: 'jhlogi', processes: ['시설 등', '청사·사무실'] },
+    // 직원 명단 관리자(2026-11-07 사용자 결정: 관리자는 서무팀장). 명단을 올린 뒤 실제 서무팀장 계정에도 관리자를 준다.
+    staffAdmin: true };
 } else {
   console.warn('⚠️ PW_JIP5 미설정 — 안전보건담당자(jip5) 계정이 비활성화됩니다.');
 }
@@ -185,9 +188,9 @@ for (let i=11;i<=16;i++) {
   const envName=process.env['PW_JIP'+i]?'PW_JIP'+i:'PW_JIP';
   USERS['jip'+i]={pwHash:requiredPassword(envName),kind:'carrier',name:'집배원'+(i-10),org:'장흥우체국',region:'장흥군',type:null,role:'집배원'};
 }
-function publicUser(id) { const u = USERS[id]; if (!u) return null;
+function publicUser(id, site) { const u = accountView(id, site); if (!u) return null;
   return { id, kind: u.kind, name: u.name, org: u.org, zone: u.zone || null, region: u.region, type: u.type, role: u.role,
-    officeCode: u.officeCode || null, officeRole: u.officeRole || null, test: !!u.test,
+    officeCode: u.officeCode || null, officeRole: u.officeRole || null, test: !!u.test, staff: !!u.staff, staffAdmin: !!u.staffAdmin, loginId: u.loginId || null, team: u.team || null,
     // 외근(집배원) = has a delivery zone or is on the control-room roster (1-1절: 소통실 명부가 곧 외근). Other app
     // accounts (직원) are 내근: the app shows the inside-staff menu without 배달위험 알림·날씨·귀국보고; the server already
     // refuses 음성신고·귀국보고 for anyone off the roster.
@@ -196,9 +199,9 @@ function publicUser(id) { const u = USERS[id]; if (!u) return null;
 /* ===================== 세션(토큰) ===================== */
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const sessions = new Map();
-function makeToken(uid) {
+function makeToken(uid, site) {
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { uid, expiresAt: Date.now() + SESSION_TTL_MS });
+  sessions.set(token, { uid, site: ['app', 'safety', 'risk'].includes(site) ? site : null, expiresAt: Date.now() + SESSION_TTL_MS });
   return token;
 }
 function tokenFromReq(req) {
@@ -212,9 +215,12 @@ function sessionFromToken(token) {
   session.expiresAt = Date.now() + SESSION_TTL_MS;
   return session;
 }
+// Fixed accounts have one kind. A staff (명단) account gets its kind from the screen it signed in on (app·소통실·위험성평가).
+function accountView(id, site) { try { return staffDir.viewFor(id, site); } catch { return Object.hasOwn(USERS, id) ? USERS[id] : null; } }
 function userFromReq(req) {
   const session = sessionFromToken(tokenFromReq(req));
-  return session ? { id: session.uid, ...USERS[session.uid] } : null;
+  const u = session && accountView(session.uid, session.site);
+  return u ? { id: session.uid, ...u, site: session.site } : null;
 }
 setInterval(() => {
   const now = Date.now();
@@ -802,11 +808,17 @@ const BUILD_TAG = 'v20260924-02-risk';
 app.get('/api/config', (req, res) => res.json({ kakaoKey: process.env.KAKAO_JS_KEY || '', build: BUILD_TAG }));
 
 app.post('/api/login', loginLimiter, async (req, res) => {
-  const { id, pw } = req.body || {};
-  const u = USERS[id];
-  const ok = !!u && typeof pw === 'string' && await bcrypt.compare(pw, u.pwHash);
-  if (!ok) return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
-  res.json({ token: makeToken(id), user: publicUser(id), expiresIn: SESSION_TTL_MS / 1000 });
+  const { id, pw, site } = req.body || {};
+  const u = typeof id === 'string' && Object.hasOwn(USERS, id) && !USERS[id].staff ? USERS[id] : null;
+  if (u) {
+    const ok = typeof pw === 'string' && await bcrypt.compare(pw, u.pwHash);
+    if (!ok) return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    return res.json({ token: makeToken(id, site), user: publicUser(id, site), expiresIn: SESSION_TTL_MS / 1000 });
+  }
+  // 직원 명단 계정: 아이디는 이름. 5번 틀리면 30분 잠금, 그 화면의 권한이 없으면 거절.
+  const r = await staffDir.login(String(id || '').trim(), pw, site);
+  if (r.error) return res.status(r.status).json({ error: r.error });
+  res.json({ token: makeToken(r.id, site), user: publicUser(r.id, site), expiresIn: SESSION_TTL_MS / 1000 });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -817,7 +829,7 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/me', (req, res) => {
   const u = userFromReq(req); if (!u) return res.status(401).json({ error: 'unauthorized' });
-  res.json({ user: publicUser(u.id) });
+  res.json({ user: publicUser(u.id, u.site) });
 });
 
 app.get('/api/reports', (req, res) => {
@@ -1136,6 +1148,8 @@ const kstDate = (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice
 const POSTAL_PROTOTYPE = require('./seed-assets/postal-prototype.json');
 let ZONES = structuredClone(POSTAL_PROTOTYPE.zones);
 let ROSTER = structuredClone(POSTAL_PROTOTYPE.roster);
+// 'staff': 소통실 명부·팀을 직원 명단에서 자동으로 만든다(명단 올린 뒤). 그때는 소통실 화면에서 명부를 고치지 않는다.
+let ROSTER_SOURCE = 'manual';
 const zoneById = id => ZONES.find(z => z.id === id);
 const rosterById = id => ROSTER.find(r => r.id === id);
 const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` : '-';
@@ -1804,7 +1818,9 @@ app.get('/api/safety/evidence',(req,res)=>{
   const actionPending=reports.filter(r=>returnActionPending(r.report)).length;
   res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,alertBroadcasts:alertEvents.length,callBroadcasts,alertFollowups:alertFollowups.length,notices:notices.length,alertTargets:eventTargets,alertConfirmed:appConfirmed,alertPhoneConfirmed:phoneConfirmed,noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,bothIssues,actionPending,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily,healthLedger,equipmentLedger});
 });
-app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER});});
+app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER,rosterSource:ROSTER_SOURCE});});
+// 직원 명단으로 만든 명부는 명단(위험성평가 「직원 명단」, 관리자 서무팀장)에서만 고친다. 홈페이지마다 명부를 따로 두지 않는다.
+app.use('/api/safety/config',(req,res,next)=>req.method==='GET'||ROSTER_SOURCE!=='staff'?next():res.status(409).json({error:'집배원 명부는 직원 명단에서 자동으로 만들어집니다. 소속·배달구역·팀은 위험성평가 홈페이지 「직원 명단」(관리자: 서무팀장)에서 고치세요.'}));
 app.get('/api/safety/ledger',(req,res)=>{
   const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});
   const kind=String(req.query.kind||''),start=String(req.query.start||''),end=String(req.query.end||'');
@@ -1882,7 +1898,9 @@ const RISK_OFFICES = [
 const riskOffice = code => RISK_OFFICES.find(office => office.code === code) || RISK_OFFICES[0];
 const userOfficeCode = u => (u && RISK_OFFICES.some(office => office.code === u.officeCode)) ? u.officeCode : HEAD_OFFICE_CODE;
 const itemOfficeCode = it => (it && RISK_OFFICES.some(office => office.code === it.officeCode)) ? it.officeCode : HEAD_OFFICE_CODE;
-const riskAccounts = () => Object.entries(typeof USERS === 'object' && USERS ? USERS : {}).filter(([, u]) => u.kind === 'safety_mgr').map(([id, u]) => ({ id, ...u }));
+// 위험성평가 계정: 고정 계정(safety_mgr)과 위험성평가 역할을 받은 명단 직원.
+const riskView = (id, u) => u.staff ? { id, ...u, kind: u.riskAccess ? 'safety_mgr' : 'none' } : { id, ...u };
+const riskAccounts = () => Object.entries(typeof USERS === 'object' && USERS ? USERS : {}).filter(([, u]) => u.kind === 'safety_mgr' || (u.staff && u.riskAccess)).map(([id, u]) => riskView(id, u));
 // Role of an account: the defaults written with the account, overridden by what the 총괄 담당자 set on the settings screen.
 const ROLE_KEYS = ['title', 'collector', 'writer', 'approver', 'chief', 'supervisorId', 'processes'];
 function riskRole(u) {
@@ -1892,7 +1910,7 @@ function riskRole(u) {
   return { title: pick('title') || u.title || '', collector: !!pick('collector'), writer: !!pick('writer'), approver: !!pick('approver'), chief: !!pick('chief'),
     supervisorId: pick('supervisorId') || null, processes: Array.isArray(pick('processes')) ? pick('processes') : [] };
 }
-const accountById = id => { const u = typeof USERS === 'object' && USERS ? USERS[id] : null; return u ? { id, ...u } : null; };
+const accountById = id => { const u = typeof USERS === 'object' && USERS && Object.hasOwn(USERS, id) ? USERS[id] : null; return u ? riskView(id, u) : null; };
 const isCollector = u => isSafetyMgr(u) && riskRole(u).collector;
 const isHeadOfficeManager = u => isCollector(u) && userOfficeCode(u) === HEAD_OFFICE_CODE;
 const riskItemDate = it => String(it?.assessmentStartedAt || it?.triagedAt || it?.createdAt || '').slice(0, 10);
@@ -2590,13 +2608,15 @@ app.post('/api/risk/items/:id/reopen', (req, res) => {
 app.get('/api/risk/roles', (req, res) => {
   const u = userFromReq(req);
   if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '역할 설정은 총괄국 총괄 안전담당자가 합니다.' });
-  res.json({ accounts: riskAccounts().map(a => ({ id: a.id, name: a.name, officeCode: userOfficeCode(a), officeName: riskOffice(userOfficeCode(a)).name, ...riskRole(a) })), history: (RISK.roleHistory || []).slice(-50) });
+  // 명단 직원 중 아직 위험성평가 역할이 없는 사람(설정 탭 「직원 추가」에서 고른다).
+  const others = Object.entries(USERS).filter(([, a]) => a.staff && !a.riskAccess).map(([id, a]) => ({ id, name: a.name, officeName: a.org, dept: a.dept || '', duty: a.duty || '' }));
+  res.json({ accounts: riskAccounts().map(a => ({ id: a.id, name: a.name, staff: !!a.staff, dept: a.dept || '', officeCode: userOfficeCode(a), officeName: riskOffice(userOfficeCode(a)).name, ...riskRole(a) })), staff: others, history: (RISK.roleHistory || []).slice(-50) });
 });
-app.put('/api/risk/roles/:id', (req, res) => {
+app.put('/api/risk/roles/:id', async (req, res) => {
   const u = userFromReq(req);
   if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '역할 설정은 총괄국 총괄 안전담당자가 합니다.' });
   const target = accountById(req.params.id);
-  if (!target || target.kind !== 'safety_mgr') return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
+  if (!target || (target.kind !== 'safety_mgr' && !target.staff)) return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
   const b = req.body || {}, before = riskRole(target), next = {};
   if (typeof b.title === 'string') next.title = b.title.trim().slice(0, 40);
   for (const key of ['collector', 'writer', 'approver', 'chief']) if (typeof b[key] === 'boolean') next[key] = b[key];
@@ -2608,10 +2628,18 @@ app.put('/api/risk/roles/:id', (req, res) => {
   }
   if (Array.isArray(b.processes)) next.processes = b.processes.map(x => String(x).trim().slice(0, 60)).filter(Boolean).slice(0, 20);
   if (next.collector === true && userOfficeCode(target) === HEAD_OFFICE_CODE && target.id !== u.id && !b.confirmCollector) return res.status(400).json({ error: '총괄 안전담당자를 바꾸면 설정 권한이 함께 넘어갑니다. 확인 후 다시 저장하세요.' });
-  RISK.roles = { ...(RISK.roles || {}), [target.id]: { ...((RISK.roles || {})[target.id] || {}), ...next } };
-  RISK.roleHistory = [...(RISK.roleHistory || []), { target: target.id, targetName: target.name, before, after: riskRole(target), by: u.name, at: new Date().toISOString() }].slice(-500);
+  let after;
+  if (target.staff) {
+    // 명단 직원의 역할은 Supabase(직원 명단)에 저장해 재배포 뒤에도 남긴다.
+    try { await staffDir.setRiskRole(target.id, next, u); } catch (error) { return res.status(502).json({ error: error.message }); }
+    after = riskRole(accountById(target.id));
+  } else {
+    RISK.roles = { ...(RISK.roles || {}), [target.id]: { ...((RISK.roles || {})[target.id] || {}), ...next } };
+    after = riskRole(target);
+  }
+  RISK.roleHistory = [...(RISK.roleHistory || []), { target: target.id, targetName: target.name, before, after, by: u.name, at: new Date().toISOString() }].slice(-500);
   saveRisk(); broadcastRisk();
-  res.json({ ok: true, role: riskRole(target) });
+  res.json({ ok: true, role: after });
 });
 
 /* 청 누적보고: 기간 집계 */
@@ -2748,6 +2776,64 @@ for (const report of reports) {
   }
 }
 if (externalRoutingMigrated) save();
+
+/* 직원 명단·가입(AGENTS.md 1-1절, staff-roster.cjs). 명단은 Supabase `staff` 표(supabase/010_staff_roster.sql). */
+const staffStore = process.env.SAFETY_SUPABASE_URL && process.env.SAFETY_SUPABASE_SERVICE_KEY
+  ? staffRoster.supabaseStaffStore({ url: process.env.SAFETY_SUPABASE_URL, key: process.env.SAFETY_SUPABASE_SERVICE_KEY })
+  : { kind: 'none', async list() { throw new Error('Supabase가 설정되지 않아 직원 명단을 쓸 수 없습니다(SAFETY_SUPABASE_URL·SAFETY_SUPABASE_SERVICE_KEY).'); } };
+const staffDir = staffRoster.createStaffDirectory({ store: staffStore, users: USERS, offices: RISK_OFFICES, bcrypt, onChange: () => applyStaffRoster() });
+// 시험 집배원(jip11~16)을 명부의 「시험 계정」 묶음에 함께 둔다. 실제 운영을 시작하면 SAFETY_TEST_ROSTER=off.
+const TEST_ROSTER_ON = process.env.SAFETY_TEST_ROSTER !== 'off';
+function applyStaffRoster() {
+  const { zones, roster } = staffRoster.rosterFromStaff(staffDir.active(), RISK_OFFICES);
+  if (!roster.length) return;
+  const test = TEST_ROSTER_ON ? POSTAL_PROTOTYPE.roster.filter(r => USERS[r.id]).map(r => ({ ...r, name: `${r.name}(시험)`, zone: 'test', test: true })) : [];
+  ZONES = [...zones, ...(test.length ? [{ id: 'test', group: '시험', name: '시험 계정(집배원1~6)', area: '', places: [], near: [], lat: null, lng: null }] : [])];
+  ROSTER = [...roster, ...test];
+  ROSTER_SOURCE = 'staff';
+  ensureSafetyCollections(); saveSafety(); broadcastSafety();
+}
+(function loadStaff(attempt = 0) {
+  staffDir.load().then(({ ready, error }) => {
+    if (ready) console.log(`▶ 직원 명단 ${staffDir.status().count}명`);
+    else if (staffStore.kind !== 'none') { console.warn('⚠️ 직원 명단:', error); if (attempt < 20) setTimeout(() => loadStaff(attempt + 1), 5 * 60 * 1000).unref(); }
+  });
+})();
+const isStaffAdmin = u => isSafetyMgr(u) && !!u.staffAdmin;
+const signupLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: '가입 시도가 너무 많습니다. 10분 뒤 다시 하세요.' } });
+const staffSend = (res, r) => r && r.error ? res.status(r.status || 400).json({ error: r.error, errors: r.errors }) : res.json(r);
+app.post('/api/staff/signup', signupLimiter, async (req, res) => {
+  try { staffSend(res, await staffDir.signup({ ...(req.body || {}), device: req.headers['user-agent'] || '' })); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.use('/api/staff', (req, res, next) => isStaffAdmin(userFromReq(req)) ? next() : res.status(403).json({ error: '직원 명단은 관리자(서무팀장)만 봅니다.' }));
+app.get('/api/staff', async (req, res) => {
+  const status = staffDir.status();
+  if (!status.ready) await staffDir.load();
+  res.json({ status: staffDir.status(), staff: staffDir.list(), offices: RISK_OFFICES.map(({ code, name }) => ({ code, name })), columns: Object.values(staffRoster.COLUMNS).map(list => list[0]), testRoster: TEST_ROSTER_ON, rosterSource: ROSTER_SOURCE });
+});
+const rosterBuffer = body => { const text = String(body?.fileBase64 || '').replace(/^data:[^,]*,/, ''); return text ? Buffer.from(text, 'base64') : null; };
+app.post('/api/staff/import/preview', async (req, res) => {
+  const buffer = rosterBuffer(req.body); if (!buffer) return res.status(400).json({ error: '엑셀 파일을 고르세요.' });
+  try { staffSend(res, await staffDir.previewImport(buffer, XLSXStyle)); } catch (error) { res.status(400).json({ error: `엑셀을 읽지 못했습니다: ${error.message}` }); }
+});
+app.post('/api/staff/import/apply', async (req, res) => {
+  const buffer = rosterBuffer(req.body); if (!buffer) return res.status(400).json({ error: '엑셀 파일을 고르세요.' });
+  try { staffSend(res, await staffDir.applyImport(buffer, XLSXStyle, userFromReq(req), { disableMissing: req.body?.disableMissing === true })); } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.patch('/api/staff/:id', async (req, res) => {
+  try { staffSend(res, await staffDir.adminUpdate(req.params.id, req.body || {}, userFromReq(req))); } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/staff/:id/reset', async (req, res) => {
+  try { staffSend(res, await staffDir.resetAccount(req.params.id, userFromReq(req))); } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/staff/:id/unlock', async (req, res) => {
+  try { staffSend(res, await staffDir.unlock(req.params.id, userFromReq(req))); } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/staff-changes', async (req, res) => {
+  if (!isStaffAdmin(userFromReq(req))) return res.status(403).json({ error: 'forbidden' });
+  try { res.json({ changes: await staffDir.changes(200) }); } catch (error) { res.status(502).json({ error: error.message }); }
+});
 
 // Branch offices and heads use the library for drafts and search; loading, indexing and backup stay with the head office.
 require('./safety-knowledge.cjs').mountKnowledge(app, req => {
