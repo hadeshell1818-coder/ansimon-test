@@ -39,7 +39,7 @@ async function main(){
   await page.getByRole('button',{name:'닫기',exact:true}).click();
   await page.getByRole('button',{name:'이행결과서 열기',exact:true}).click();
   assert.equal(await page.locator('.result-photo').count(),2);
-  assert.match(await page.locator('.result-plan').innerText(),/담당자\(관리감독자\)/);
+  assert.match(await page.locator('.result-plan').innerText(),/담당자\(성명\)/);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-result.png'),fullPage:true});
   // Printing goes through a hidden frame in the page, so no about:blank window is left behind; the frame is removed
   // after printing (afterprint). The test stands in for the browser's print dialog.
