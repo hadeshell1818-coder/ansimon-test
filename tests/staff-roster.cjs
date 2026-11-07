@@ -68,7 +68,7 @@ async function main() {
   const dir = S.createStaffDirectory({ store, users, offices: OFFICES, bcrypt, onChange: () => changes++ });
   await dir.load();
   const applied = await dir.applyImport(book(ROWS, MERGES), XLSX, admin);
-  assert.deepEqual(applied, { added: 7, changed: 0, disabled: 0, missing: 0 });
+  assert.deepEqual(applied, { added: 7, changed: 0, disabled: 0, missing: 0, skipped: 0, total: 7 });
   const ids = Object.fromEntries(dir.list().map(s => [s.phone, s.loginId]));
   assert.equal(ids['010-1111-0001'], '가나다');
   assert.equal(ids['010-1111-0005'], '김동명(장흥)'); assert.equal(ids['010-1111-0006'], '김동명(대덕)');
@@ -126,9 +126,16 @@ async function main() {
   assert.deepEqual(preview.diff.changed[0].changes, { team: ['', '2팀'] });
   assert.equal(preview.diff.missing[0].name, '라마바');
   const second = await dir.applyImport(book(next, MERGES), XLSX, admin, { disableMissing: true });
-  assert.deepEqual(second, { added: 0, changed: 1, disabled: 1, missing: 0 });
+  assert.deepEqual(second, { added: 0, changed: 1, disabled: 1, missing: 0, skipped: 0, total: 6 });
   assert.ok(dir.list().find(s => s.name === '라마바').disabled, 'kept with its records, only disabled');
   assert.ok(!Object.values(users).some(u => u.staff && u.name === '라마바'), 'a disabled person cannot sign in');
+  // 고칠 줄이 있으면 그대로는 반영하지 않고(400), 「고칠 줄은 빼고 반영」이면 나머지만 저장한다. 그때 빠진 사람 사용 중지는 하지 않는다.
+  const withBad = [...next, ['장흥우체국', '영업과', '새직원', '061-000-0000', '창구', '', ''], ['장흥우체국', '영업과', '추가직원', '010-1111-0009', '창구', '', '']];
+  assert.equal((await dir.applyImport(book(withBad, MERGES), XLSX, admin)).status, 400);
+  const partial = await dir.applyImport(book(withBad.filter(r => r[2] !== '마바사'), MERGES), XLSX, admin, { skipErrors: true, disableMissing: true });
+  assert.deepEqual([partial.added, partial.skipped, partial.disabled, partial.missing], [1, 1, 0, 1]);
+  assert.ok(dir.list().some(s => s.name === '추가직원') && !dir.list().some(s => s.name === '새직원'));
+  assert.ok(!dir.list().find(s => s.name === '마바사').disabled, 'not disabled while error rows are skipped');
   assert.equal((await dir.adminUpdate(dir.list().find(s => s.name === '마바사').id, { officeCode: 'nowhere' }, admin)).status, 400);
   assert.ok(changes > 0);
   console.log('PASS: roster Excel (merged cells, short office names, row errors), login ids for same names, team/zone groups for the control room, signup by name+phone, per-screen access, 5-fail lock, unlock/reset, re-upload diff and disable');

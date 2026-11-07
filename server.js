@@ -2819,7 +2819,7 @@ app.post('/api/staff/import/preview', async (req, res) => {
 });
 app.post('/api/staff/import/apply', async (req, res) => {
   const buffer = rosterBuffer(req.body); if (!buffer) return res.status(400).json({ error: '엑셀 파일을 고르세요.' });
-  try { staffSend(res, await staffDir.applyImport(buffer, XLSXStyle, userFromReq(req), { disableMissing: req.body?.disableMissing === true })); } catch (error) { res.status(502).json({ error: error.message }); }
+  try { staffSend(res, await staffDir.applyImport(buffer, XLSXStyle, userFromReq(req), { disableMissing: req.body?.disableMissing === true, skipErrors: req.body?.skipErrors === true })); } catch (error) { res.status(502).json({ error: error.message }); }
 });
 app.patch('/api/staff/:id', async (req, res) => {
   try { staffSend(res, await staffDir.adminUpdate(req.params.id, req.body || {}, userFromReq(req))); } catch (error) { res.status(502).json({ error: error.message }); }

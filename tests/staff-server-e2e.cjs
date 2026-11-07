@@ -58,7 +58,7 @@ async function main() {
     const preview = await call('POST', '/api/staff/import/preview', { fileBase64: roster() }, admin);
     assert.equal(preview.status, 200); assert.equal(preview.body.diff.added.length, 4);
     const applied = await call('POST', '/api/staff/import/apply', { fileBase64: roster() }, admin);
-    assert.deepEqual(applied.body, { added: 4, changed: 0, disabled: 0, missing: 0 });
+    assert.deepEqual(applied.body, { added: 4, changed: 0, disabled: 0, missing: 0, skipped: 0, total: 4 });
     assert.equal(supa.tables.staff.length, 4); assert.ok(supa.tables.staff_changes.some(c => c.action === 'added' && c.by_name === '안전보건담당자'));
     assert.ok(supa.tables.staff.every(r => !('pw_hash' in r) || r.pw_hash === null));
 
