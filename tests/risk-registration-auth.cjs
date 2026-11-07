@@ -3,7 +3,7 @@ const express=require('express'),{chromium}=require('playwright');
 const source=fs.readFileSync(path.join(__dirname,'../server.js'),'utf8');
 async function main(){
  const app=express();app.use(express.json());
- const sessions=new Map(),USERS={manager:{kind:'safety_mgr',org:'장흥우체국',name:'담당자'},other:{kind:'carrier',org:'장흥우체국'}};
+ const sessions=new Map(),USERS={manager:{kind:'safety_mgr',org:'장흥우체국',name:'담당자',riskRole:{collector:true,writer:true}},other:{kind:'carrier',org:'장흥우체국'}};
  const item={id:'K1',status:'inbox',source:'staff',reporter:'직원',createdAt:new Date().toISOString(),factor:'롤파레트 파손',note:'철망 찔림 위험'};
  let writes=0;const context=vm.createContext({app,sessions,USERS,SESSION_TTL_MS:28800000,SAFETY_OFFICE:'장흥우체국',RISK:{items:[item]},Date,
  syncRiskSource(){writes++},saveRisk(){},save(){},broadcastRisk(){}});

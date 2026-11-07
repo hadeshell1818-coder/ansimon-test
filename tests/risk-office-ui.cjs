@@ -4,116 +4,170 @@ const os = require('node:os');
 const express = require('express');
 const { chromium } = require('playwright');
 
-// Office screens (per-item approval, 2026-11-05): a branch manager requests the head's approval for one assessment, the
-// branch head approves it item by item (and only views the table), and the head office picks an office (no counts in
-// the picker), sees approved branch rows read-only and asks for revision. The 결재 tab lists one year. The printed
-// approval box shows 담당 and 국장 names; 관내 전체 prints the head office first and the branches after it with no
-// page break; branch accounts get the read-only library.
-const offices = [{ code: 'jangheung', name: '장흥우체국', head: true, headName: '' }, { code: 'daedeok', name: '장흥대덕우체국', head: false, headName: '대덕 국장' }];
+// Risk screens by role (2026-11-07): the collector assigns app reports, follows progress before approval, asks for 보완,
+// sends the yearly 정기평가 to the 총괄국장 and sets roles; a writer bundles 평가표 and 이행결과서 for the 결재자; the 결재자
+// approves the bundle once and only views the table. Printed forms carry □ 공정명 □ 평가일 □ 평가자 and an approval box
+// (담당 · 과장 · 국장 at the head office, 담당 · 국장 at a branch) stamped with the names of the steps that happened.
+const offices = [{ code: 'jangheung', name: '장흥우체국', head: true }, { code: 'daedeok', name: '장흥대덕우체국', head: false }];
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
-const branchItem = { id: 'D1', status: 'assessed', officeCode: 'daedeok', officeName: '장흥대덕우체국', createdAt: today, assessmentStartedAt: today,
-  customProcess: '집배', factor: '대덕 계단 넘어짐', riskLevel: '중', evaluator: '대덕 담당자', reduction: '미끄럼 방지' };
-const hqItem = { id: 'H1', status: 'assessed', officeCode: 'jangheung', officeName: '장흥우체국', createdAt: today, assessmentStartedAt: today,
-  customProcess: '소포', factor: '총괄국 소포 끼임', riskLevel: '상', evaluator: '안전보건담당자' };
-const approval = status => ({ status, requestedBy: '대덕 담당자', requestedAt: today + 'T01:00:00Z', approvedBy: status === 'approved' ? '대덕 국장' : null,
-  approvedAt: today + 'T02:00:00Z', approvedOnce: status === 'approved', history: [] });
+const acct = (id, name, officeCode, role) => ({ id, name, officeCode, title: '', collector: false, writer: false, approver: false, chief: false, supervisorId: null, processes: [], ...role });
+const accounts = [
+  acct('hq', '서무팀장(시험)', 'jangheung', { title: '서무팀장', collector: true, writer: true, supervisorId: 'logi', processes: ['시설 등'] }),
+  acct('post', '우편팀장(시험)', 'jangheung', { title: '우편팀장', writer: true, supervisorId: 'sales', processes: ['접수(창구)'] }),
+  acct('sales', '영업과장(시험)', 'jangheung', { title: '영업과장', approver: true }),
+  acct('logi', '우편물류과장(시험)', 'jangheung', { title: '우편물류과장', approver: true }),
+  acct('chief', '총괄국장(시험)', 'jangheung', { title: '총괄국장', chief: true }),
+  acct('dd', '대덕 담당자', 'daedeok', { collector: true, writer: true, supervisorId: 'ddHead' }),
+  acct('ddHead', '대덕 국장', 'daedeok', { title: '국장', approver: true }),
+];
+const base = (id, extra) => ({ id, status: 'assessed', officeCode: 'jangheung', officeName: '장흥우체국', createdAt: today, assessmentStartedAt: today, customProcess: '접수(창구)', riskLevel: '중', readOnly: false, canImprove: true, approvals: {}, ...extra });
+const H1 = base('H1', { factor: '창구 의자 바퀴 미끄러짐', assignedTo: 'post', assignedName: '우편팀장(시험)' });
+const H3 = base('H3', { factor: '번호표 발행기 전선 걸림', assignedTo: 'post', assignedName: '우편팀장(시험)', doneAt: today + 'T03:00:00Z', resultUpdatedAt: today + 'T03:00:00Z', afterRiskLevel: '하',
+  approvals: { assessment: { status: 'approved', requestedBy: '우편팀장(시험)', approvedBy: '영업과장(시험)', approvedOnce: true } } });
+const D1 = base('D1', { officeCode: 'daedeok', officeName: '장흥대덕우체국', customProcess: '집배', factor: '대덕 계단 넘어짐', assignedTo: 'dd', readOnly: true, canImprove: false,
+  approvals: { assessment: { status: 'approved', requestedBy: '대덕 담당자', approvedBy: '대덕 국장', approvedOnce: true } } });
+const pendingBundle = { id: 'AB1', kind: 'regular', officeCode: 'jangheung', officeName: '장흥우체국', status: 'pending', requestedBy: '우편팀장(시험)', requestedById: 'post', requestedAt: today + 'T04:00:00Z',
+  approverId: 'sales', approverName: '영업과장(시험)', assessmentIds: ['H1'], resultIds: [], items: [{ id: 'H1', process: '접수(창구)', factor: H1.factor, riskLevel: '중' }] };
+const me = id => { const a = accounts.find(x => x.id === id); return { id, name: a.name, title: a.title, collector: a.collector, writer: a.writer, approver: a.approver, chief: a.chief, supervisorId: a.supervisorId, processes: a.processes }; };
 const views = {
-  manager: { user: { kind: 'safety_mgr', org: '장흥대덕우체국', name: '대덕 담당자', officeCode: 'daedeok', officeRole: 'manager', test: true },
-    state: { office: { code: 'daedeok', name: '장흥대덕우체국', head: false, role: 'manager', headName: '대덕 국장' }, registered: [{ ...branchItem, readOnly: false, canImprove: true, approval: null }] } },
-  head: { user: { kind: 'safety_mgr', org: '장흥대덕우체국', name: '대덕 국장', officeCode: 'daedeok', officeRole: 'head', test: true },
-    state: { office: { code: 'daedeok', name: '장흥대덕우체국', head: false, role: 'head', headName: '대덕 국장' }, registered: [{ ...branchItem, readOnly: true, canImprove: false, approval: approval('pending') }] } },
-  hq: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '안전보건담당자', officeCode: 'jangheung', officeRole: 'manager' },
-    state: { office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'manager', headName: '' }, registered: [{ ...hqItem, readOnly: false, canImprove: true, approval: null }, { ...branchItem, readOnly: true, canImprove: false, approval: approval('approved') }] } },
+  writer: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '우편팀장(시험)', test: true },
+    state: { me: me('post'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'writer' }, registered: [H1, H3], bundles: [], submissions: [] } },
+  approver: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '영업과장(시험)', test: true },
+    state: { me: me('sales'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'head' },
+      registered: [{ ...H1, readOnly: true, canImprove: false, approvals: { assessment: { status: 'pending', bundleId: 'AB1', requestedBy: '우편팀장(시험)' } } }], bundles: [pendingBundle], submissions: [] } },
+  collector: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '서무팀장(시험)', test: true },
+    state: { me: me('hq'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'collector' },
+      inbox: [{ id: 'I1', status: 'inbox', source: 'staff', reporter: '직원', createdAt: today + 'T00:00:00Z', note: '창구 앞 매트 들림', officeCode: 'jangheung' }],
+      registered: [{ ...H1, readOnly: true }, { ...H3, readOnly: true }, D1], bundles: [pendingBundle], submissions: [{ officeCode: 'jangheung', writerId: 'post', writerName: '우편팀장(시험)', from: today.slice(0, 4) + '-01-01', to: today, itemCount: 2, at: today + 'T05:00:00Z' }] } },
+  branch: { user: { kind: 'safety_mgr', org: '장흥대덕우체국', name: '대덕 담당자', test: true },
+    state: { me: me('dd'), office: { code: 'daedeok', name: '장흥대덕우체국', head: false, role: 'collector' }, registered: [{ ...D1, readOnly: false, canImprove: true, approvals: {} }], bundles: [], submissions: [] } },
 };
 
 async function main() {
   const app = express(); app.use(express.static(path.join(__dirname, '../public')));
   const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const url0 = `http://127.0.0.1:${server.address().port}`;
   let browser;
   try {
     browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
     const open = async role => {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, timezoneId: 'Asia/Seoul' }), errors = [], posts = [];
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, timezoneId: 'Asia/Seoul' }), errors = [], sent = [];
       page.on('pageerror', e => errors.push(e.message));
       page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('보완 내용') : dialog.accept());
       await page.route('**/api/**', async route => {
-        const url = new URL(route.request().url()); let data = {};
+        const url = new URL(route.request().url()), method = route.request().method(); let data = {};
         if (url.pathname === '/api/me') data = { user: views[role].user };
-        if (url.pathname === '/api/risk/state') data = { inbox: [], processes: [], hazardTypes: {}, criteria: { levels: [] }, offices, ...views[role].state };
+        if (url.pathname === '/api/risk/state') data = { inbox: [], processes: [], hazardTypes: {}, criteria: { levels: [] }, offices, accounts: role === 'branch' ? accounts.filter(a => a.officeCode === 'daedeok') : accounts, ...views[role].state };
+        if (url.pathname === '/api/risk/roles') data = { accounts: accounts.map(a => ({ ...a, officeName: offices.find(o => o.code === a.officeCode).name })), history: [] };
         if (url.pathname === '/api/safety-knowledge') data = { connected: true, documents: [], candidates: [] };
-        if (route.request().method() === 'POST') { posts.push({ path: url.pathname, body: route.request().postDataJSON() }); data = { ok: true }; }
+        if (method === 'POST' || method === 'PUT') { sent.push({ method, path: url.pathname, body: route.request().postDataJSON() }); data = { ok: true }; }
         await route.fulfill({ json: data });
       });
       await page.addInitScript(() => sessionStorage.setItem('cv_risk_token', 'test-only'));
-      await page.goto(base + '/risk.html');
+      await page.goto(url0 + '/risk.html');
       await page.locator('#app').waitFor({ state: 'visible' });
-      return { page, errors, posts };
+      return { page, errors, sent };
     };
+    const toast = (page, text) => page.waitForFunction(t => document.querySelector('#toast')?.textContent.includes(t), text);
 
-    // Branch manager: request approval for one assessment from its row; the library is read-only.
-    const manager = await open('manager');
-    assert.match(await manager.page.locator('#who').innerText(), /장흥대덕우체국 · 대덕 담당자 \(시험용\)/);
-    await manager.page.locator('#tab-table').click();
-    await manager.page.getByRole('button', { name: '국장 결재 요청', exact: true }).first().click();
-    await manager.page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('결재를 요청'));
-    assert.ok(manager.posts.some(p => p.path === '/api/risk/items/D1/approval/request'));
-    // The 위험성평가표 form: 담당자 in the evaluation part, 감독자 (default: the office head) in the plan.
-    await manager.page.getByRole('button', { name: '보기·수정', exact: true }).click();
-    assert.equal(await manager.page.locator('label', { hasText: /^감독자$/ }).count(), 1);
-    assert.equal(await manager.page.locator('#e-owner').inputValue(), '대덕 국장');
-    assert.equal(await manager.page.locator('#e-report-result').count(), 0, 'no separate reporter-result box');
-    await manager.page.getByRole('button', { name: '닫기', exact: true }).click();
-    await manager.page.locator('#tab-approval').click();
-    assert.match(await manager.page.locator('.report-card').innerText(), /대덕 계단 넘어짐/);
-    await manager.page.locator('#tab-library').click();
-    assert.equal(await manager.page.getByRole('button', { name: '공식 법령 최신본 적재' }).count(), 0);
-    assert.equal(await manager.page.getByRole('button', { name: '근거 자료 백업 내려받기' }).count(), 0);
-    assert.deepEqual(manager.errors, []);
+    // Writer: no inbox or settings; bundles the unapproved 평가표 and the written 이행결과서 together for the 결재자.
+    const writer = await open('writer');
+    assert.equal(await writer.page.locator('#tab-inbox').isHidden(), true, 'app reports go to the collector');
+    assert.equal(await writer.page.locator('#tab-roles').isHidden(), true);
+    assert.equal(await writer.page.locator('#tab-table').getAttribute('class').then(c => c.includes('on')), true);
+    await writer.page.getByRole('button', { name: '보기·수정', exact: true }).first().click();
+    assert.equal(await writer.page.locator('#e-owner').inputValue(), '영업과장(시험)', '감독자 defaults to the writer’s 결재자');
+    await writer.page.getByRole('button', { name: '닫기', exact: true }).click();
+    await writer.page.locator('#tab-approval').click();
+    assert.deepEqual(await writer.page.locator('.pick-assessment').evaluateAll(xs => xs.map(x => x.value)), ['H1']);
+    assert.deepEqual(await writer.page.locator('.pick-result').evaluateAll(xs => xs.map(x => x.value)), ['H3']);
+    assert.equal(await writer.page.locator('#bundle-approver').inputValue(), 'sales');
+    await writer.page.getByRole('button', { name: '결재 올리기', exact: true }).click();
+    await toast(writer.page, '결재를 올렸습니다');
+    const sentBundle = writer.sent.find(p => p.path === '/api/risk/bundles').body;
+    assert.deepEqual([sentBundle.kind, sentBundle.assessmentIds, sentBundle.resultIds, sentBundle.approverId], ['regular', ['H1'], ['H3'], 'sales']);
+    // 이행결과서: 담당자(성명) with the writer's name.
+    await writer.page.locator('#tab-table').click();
+    await writer.page.evaluate(() => openImprove('H1'));
+    assert.equal(await writer.page.locator('label', { hasText: /^담당자\(성명\)$/ }).count(), 1);
+    assert.equal(await writer.page.locator('#i-person').inputValue(), '우편팀장(시험)');
+    const resultForm = await writer.page.evaluate(() => resultFormHtml(R.registered.find(it => it.id === 'H3')));
+    assert.match(resultForm, /<th>담당자\(성명\)<\/th>/);
+    assert.match(resultForm, /approval-box three/);
+    assert.deepEqual(writer.errors, []);
 
-    // Branch head: lands on the 결재 tab, approves the item; the table has no edit controls and no add button.
-    const head = await open('head');
-    assert.equal(await head.page.locator('#tab-inbox').isHidden(), true);
-    assert.equal(await head.page.locator('#tab-approval').getAttribute('class').then(c => c.includes('on')), true);
-    assert.equal(await head.page.locator('#approvalN').innerText(), '1');
-    await head.page.getByRole('button', { name: '결재', exact: true }).first().click();
-    await head.page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('결재했습니다'));
-    assert.ok(head.posts.some(p => p.path === '/api/risk/items/D1/approval/approve'));
-    await head.page.locator('#tab-table').click();
-    assert.equal(await head.page.locator('.three-step select').count(), 0);
-    assert.equal(await head.page.locator('[contenteditable="true"]').count(), 0);
-    assert.equal(await head.page.getByRole('button', { name: '위험성평가 추가' }).count(), 0);
-    assert.match(await head.page.locator('.locked-row').innerText(), /국장 결재 대기/);
-    assert.deepEqual(head.errors, []);
+    // Approver: lands on 결재, approves the bundle once; the table is view-only.
+    const approver = await open('approver');
+    assert.equal(await approver.page.locator('#tab-approval').getAttribute('class').then(c => c.includes('on')), true);
+    assert.equal(await approver.page.locator('#approvalN').innerText(), '1');
+    assert.match(await approver.page.locator('.report-card').first().innerText(), /창구 의자 바퀴 미끄러짐/);
+    await approver.page.getByRole('button', { name: '결재', exact: true }).click();
+    await toast(approver.page, '결재했습니다');
+    assert.ok(approver.sent.some(p => p.path === '/api/risk/bundles/AB1/approve'));
+    await approver.page.locator('#tab-table').click();
+    assert.equal(await approver.page.locator('.three-step select').count(), 0);
+    assert.equal(await approver.page.locator('[contenteditable="true"]').count(), 0);
+    assert.equal(await approver.page.getByRole('button', { name: '위험성평가 추가' }).count(), 0);
+    assert.match(await approver.page.locator('.locked-row').innerText(), /평가표 결재 대기/);
+    assert.deepEqual(approver.errors, []);
 
-    // Head office: the office picker has names only; own rows editable, approved branch rows read-only, revision request.
-    const hq = await open('hq');
-    await hq.page.locator('#tab-table').click();
-    const picker = hq.page.getByLabel('볼 국');
-    assert.deepEqual(await picker.locator('option').allInnerTexts(), ['장흥우체국', '장흥대덕우체국', '관내 전체']);
-    assert.equal(await hq.page.locator('.three-step select').count(), 1, 'own row editable');
-    await picker.selectOption('daedeok');
-    assert.equal(await hq.page.locator('.three-step select').count(), 0);
-    assert.equal(await hq.page.getByRole('button', { name: '위험성평가 추가' }).count(), 0);
-    // Approval box: the branch names the writer and its head; the head office leaves 국장 blank.
-    const boxes = await hq.page.evaluate(() => [approvalBox('daedeok', R.registered.filter(it => it.officeCode === 'daedeok')), approvalBox('jangheung', R.registered.filter(it => it.officeCode === 'jangheung'))]);
-    assert.match(boxes[0], /<th>담당<\/th><th>국장<\/th><\/tr><tr><td>대덕 담당자<\/td><td>대덕 국장<\/td>/);
-    assert.match(boxes[1], /<td>안전보건담당자<\/td><td><\/td>/);
-    // 관내 전체 print: head office first, branch after it, no page break between offices.
-    const printed = await hq.page.evaluate(() => { officeView = 'all'; return officeDocuments(assessmentRows(), (code, items) => '<h1>' + officeName(code) + '</h1>'); });
+    // Collector: assigns an app report, sees progress before approval, asks for 보완, sends the 정기평가, sets roles.
+    const collector = await open('collector');
+    assert.match(await collector.page.locator('#inboxList').innerText(), /창구 앞 매트 들림/);
+    await collector.page.locator('#assign-I1').selectOption('post');
+    await collector.page.getByRole('button', { name: '배분', exact: true }).click();
+    await toast(collector.page, '배분했습니다');
+    assert.deepEqual(collector.sent.find(p => p.path === '/api/risk/items/I1/assign').body, { writerId: 'post' });
+    await collector.page.locator('#tab-approval').click();
+    const progress = await collector.page.locator('.progress-table').innerText();
+    assert.match(progress, /우편팀장 우편팀장\(시험\)[\s\S]*창구 의자 바퀴 미끄러짐[\s\S]*작성 중/);
+    assert.match(progress, /이행결과서 결재 전/);
+    await collector.page.locator('.progress-table tr', { hasText: 'H3' }).getByRole('button', { name: '보완 요청' }).click();
+    await toast(collector.page, '보완을 요청');
+    assert.deepEqual(collector.sent.find(p => p.path === '/api/risk/items/H3/reopen').body, { reason: '보완 내용' });
+    assert.match(await collector.page.locator('.form-section', { hasText: '정기평가' }).first().innerText(), /우편팀장\(시험\)[\s\S]*2건/);
+    await collector.page.getByRole('button', { name: '총괄국장 결재 올리기' }).click();
+    await toast(collector.page, '총괄국장 결재를 올렸습니다');
+    const annual = collector.sent.find(p => p.path === '/api/risk/bundles' && p.body.kind === 'annual').body;
+    assert.equal(annual.approverId, 'chief');
+    // Approval box and info line: names only for steps that happened; 평가자 = 관리감독자(과장), 팀장, 담당 직원.
+    const head = await collector.page.evaluate(() => { assessmentStart = '2026-01-01'; assessmentEnd = '2026-12-31'; return docHead('장흥우체국 위험성평가표', 'jangheung', R.registered.filter(it => it.id === 'H3'), '접수(창구)'); });
+    assert.match(head, /<th>담당<\/th><th>과장<\/th><th>국장<\/th><\/tr><tr><td>우편팀장\(시험\)<\/td><td>영업과장\(시험\)<\/td><td><\/td>/);
+    assert.match(head, /□ 공정명: 접수\(창구\).*□ 평가일: 2026-01-01 ~ 2026-12-31.*□ 평가자: 관리감독자\(영업과장\), 우편팀장, 담당 직원/);
+    const branchBox = await collector.page.evaluate(() => approvalBox('daedeok', R.registered.filter(it => it.id === 'D1')));
+    assert.match(branchBox, /<th>담당<\/th><th>국장<\/th><\/tr><tr><td>대덕 담당자<\/td><td>대덕 국장<\/td>/);
+    // Office picker and 관내 전체 print: head office first, branch after it, no page break.
+    await collector.page.locator('#tab-table').click();
+    assert.deepEqual(await collector.page.getByLabel('볼 국').locator('option').allInnerTexts(), ['장흥우체국', '장흥대덕우체국', '관내 전체']);
+    const printed = await collector.page.evaluate(() => { officeView = 'all'; return officeDocuments(assessmentRows(), (code, items) => '<h1>' + officeName(code) + '</h1>'); });
     assert.match(printed, /<h1>장흥우체국<\/h1>[\s\S]*<h1>장흥대덕우체국<\/h1>/);
     assert.doesNotMatch(printed, /break-before:page/);
-    await hq.page.evaluate(() => { officeView = ''; });
-    await hq.page.locator('#tab-approval').click();
-    assert.match(await hq.page.locator('.report-card').innerText(), /장흥대덕우체국/);
-    await hq.page.getByRole('button', { name: '보완 요청', exact: true }).click();
-    await hq.page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('보완을 요청'));
-    assert.deepEqual(hq.posts.find(p => p.path === '/api/risk/items/D1/approval/revision').body, { reason: '보완 내용' });
-    await hq.page.locator('#tab-library').click();
-    assert.equal(await hq.page.getByRole('button', { name: '근거 자료 백업 내려받기' }).count(), 1, 'head office keeps library admin');
-    await hq.page.screenshot({ path: path.join(os.tmpdir(), 'risk-office-hq.png'), fullPage: true });
-    assert.deepEqual(hq.errors, []);
-    console.log('PASS: per-item request from the row, 담당자/감독자 form, head approves item by item and only views, head office picker without counts, read-only branch rows, revision, approval box names, 관내 전체 printed without page breaks, library limits');
+    await collector.page.evaluate(() => { officeView = ''; });
+    // Settings.
+    assert.equal(await collector.page.locator('#tab-roles').isHidden(), false);
+    await collector.page.locator('#tab-roles').click();
+    const row = collector.page.locator('tr[data-id="post"]');
+    await row.locator('.r-proc').fill('접수(창구), 우편 창구');
+    await row.getByRole('button', { name: '저장' }).click();
+    await toast(collector.page, '저장했습니다');
+    const put = collector.sent.find(p => p.method === 'PUT');
+    assert.equal(put.path, '/api/risk/roles/post'); assert.deepEqual(put.body.processes, ['접수(창구)', '우편 창구']); assert.equal(put.body.supervisorId, 'sales');
+    await collector.page.locator('#tab-library').click();
+    assert.equal(await collector.page.getByRole('button', { name: '근거 자료 백업 내려받기' }).count(), 1, 'head office keeps library admin');
+    await collector.page.screenshot({ path: path.join(os.tmpdir(), 'risk-office-hq.png'), fullPage: true });
+    assert.deepEqual(collector.errors, []);
+
+    // Branch: its 담당자 is collector and writer; no settings; the library is read-only.
+    const branch = await open('branch');
+    assert.equal(await branch.page.locator('#tab-roles').isHidden(), true);
+    await branch.page.locator('#tab-approval').click();
+    assert.equal(await branch.page.locator('#bundle-approver').inputValue(), 'ddHead');
+    assert.equal(await branch.page.getByRole('button', { name: '총괄국장 결재 올리기' }).count(), 0);
+    await branch.page.locator('#tab-library').click();
+    assert.equal(await branch.page.getByRole('button', { name: '공식 법령 최신본 적재' }).count(), 0);
+    assert.equal(await branch.page.getByRole('button', { name: '근거 자료 백업 내려받기' }).count(), 0);
+    assert.deepEqual(branch.errors, []);
+    console.log('PASS: writer bundles 평가표+이행결과서, 감독자 and 담당자(성명) defaults, approver approves once and only views, collector assigns, follows progress, asks for 보완, sends 정기평가 and sets roles, stamped approval box and 평가자 line, 관내 전체 print, branch limits');
   } finally { await browser?.close(); await new Promise(r => server.close(r)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
