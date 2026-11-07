@@ -80,23 +80,22 @@ async function main() {
   const chainOf = (id, doc = 'assessment') => Array.from(steps(id)[doc].chain || [], s => `${s.id}:${s.roles.join('+')}`);
   try {
     assert.equal(isSafetyMgr(USERS.carrier), false);
-    // Visibility: writers see their own, a 과장 the items of the writers they approve, the collector and chief all of the
-    // office; the head office sees no branch item before approval; app reports reach only the collector.
+    // Visibility: writers see their own, the collector all of the office; reviewers (과장·국장·총괄국장) see nothing until
+    // an item is sent up to them; the head office sees no branch item before approval; app reports reach only the collector.
     assert.deepEqual(await ids('post'), ['H1']);
     assert.deepEqual(await ids('comm'), ['H3']);
-    assert.deepEqual(await ids('sales'), ['H1']);
-    assert.deepEqual(await ids('logi'), ['H2', 'H3']);
+    assert.deepEqual(await ids('sales'), []);
+    assert.deepEqual(await ids('logi'), []);
     assert.deepEqual(await ids('hq'), ['H1', 'H2', 'H3']);
-    assert.deepEqual(await ids('chief'), ['H1', 'H2', 'H3']);
+    assert.deepEqual(await ids('chief'), []);
     assert.deepEqual(await ids('dd'), ['D1', 'D2']);
-    assert.deepEqual(await ids('ddHead'), ['D1', 'D2']);
+    assert.deepEqual(await ids('ddHead'), [], 'the 국장 sees nothing before the 담당자 sends it');
     assert.deepEqual((await state('hq')).inbox.map(it => it.id), ['I1']);
     assert.deepEqual((await state('post')).inbox, []);
     const hqState = await state('hq');
     assert.equal(hqState.office.role, 'collector'); assert.equal(hqState.me.title, '서무팀장');
     assert.equal(hqState.bundles, undefined, 'no period bundles any more');
     assert.ok(hqState.accounts.some(a => a.id === 'ddHead'));
-    assert.equal((await state('sales')).registered.every(it => it.readOnly), true, 'a 과장 only views');
 
     // 배분: only the collector, only to a writer of the same office.
     assert.equal((await call('post', 'POST', '/api/risk/items/I1/assign', { writerId: 'post' })).status, 404);
@@ -108,18 +107,21 @@ async function main() {
 
     // Edits: only the assigned writer.
     assert.equal((await patch('hq', 'H1', { owner: 'x' })).status, 403);
-    assert.equal((await patch('sales', 'H1', { owner: 'x' })).status, 403);
+    assert.equal((await patch('sales', 'H1', { owner: 'x' })).status, 404, 'not visible before it is sent up');
     assert.equal((await patch('logi', 'H1', { owner: 'x' })).status, 404);
     assert.equal((await patch('post', 'H1', { owner: '영업과장' })).status, 200);
 
     // 결재선: 우편팀장 → 영업과장 → 서무팀장 확인 → 우편물류과장 → 총괄국장, one step at a time.
-    assert.equal((await act('sales', 'H1', 'assessment', 'request')).status, 403, 'only the writer sends it');
+    assert.equal((await act('sales', 'H1', 'assessment', 'request')).status, 404, 'a reviewer cannot even see it before it is sent');
     assert.equal((await act('post', 'I1', 'assessment', 'request')).status, 400, 'a risk level first');
     assert.equal((await act('post', 'H1', 'assessment', 'request')).status, 200);
     assert.deepEqual(chainOf('H1'), ['sales:supervisor', 'hq:collector', 'logi:logistics', 'chief:chief']);
     assert.equal((await patch('post', 'H1', { owner: 'x' })).status, 409, 'fixed while pending');
     assert.equal((await act('post', 'H1', 'assessment', 'request')).status, 409);
     assert.ok((await ids('logi')).includes('H1'), 'the 우편물류과장 sees what is on their 결재선');
+    assert.deepEqual(await ids('sales'), ['H1']); assert.deepEqual(await ids('chief'), ['H1']);
+    assert.equal((await state('sales')).registered.every(it => it.readOnly), true, 'a 과장 only views');
+    assert.equal((await patch('sales', 'H1', { owner: 'x' })).status, 403);
     assert.equal((await act('logi', 'H1', 'assessment', 'approve')).status, 403, 'not their turn yet');
     assert.equal((await act('post', 'H1', 'assessment', 'approve')).status, 403);
     for (const who of ['sales', 'hq', 'logi']) assert.equal((await act(who, 'H1', 'assessment', 'approve')).status, 200, who);
@@ -179,6 +181,7 @@ async function main() {
     assert.equal((await act('dd', 'D2', 'assessment', 'request')).status, 400, 'no risk level');
     await act('dd', 'D1', 'assessment', 'request');
     assert.deepEqual(chainOf('D1'), ['ddHead:chief']);
+    assert.deepEqual(await ids('ddHead'), ['D1'], 'the 국장 sees it once sent, D2 stays hidden');
     assert.ok(!(await ids('hq')).includes('D1'), 'pending branch items stay hidden');
     assert.equal((await act('ddHead', 'D1', 'assessment', 'approve')).status, 200);
     assert.ok((await ids('hq')).includes('D1'));

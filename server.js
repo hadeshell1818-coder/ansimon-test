@@ -1906,10 +1906,9 @@ function riskItemVisible(u, it) {
   if (!isSafetyMgr(u)) return false;
   const role = riskRole(u), own = itemOfficeCode(it) === userOfficeCode(u);
   if (own) {
-    if (role.collector || role.chief || inChain(it, u.id)) return true;
-    if (role.writer && (it.assignedTo === u.id || (!it.assignedTo && it.createdById === u.id))) return true;
-    if (role.approver) { const writer = accountById(it.assignedTo); return !!writer && riskRole(writer).supervisorId === u.id; }
-    return false;
+    // Reviewers (과장·국장·총괄국장) see an item only once it is sent up to them (2026-11-07 user decision).
+    if (role.collector || inChain(it, u.id)) return true;
+    return role.writer && (it.assignedTo === u.id || (!it.assignedTo && it.createdById === u.id));
   }
   return userOfficeCode(u) === HEAD_OFFICE_CODE && (role.collector || role.chief) && branchApproved(it);
 }
@@ -2127,7 +2126,7 @@ app.get('/api/risk/export.xlsx', (req, res) => {
     return riskItemVisible(u, it) && (office === 'all' || itemOfficeCode(it) === office)
       && !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
   }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt)));
-  const headers = ['번호', '유해·위험요인', '위험성 수준', '개선대책', '개선예정일', '개선완료일', '담당자', '이행결과서', '관련근거(선택사항)'];
+  const headers = ['번호', '유해·위험요인', '위험성 수준', '개선대책', '개선예정일', '개선완료일', '담당자(성명)', '이행결과서', '관련근거(선택사항)'];
   const border = { top: { style: 'thin', color: { rgb: '9AA4AE' } }, bottom: { style: 'thin', color: { rgb: '9AA4AE' } }, left: { style: 'thin', color: { rgb: '9AA4AE' } }, right: { style: 'thin', color: { rgb: '9AA4AE' } } };
   const workbook = XLSXStyle.utils.book_new();
   const processOf = it => it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '미지정 공정';

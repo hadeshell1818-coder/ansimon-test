@@ -386,14 +386,14 @@ function assessmentGroups(rows){const groups=new Map();rows.forEach(it=>{const k
 function editableCell(it,field,value){const center=['dueDate','owner'].includes(field);return '<td class="'+(center?'center-edit':'l')+' direct-edit"><div contenteditable="true" role="textbox" tabindex="0" aria-label="'+esc(field)+' 직접 수정" data-id="'+esc(it.id)+'" data-field="'+field+'" onblur="saveRiskCell(this)">'+esc(value||'')+'</div></td>'}
 function numberedText(value){return String(value||'').split(/\n+/).map(x=>x.trim().replace(/^[-*•]\s*/,'').replace(/^\d+[.)]\s*/, '')).filter(Boolean).map((x,i)=>(i+1)+'. '+x).join('\n')}
 function assessmentTable(rows,print=false){
- return '<table class="ratable three-step"><colgroup><col style="width:4%"><col style="width:21%"><col style="width:8%"><col style="width:20%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:8%"></colgroup><thead><tr><th>번호</th><th>유해·위험요인<br>(위험한 상황과 사건)</th><th>위험성의 수준<br>(상,중,하)</th><th>개선대책</th><th>개선<br>예정일</th><th>개선<br>완료일</th><th>담당자</th><th>이행결과서</th><th>관련근거<br>(선택사항)</th><th>위험성<br>평가표</th></tr></thead><tbody>'+rows.map((it,i)=>rowHtml(it,i,print)).join('')+'</tbody></table>';
+ return '<table class="ratable three-step"><colgroup><col style="width:4%"><col style="width:21%"><col style="width:8%"><col style="width:20%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:8%"></colgroup><thead><tr><th>번호</th><th>유해·위험요인<br>(위험한 상황과 사건)</th><th>위험성의 수준<br>(상,중,하)</th><th>개선대책</th><th>개선<br>예정일</th><th>개선<br>완료일</th><th>담당자<br>(성명)</th><th>이행결과서</th><th>관련근거<br>(선택사항)</th><th>위험성<br>평가표</th></tr></thead><tbody>'+rows.map((it,i)=>rowHtml(it,i,print)).join('')+'</tbody></table>';
 }
 function renderTable(){
  const rows=assessmentRows();
  const groups=assessmentGroups(rows);
  const processes=groups.map(([name])=>name);
  if(!processes.includes(processOutput)) processOutput='';
- const grouped=groups.map(([name,items])=>{const evaluators=[...new Set(items.map(it=>it.evaluator||it.assessedBy).filter(Boolean))];const locked=items.some(it=>it.readOnly);const office=shownOffice()==='all'?'<b class="office-tag">'+esc(officeName(itemOffice(items[0])))+'</b>':'';return '<section class="process-group"><header>'+office+(locked?'<b class="process-name-edit" style="background:none;border:0">'+esc(name)+'</b>':'<input class="process-name-edit" aria-label="공정명 직접 수정" value="'+esc(name)+'" data-ids="'+esc(JSON.stringify(items.map(x=>x.id)))+'" onchange="saveProcessGroup(this)">')+'<span class="process-evaluator">안전관리 담당자: '+esc(evaluators.join(', ')||'-')+'</span></header>'+assessmentTable(items)+'</section>'}).join('');
+ const grouped=groups.map(([name,items])=>{const locked=items.some(it=>it.readOnly);const office=shownOffice()==='all'?'<b class="office-tag">'+esc(officeName(itemOffice(items[0])))+'</b>':'';return '<section class="process-group"><header>'+office+(locked?'<b class="process-name-edit" style="background:none;border:0">'+esc(name)+'</b>':'<input class="process-name-edit" aria-label="공정명 직접 수정" value="'+esc(name)+'" data-ids="'+esc(JSON.stringify(items.map(x=>x.id)))+'" onchange="saveProcessGroup(this)">')+'<span class="process-evaluator">□ 평가일: '+esc(assessmentStart)+' ~ '+esc(assessmentEnd)+'　□ 평가자: '+esc(assessorsText(items))+'</span></header>'+assessmentTable(items)+'</section>'}).join('');
  const count=level=>rows.filter(it=>it.riskLevel===level).length;
  const label=assessmentStart+' ~ '+assessmentEnd;
  const canAdd=(!R.office||R.me?.writer||R.me?.collector)&&(shownOffice()===(R.office?.code||HEAD_CODE));const lockNote=rows.some(it=>it.readOnly)?'<p class="workspace-note">'+(!(R.me?.writer||R.me?.collector)?'결재자 계정은 평가표를 보고 「결재」 탭에서 차례가 된 문서를 결재합니다.':shownOffice()!==(R.office?.code||HEAD_CODE)?'관내국 국장이 결재한 위험성평가입니다. 고칠 내용은 보완 요청합니다.':'결재 대기·결재 완료 항목과 다른 담당자의 항목은 고정됩니다. 결재된 항목은 총괄 안전담당자의 보완 요청으로 다시 엽니다(이행결과서는 평가표 결재 뒤에도 작성).')+'</p>':'';
@@ -404,7 +404,7 @@ function renderTable(){
 function readOnlyRowHtml(it,index){
  const st={assessing:'평가중',assessed:'평가완료',done:'개선완료'}[it.status]||'',result=it.doneAt||it.resultUpdatedAt,photo=it.photoUrl||it.beforePhotoUrl;
  const lock='<button class="btn" onclick="editRow(\''+esc(it.id)+'\')">보기</button><small>'+esc(workflowText(it))+'</small>'+(R.me?.collector&&['assessment','result'].some(s=>stepState(it,s)==='approved')?'<button class="btn danger" onclick="reopenItem(\''+esc(it.id)+'\')">보완 요청</button>':'');
- return '<tr class="locked-row"><td>'+(index+1)+'</td><td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+'<div>'+esc(it.factor||'')+'</div><div class="screen-actions"><span>'+esc(st)+'</span></div></td><td>'+esc(levelText(it))+'</td><td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td><td class="result-cell">'+(result?'<button class="btn" title="이행결과서 보기" aria-label="이행결과서 보기" onclick="showResult(\''+esc(it.id)+'\')"><span class="file-icon">▤</span></button>':(it.canImprove?'<button class="btn" onclick="openImprove(\''+esc(it.id)+'\')">작성</button>':'미작성'))+'</td><td class="l">'+esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))+'</td><td class="result-cell approval-cell">'+lock+'</td></tr>';
+ return '<tr class="locked-row"><td>'+(index+1)+'</td><td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+'<div>'+esc(it.factor||'')+'</div><div class="screen-actions"><span>'+esc(st)+'</span></div></td><td>'+esc(levelText(it))+'</td><td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(personName(it))+'</td><td class="result-cell">'+(result?'<button class="btn" title="이행결과서 보기" aria-label="이행결과서 보기" onclick="showResult(\''+esc(it.id)+'\')"><span class="file-icon">▤</span></button>':(it.canImprove?'<button class="btn" onclick="openImprove(\''+esc(it.id)+'\')">작성</button>':'미작성'))+'</td><td class="l">'+esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))+'</td><td class="result-cell approval-cell">'+lock+'</td></tr>';
 }
 function rowHtml(it,index,print=false){
  if(!print&&it.readOnly) return readOnlyRowHtml(it,index);
@@ -415,7 +415,7 @@ function rowHtml(it,index,print=false){
  const photo=it.photoUrl||it.beforePhotoUrl;
  const deleteButton='<button class="btn danger" onclick="deleteRiskItem(\''+esc(it.id)+'\')">삭제</button>';
  const factorCell=print?'<td class="l factor">'+esc(it.factor||'')+'</td>':'<td class="l factor">'+(photo?'<img class="risk-row-photo" src="'+esc(photo)+'" alt="현장 사진" onclick="event.stopPropagation();lightbox(this.src)">':'')+editableCell(it,'factor',it.factor).replace(/^<td class="l direct-edit">|<\/td>$/g,'')+'<div class="screen-actions"><span>'+esc(st)+'</span>'+deleteButton+'</div></td>';
- return '<tr><td>'+(index+1)+'</td>'+factorCell+'<td>'+(print?options:'<select aria-label="위험성 수준" onchange="saveRiskLevel(\''+esc(it.id)+'\',this.value)">'+riskLevelOptions(it.riskLevel)+'</select>')+(!it.riskLevel?'<small>'+esc(levelText(it))+'</small>':'')+'</td>'+ (print?'<td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(it.owner||'')+'</td>':editableCell(it,'reduction',numberedText(it.reduction))+editableCell(it,'dueDate',it.dueDate)+ '<td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td>'+editableCell(it,'owner',it.owner))+'<td class="result-cell">'+(print?'작성':resultButton)+'</td>'+(print?'<td class="l">'+esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))+'</td>':editableCell(it,'referenceText',numberedText(RiskReferences.conciseReferences(it.referenceText))))+(print?'<td>'+formLabel+'</td>':'<td class="result-cell approval-cell"><button class="btn" onclick="editRow(\''+esc(it.id)+'\')">'+formLabel+'</button>'+'<small>'+esc(workflowText(it))+'</small>'+'</td>')+'</tr>';
+ return '<tr><td>'+(index+1)+'</td>'+factorCell+'<td>'+(print?options:'<select aria-label="위험성 수준" onchange="saveRiskLevel(\''+esc(it.id)+'\',this.value)">'+riskLevelOptions(it.riskLevel)+'</select>')+(!it.riskLevel?'<small>'+esc(levelText(it))+'</small>':'')+'</td>'+ (print?'<td class="l">'+esc(numberedText(it.reduction))+'</td><td>'+esc(it.dueDate||'')+'</td><td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td><td>'+esc(personName(it))+'</td>':editableCell(it,'reduction',numberedText(it.reduction))+editableCell(it,'dueDate',it.dueDate)+ '<td>'+esc(it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''))+'</td>'+editableCell(it,'evaluator',personName(it)))+'<td class="result-cell">'+(print?'작성':resultButton)+'</td>'+(print?'<td class="l">'+esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))+'</td>':editableCell(it,'referenceText',numberedText(RiskReferences.conciseReferences(it.referenceText))))+(print?'<td>'+formLabel+'</td>':'<td class="result-cell approval-cell"><button class="btn" onclick="editRow(\''+esc(it.id)+'\')">'+formLabel+'</button>'+'<small>'+esc(workflowText(it))+'</small>'+'</td>')+'</tr>';
 }
 async function saveRiskCell(cell){const field=cell.dataset.field,id=cell.dataset.id,value=cell.innerText.trim();try{await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify({[field]:value})});toast('평가표 항목을 저장했습니다')}catch(e){toast(e.message);await load()}}
 async function approveExternalEvidence(){const sources=riskAdviceDraft?.externalSources||[];if(!sources.length){toast('승인할 외부자료가 없습니다.');return}try{const result=await api('/api/safety-knowledge/approve-external',{method:'POST',body:JSON.stringify({sources})});toast((result.count||0)+'건의 외부자료를 근거자료실에 저장했습니다.')}catch(e){toast(e.message)}}
@@ -453,7 +453,7 @@ async function printRiskDocument(title,body,landscape=false,{fitOnePage=false}={
 }
 // Separate so tests can stand in for the browser's print dialog.
 function printFrame(w){w.focus();w.print()}
-function assessmentPrintTable(rows){return '<table class="ratable"><colgroup>'+[4,21,7,25,8,8,7,8,12].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead><tr>'+['번호','유해·위험요인','위험성 수준','개선대책','개선예정일','개선완료일','담당자','이행결과서','관련근거'].map(title=>'<th>'+title+'</th>').join('')+'</tr></thead><tbody>'+rows.map((it,index)=>'<tr>'+[index+1,it.factor||'',levelText(it),numberedText(it.reduction),it.dueDate||'',it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''),it.owner||'',it.doneAt||it.resultUpdatedAt?'작성 완료':'미작성',numberedText(RiskReferences.conciseReferences(it.referenceText))].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
+function assessmentPrintTable(rows){return '<table class="ratable"><colgroup>'+[4,21,7,25,8,8,7,8,12].map(width=>'<col style="width:'+width+'%">').join('')+'</colgroup><thead><tr>'+['번호','유해·위험요인','위험성 수준','개선대책','개선예정일','개선완료일','담당자(성명)','이행결과서','관련근거'].map(title=>'<th>'+title+'</th>').join('')+'</tr></thead><tbody>'+rows.map((it,index)=>'<tr>'+[index+1,it.factor||'',levelText(it),numberedText(it.reduction),it.dueDate||'',it.completedDate||(it.doneAt?it.doneAt.slice(0,10):''),personName(it),it.doneAt||it.resultUpdatedAt?'작성 완료':'미작성',numberedText(RiskReferences.conciseReferences(it.referenceText))].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
 // One document per office (관내 전체 prints each office on its own pages), each with its approval box at the top right.
 // 관내 전체: the head office first and each branch after it in the office order, one after another without a page break,
 // so the whole set prints as one report for the regional office (2026-11-05 user decision).
@@ -490,6 +490,8 @@ async function deleteRiskItem(id){
 
 // 감독자 default: the writer's 결재자 from the role settings (과장; a branch's 국장); the officer can change it.
 function syncFormFromItem(it){const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v};set('e-reduction',numberedText(it.reduction));set('e-reference',numberedText(RiskReferences.conciseReferences(it.referenceText)));if(it.riskLevel)set('e-level',it.riskLevel)}
+// 담당자(성명): the employee who writes the assessment (2026-11-07: a name, never the 감독자 or whoever opens it).
+function personName(it){return it.evaluator||it.assignedName||accountOf(it.assignedTo)?.name||''}
 function defaultSupervisor(it){const w=accountOf(it.assignedTo)||accountOf(R.me?.id),s=w&&accountOf(w.supervisorId);return s?s.name:''}
 // The 위험성평가표 form. A written item opens with what was written (risk level, measures, references) so it can be read
 // and corrected; a fixed item (other office, awaiting or holding approval, a head) opens read-only.
@@ -503,12 +505,12 @@ function editRow(id){
     ${(it.photoUrl||it.beforePhotoUrl)?`<img class="evidence-photo" src="${esc(it.photoUrl||it.beforePhotoUrl)}" alt="신고 원본 사진" onclick="lightbox(this.src)">`:''}
     ${it.sourceReport?`<p class="hint">신고자에게는 평가 뒤 유해·위험요인·위험성 수준·개선대책·개선예정일이 「진행 중」으로, 이행결과서를 쓰면 이행결과서 전체가 「처리 완료」로 자동 공개됩니다(산업안전보건법 제36조제4항·시행규칙 제37조의3).</p>`:''}
     <p>${esc(it.note||'')}</p>
-    <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"${dis}></div><div class="fld"><label>담당자</label><input id="e-evaluator" value="${esc(it.evaluator||it.assessedBy||me.name||'')}"${dis}></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor"${dis}>${esc(it.factor||d.factor||'')}</textarea></div>
+    <section class="form-section"><h4>평가 정보</h4><div class="form-grid"><div class="fld"><label>공정명</label><input id="e-target" value="${esc(it.customProcess||it.assessmentTarget||procName(it.proc))}"${dis}></div><div class="fld"><label>담당자(성명)</label><input id="e-evaluator" value="${esc(personName(it))}" placeholder="담당 직원 이름"${dis}></div></div><div class="fld"><label>유해·위험요인</label><textarea id="e-factor"${dis}>${esc(it.factor||d.factor||'')}</textarea></div>
     ${locked?'':`<div class="ai-draft-action"><button id="risk-advice-button" class="btn" type="button" onclick="requestRiskAdvice('${id}')">AI로 초안 작성</button><small>관련 법령·지침을 찾아 개선대책과 관련근거를 자동으로 채웁니다. 이후 직접 수정할 수 있습니다.</small></div><div id="risk-advice-result">${it.aiAdvice?'<div class="ai-box"><b>이전 AI 초안 검토 이력</b><p>'+esc(it.aiAdvice.rationale||'')+'</p><p>'+esc(it.aiAdvice.limitations||'')+'</p>'+(it.aiAdvice.answers||[]).map(a=>'<p><b>'+esc(a.question)+'</b><br>'+esc(a.answer)+'</p>').join('')+'</div>':''}</div>${riskChatPanel(id)}`}
     <div class="form-grid"><div class="fld"><label>위험성 수준</label><select id="e-level"${dis}>${riskLevelOptions(it.riskLevel)}</select></div><div></div></div>
     <div class="fld"><label>개선대책</label><textarea id="e-reduction" rows="6"${dis}>${esc(numberedText(it.reduction))}</textarea></div>
     <div class="fld"><label>관련근거 (선택사항)</label><textarea id="e-reference" rows="3"${dis}>${esc(numberedText(RiskReferences.conciseReferences(it.referenceText)))}</textarea></div></section>
-    <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"${dis}></div><div class="fld"><label>감독자</label><input id="e-owner" value="${esc(it.owner||defaultSupervisor(it))}"${dis}></div></div></section>
+    <section class="form-section"><h4>개선계획</h4><div class="form-grid"><div class="fld"><label>개선예정일</label><input id="e-due" value="${esc(it.dueDate||'')}" placeholder="6.30"${dis}></div><div class="fld"><label>감독자(성명)</label><input id="e-owner" placeholder="관리감독자 이름" value="${esc(it.owner||defaultSupervisor(it))}"${dis}></div></div></section>
     <div class="row-btns">
       ${locked?'':`<button class="btn primary" onclick="saveRow('${id}')">저장</button>`}
       ${(it.doneAt||it.resultUpdatedAt)?`<button class="btn" onclick="showResult('${id}')">이행결과서 보기</button>`:it.canImprove?`<button class="btn" onclick="openImprove('${id}')">이행결과서 작성</button>`:''}
@@ -643,10 +645,12 @@ async function requestRiskAdvice(id,answerQuestions=false){
     const explanation='<p><b>현장 적용 판단</b><br>'+esc(d.rationale||'현장 확인 필요')+'</p><p>'+esc(d.limitations||'')+'</p>'+((review.additionalChecks||[]).length?'<p><b>추가 확인사항</b><br>'+esc(review.additionalChecks.join('\n'))+'</p>':'')+riskAdviceSources(d);
     if(review.needsAttention||!review.passed){
       const hasMeasures=Array.isArray(d.measures)&&d.measures.length>0;
-      const notice=d.noEvidence?'공식 근거 검색 결과가 없어 자동 반영을 보류했습니다. 아래 내용은 확인되지 않은 AI 제안입니다.':(review.summary||'근거와 대책의 연결성을 확인해 주세요.');
+      const notice=d.noEvidence?'공식 근거 검색 결과가 없습니다. 아래 대책은 근거가 확인되지 않은 AI 제안입니다.':(review.summary||'근거와 대책의 연결성을 확인해 주세요.');
       const measures=hasMeasures?'<p style="white-space:pre-wrap"><b>개선대책 초안</b>\n'+esc(d.measures.map((m,i)=>(i+1)+'. '+m).join('\n'))+'</p>':'<p>검토 가능한 개선대책이 생성되지 않았습니다. 서버 AI 오류 여부를 확인해 주세요.</p>';
-      const action=hasMeasures?'<button type="button" class="btn primary" onclick="applyRiskAdviceDraft(\''+esc(id)+'\')">담당자 검토 후 초안 반영</button>':'';
-      host.innerHTML='<div class="ai-box"><b>AI 제안 · 검토 필요</b>'+riskUnderstanding(d)+'<p>'+esc(notice)+'</p>'+measures+explanation+action+'</div>';
+      // 2026-11-07 user decision: the draft goes straight into the form boxes (not saved until 「저장」); a draft the user
+      // does not like is simply drafted again with 「AI로 초안 작성」.
+      if(hasMeasures){const fill=(fid,v)=>{const el=$(fid);if(el)el.value=v};fill('e-reduction',body.reduction);fill('e-reference',body.referenceText)}
+      host.innerHTML='<div class="ai-box"><b>'+(hasMeasures?'AI 초안 · 근거 확인 필요':'AI 제안 · 검토 필요')+'</b>'+riskUnderstanding(d)+'<p>'+esc(notice)+'</p>'+measures+(hasMeasures?'<p class="hint">개선대책·관련근거 칸에 넣었습니다. 내용을 확인하고 「저장」을 누르세요. 마음에 들지 않으면 「AI로 초안 작성」을 다시 누르세요.</p>':'')+explanation+'</div>';
       return;
     }
     const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)});
@@ -656,25 +660,6 @@ async function requestRiskAdvice(id,answerQuestions=false){
     host.innerHTML='<div class="ai-box"><b>개선대책과 관련근거 초안</b><small>근거 구분: '+esc(origin)+' · 최종 평가는 담당자가 확인해 주세요.</small>'+riskUnderstanding(d)+'<div class="advice-edit-row"><strong>개선대책</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="reduction" onblur="saveRiskCell(this)">'+esc(body.reduction)+'</div></div><div class="advice-edit-row"><strong>관련근거</strong><div class="advice-edit" contenteditable="true" data-id="'+esc(id)+'" data-field="referenceText" onblur="saveRiskCell(this)">'+esc(body.referenceText)+'</div></div>'+explanation+approval+'</div>';
   }catch(error){if(riskAdviceSession===session&&$('risk-advice-result')===host)host.innerHTML='<small class="workspace-error">'+esc(error.message)+'</small>';}
   finally{if(button){button.disabled=false;button.textContent='AI로 초안 작성'}}
-}
-async function applyRiskAdviceDraft(id){
-  const d=riskAdviceDraft,it=R.registered.find(item=>item.id===id);
-  if(!it||!d||!Array.isArray(d.measures)||!d.measures.length){toast('반영할 초안이 없습니다.');return}
-  if(!confirm('AI 초안은 법적 근거와 현장 적합성이 확인되지 않았습니다. 내용을 검토하고 평가표에 임시 반영하시겠습니까?'))return;
-  const references=adviceReferences(d),session=riskAdviceSession||{};
-  const payload={
-    reduction:numberedText(d.measures.join('\n')),
-    referenceText:numberedText(references.join('\n')),
-    fieldReview:[d.rationale,d.limitations,...(d.review?.additionalChecks||[])].filter(Boolean).join('\n'),
-    aiAdvice:{description:$('e-factor')?.value.trim()||'',answers:session.answers||[],rationale:d.rationale,limitations:d.limitations,evidence:d.evidence||[],review:d.review||{},sourceOrigin:d.sourceOrigin}
-  };
-  try{
-    const saved=await api('/api/risk/items/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(payload)});
-    Object.assign(it,saved.item);syncFormFromItem(it);
-    toast('검토 필요 초안을 반영했습니다. 위험성 등급과 근거를 현장에서 확정해 주세요.');
-    const host=$('risk-advice-result');
-    if(host)host.innerHTML='<div class="ai-box"><b>임시 초안 반영 완료 · 담당자 확인 필수</b><p style="white-space:pre-wrap">'+esc(payload.reduction)+'</p><p>'+esc(d.limitations||'적용 근거 확인이 필요합니다.')+'</p></div>';
-  }catch(error){toast(error.message)}
 }
 function riskChatPanel(id){return '<section class="ai-box"><b>AI 초안 검토 대화</b><p>잘못 이해한 부분을 알려주거나 다른 대책을 요청하세요. 수정 제안은 확인 후 반영할 수 있습니다.</p><div id="risk-chat-messages" style="white-space:pre-wrap"></div><label for="risk-chat-input">검토 질문·현장 정정</label><div class="risk-chat-row"><textarea id="risk-chat-input" maxlength="1500" placeholder="예: 차량 작업이 아니라 수작업 운반입니다. 공간을 넓힐 수 없는데 다른 대책은?"></textarea><button id="risk-chat-send" class="btn" type="button" onclick="sendRiskChat(\''+esc(id)+'\')">AI와 검토</button></div><label><input type="checkbox" id="risk-chat-refresh"> 새로운 근거를 다시 검색</label><div id="risk-chat-proposal" style="white-space:pre-wrap"></div></section>'}
 function renderRiskChat(){const session=riskAdviceSession;if(!session||!$('risk-chat-messages'))return;$('risk-chat-messages').innerHTML=(session.conversation||[]).map(turn=>'<p><b>'+(turn.role==='user'?'담당자':'AI 검토')+'</b><br>'+esc(turn.text)+'</p>').join('')}
