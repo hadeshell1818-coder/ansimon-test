@@ -375,7 +375,7 @@ const townStem = name => name.replace(/(읍|면)$/, '');
 /* 소통실 명부(2026-11-07 사용자 결정): 장흥총괄·대덕의 외근(배달구역 있음).
  * - 알림 대상 단위는 읍·면이다(zones). 팀과 팀 없는 소포배달원의 배달구역이 겹치므로, 한 읍·면을 고르면 그곳을
  *   배달하는 팀원과 소포배달원 모두에게 간다(예: 장흥읍 → 억불팀·예양팀·장흥읍 소포배달). 관산읍/관산면처럼 표기가
- *   다르면 같은 곳으로 본다(읍 표기 우선).
+ *   다르면 같은 곳으로 본다(읍 표기 우선). 받는 사람이 똑같은 읍·면들은 한 지역으로 묶는다(대덕읍·회진면 등).
  * - 명부·공지 화면의 묶음은 팀(groups): 팀이 없으면 관내국은 국 이름(장흥대덕), 총괄국은 배달구역 글.
  *   각 묶음은 실제 배달지역(area, 예: 대덕읍, 회진면)과 그 읍·면(towns)을 가진다. */
 function rosterFromStaff(list, offices) {
@@ -393,11 +393,27 @@ function rosterFromStaff(list, offices) {
     for (const t of townsOf(s.zone)) { const town = townFor(t); g.towns.add(town.id); g.areas.add(town); town.teams.add(g.name); }
     groups.set(key, g);
   }
-  const zones = [...towns.values()].map(({ teams, ...t }) => ({ ...t, area: t.name, places: placesFrom(t.name), teams: [...teams] }));
-  const groupList = [...groups.values()].map(g => ({ id: g.id, kind: g.kind, name: g.name, area: [...g.areas].map(t => t.name).join(', '), towns: [...g.towns] }));
+  // 받는 사람이 똑같은 읍·면은 한 알림 지역으로 묶는다(예: 대덕읍·회진면은 대덕국 집배원 다섯 명이 모두 배달).
+  const townIdsOf = s => [...new Set(townsOf(s.zone).map(t => towns.get(townStem(t)).id))];
+  const membersOf = new Map();
+  for (const s of field) for (const id of townIdsOf(s)) membersOf.set(id, [...(membersOf.get(id) || []), s.id]);
+  const areas = new Map(), areaOfTown = new Map();
+  for (const town of towns.values()) {
+    const key = (membersOf.get(town.id) || []).sort((a, b) => a - b).join(',');
+    const area = areas.get(key) || { towns: [], teams: new Set() };
+    area.towns.push(town); town.teams.forEach(t => area.teams.add(t)); areas.set(key, area);
+  }
+  const zones = [...areas.values()].map(area => {
+    const id = area.towns.length === 1 ? area.towns[0].id : groupId(`읍면:${area.towns.map(t => townStem(t.name)).join('+')}`);
+    area.towns.forEach(t => areaOfTown.set(t.id, id));
+    const name = area.towns.map(t => t.name).join('·');
+    return { id, group: '읍면', name, area: name, towns: area.towns.map(t => t.name), places: placesFrom(area.towns.map(t => t.name).join(' ')), near: [], lat: null, lng: null, teams: [...area.teams] };
+  });
+  const areaIds = ids => [...new Set(ids.map(id => areaOfTown.get(id)))];
+  const groupList = [...groups.values()].map(g => ({ id: g.id, kind: g.kind, name: g.name, area: [...g.areas].map(t => t.name).join(', '), towns: areaIds([...g.towns]) }));
   const roster = field.map(s => {
-    const g = groups.get(groupKey(s)), ids = townsOf(s.zone).map(t => towns.get(townStem(t)).id);
-    return { id: `st${s.id}`, name: s.name, zone: ids[0], zones: [...new Set(ids)], group: g.name, groupId: g.id, phone: formatPhone(s.phone), team: s.team, deliveryZone: s.zone, staff: true };
+    const g = groups.get(groupKey(s)), ids = areaIds(townIdsOf(s));
+    return { id: `st${s.id}`, name: s.name, zone: ids[0], zones: ids, group: g.name, groupId: g.id, phone: formatPhone(s.phone), team: s.team, deliveryZone: s.zone, staff: true };
   });
   return { zones, groups: groupList, roster };
 }
