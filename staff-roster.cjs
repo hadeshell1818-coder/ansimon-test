@@ -267,10 +267,14 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
     const parsed = parseRosterBook(buffer, XLSX, offices);
     return { ...parsed, diff: diffRoster(staff, parsed.rows), total: parsed.rows.length };
   }
-  async function applyImport(buffer, XLSX, by, { disableMissing = false } = {}) {
+  // skipErrors: 고칠 줄(번호 형식 등)은 빼고 나머지만 반영한다. 그때는 빠진 사람 사용 중지를 하지 않는다
+  // (오류 줄의 사람이 「새 명단에 없음」으로 잘못 잡히지 않도록).
+  async function applyImport(buffer, XLSX, by, { disableMissing = false, skipErrors = false } = {}) {
     const preview = await previewImport(buffer, XLSX);
     if (preview.error) return preview;
-    if (preview.errors.length) return { status: 400, error: '엑셀에 고칠 줄이 있습니다. 미리보기의 오류를 고친 뒤 다시 올리세요.', errors: preview.errors };
+    if (!preview.rows.length) return { status: 400, error: preview.errors[0] || '엑셀에서 직원을 찾지 못했습니다.', errors: preview.errors };
+    if (preview.errors.length && !skipErrors) return { status: 400, error: '엑셀에 고칠 줄이 있습니다. 고친 뒤 다시 올리거나 「고칠 줄은 빼고 반영」을 누르세요.', errors: preview.errors };
+    if (preview.errors.length) disableMissing = false;
     const { added, changed, missing } = preview.diff, log = [];
     const inserted = await store.insert(added.map(({ line, ...row }) => row));
     inserted.forEach(replaceRow);
@@ -286,7 +290,7 @@ function createStaffDirectory({ store, users, offices, bcrypt, onChange = () => 
     await store.log(log);
     await refreshLoginIds(by);
     register(); onChange();
-    return { added: inserted.length, changed: changed.length, disabled: disableMissing ? missing.length : 0, missing: disableMissing ? 0 : missing.length };
+    return { added: inserted.length, changed: changed.length, disabled: disableMissing ? missing.length : 0, missing: disableMissing ? 0 : missing.length, skipped: preview.errors.length, total: staff.filter(x => !x.disabled).length };
   }
   async function adminUpdate(id, body, by) {
     const s = staff.find(x => x.id === +id);
