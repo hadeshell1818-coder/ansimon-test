@@ -73,8 +73,15 @@ async function main() {
     const ctl = (await login('jip4', pw, 'safety')).body.token;
     const config = (await call('GET', '/api/safety/config', null, ctl)).body;
     assert.equal(config.rosterSource, 'staff');
-    const team = config.zones.find(z => z.name === '1팀');
-    assert.deepEqual(config.roster.filter(r => r.zone === team.id).map(r => r.name).sort(), ['임꺽정', '홍길동']);
+    const team = config.groups.find(g => g.name === '1팀');
+    assert.deepEqual(config.roster.filter(r => r.groupId === team.id).map(r => r.name).sort(), ['임꺽정', '홍길동']);
+    assert.ok(config.groups.some(g => g.name === '장흥대덕' && g.area === '대덕읍'), 'the branch group shows its real delivery area');
+    // 알림은 읍·면 단위: 장흥읍을 고르면 1팀 두 사람이 받는다.
+    const town = config.zones.find(z => z.name === '장흥읍');
+    const sent = await call('POST', '/api/safety/alerts', { level: 'caution', text: '장흥읍 도로 결빙 주의', zones: [town.id] }, ctl);
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    const alertTargets = (await call('GET', '/api/safety/state', null, ctl)).body.alerts.at(-1)?.targets || sent.body.alert?.targets || [];
+    assert.deepEqual(alertTargets.map(t => typeof t === 'string' ? t : t.id).map(id => config.roster.find(r => r.id === id)?.name).sort(), ['임꺽정', '홍길동']);
     assert.ok(config.roster.some(r => r.name === '심청'), 'the 대덕 carrier too');
     assert.ok(!config.roster.some(r => r.name === '전우치'), 'inside staff are not on the roster');
     assert.ok(config.roster.some(r => r.test && r.name === '집배원1(시험)'));
