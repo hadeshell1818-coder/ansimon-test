@@ -77,7 +77,15 @@ async function main() {
     assert.equal(await writer.page.locator('#tab-inbox').isHidden(), true, 'app reports go to the collector');
     assert.equal(await writer.page.locator('#tab-roles').isHidden(), true);
     assert.equal(await writer.page.locator('#tab-table').getAttribute('class').then(c => c.includes('on')), true);
+    // The table: header line with 평가일·평가자 (no old 「안전관리 담당자」), 담당자(성명) column with the employee's name.
+    const group = writer.page.locator('.process-group').first();
+    assert.match(await group.locator('header').innerText(), /□ 평가일: .*□ 평가자: 관리감독자\(영업과장\), 우편팀장, 담당 직원/);
+    assert.doesNotMatch(await group.locator('header').innerText(), /안전관리 담당자/);
+    assert.match(await group.locator('thead').innerText(), /담당자\s*\(성명\)/);
     await writer.page.getByRole('button', { name: '보기·수정', exact: true }).first().click();
+    assert.equal(await writer.page.locator('label', { hasText: /^담당자\(성명\)$/ }).count(), 1);
+    assert.equal(await writer.page.locator('#e-evaluator').inputValue(), '우편팀장(시험)', '담당자(성명) is the employee, not whoever opens it');
+    assert.equal(await writer.page.locator('label', { hasText: /^감독자\(성명\)$/ }).count(), 1);
     assert.equal(await writer.page.locator('#e-owner').inputValue(), '영업과장(시험)', '감독자 defaults to the writer’s 결재자');
     assert.equal(await writer.page.locator('#modalCard').getByRole('button', { name: '위험성평가표 결재 올리기' }).count(), 1);
     await writer.page.getByRole('button', { name: '닫기', exact: true }).click();
