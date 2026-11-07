@@ -31,11 +31,13 @@ const USERS = {
 };
 const day = '2026-08-10';
 const item = (id, officeCode, assignedTo, extra) => ({ id, officeCode, assignedTo, assignedName: assignedTo && USERS[assignedTo].name, status: 'assessed', createdAt: day, assessmentStartedAt: day, ...extra });
+// An item whose 이행결과서 is already written (one 결재 covers both documents).
+const written = { doneAt: '2026-08-20T00:00:00Z', resultUpdatedAt: '2026-08-20T00:00:00Z', afterRiskLevel: '하', resultNote: '조치 확인' };
 const RISK = { items: [
   { id: 'I1', status: 'inbox', officeCode: 'jangheung', createdAt: day, factor: '창구 앞 매트 들림', source: 'staff' },
   item('H1', 'jangheung', 'post', { customProcess: '접수(창구)', factor: '창구 의자 바퀴 미끄러짐', riskLevel: '중' }),
-  item('H2', 'jangheung', 'hq', { customProcess: '시설 등', factor: '계단 미끄럼 방지 탈락', riskLevel: '상' }),
-  item('H3', 'jangheung', 'comm', { customProcess: '구분', factor: '컨베이어 손끼임', riskLevel: '하' }),
+  item('H2', 'jangheung', 'hq', { customProcess: '시설 등', factor: '계단 미끄럼 방지 탈락', riskLevel: '상', ...written }),
+  item('H3', 'jangheung', 'comm', { customProcess: '구분', factor: '컨베이어 손끼임', riskLevel: '하', ...written }),
   item('D1', 'daedeok', 'dd', { customProcess: '집배', factor: '대덕 계단 넘어짐', riskLevel: '중' }),
   item('D2', 'daedeok', 'dd', { status: 'assessing', customProcess: '집배', factor: '대덕 이륜차 전도' }),
 ] };
@@ -111,75 +113,69 @@ async function main() {
     assert.equal((await patch('logi', 'H1', { owner: 'x' })).status, 404);
     assert.equal((await patch('post', 'H1', { owner: '영업과장' })).status, 200);
 
-    // 결재선: 우편팀장 → 영업과장 → 서무팀장 확인 → 우편물류과장 → 총괄국장, one step at a time.
-    assert.equal((await act('sales', 'H1', 'assessment', 'request')).status, 404, 'a reviewer cannot even see it before it is sent');
-    assert.equal((await act('post', 'I1', 'assessment', 'request')).status, 400, 'a risk level first');
-    assert.equal((await act('post', 'H1', 'assessment', 'request')).status, 200);
+    // One 결재 for the 평가표 together with its 이행결과서 (2026-11-07 user decision): nothing goes up before the
+    // 이행결과서 is written, and a 평가표 alone is refused.
+    assert.equal((await act('post', 'H1', 'assessment', 'request')).status, 400, 'no 평가표 on its own');
+    assert.equal((await act('post', 'H1', 'both', 'request')).status, 400, 'the 이행결과서 is not written yet');
+    assert.equal(steps('H1').assessment?.status ?? null, null, 'nothing half-sent');
+    const improve = await call('post', 'POST', '/api/risk/items/H1/improve', { afterRiskLevel: '하', completedDate: '2026-08-21', resultNote: '바퀴 고정 확인', resultPerson: '우편팀장' });
+    assert.equal(improve.status, 200, JSON.stringify(improve.body));
+    assert.equal(RISK.items.find(it => it.id === 'H1').resultPerson, '우편팀장');
+
+    // 결재선: 우편팀장 → 영업과장 → 서무팀장 확인 → 우편물류과장 → 총괄국장, one step at a time, both documents together.
+    assert.equal((await act('sales', 'H1', 'both', 'request')).status, 404, 'a reviewer cannot even see it before it is sent');
+    assert.equal((await act('post', 'H1', 'both', 'request')).status, 200);
     assert.deepEqual(chainOf('H1'), ['sales:supervisor', 'hq:collector', 'logi:logistics', 'chief:chief']);
+    assert.deepEqual(chainOf('H1', 'result'), chainOf('H1'));
     assert.equal((await patch('post', 'H1', { owner: 'x' })).status, 409, 'fixed while pending');
-    assert.equal((await act('post', 'H1', 'assessment', 'request')).status, 409);
+    assert.equal((await act('post', 'H1', 'both', 'request')).status, 409);
     assert.ok((await ids('logi')).includes('H1'), 'the 우편물류과장 sees what is on their 결재선');
     assert.deepEqual(await ids('sales'), ['H1']); assert.deepEqual(await ids('chief'), ['H1']);
     assert.equal((await state('sales')).registered.every(it => it.readOnly), true, 'a 과장 only views');
     assert.equal((await patch('sales', 'H1', { owner: 'x' })).status, 403);
-    assert.equal((await act('logi', 'H1', 'assessment', 'approve')).status, 403, 'not their turn yet');
-    assert.equal((await act('post', 'H1', 'assessment', 'approve')).status, 403);
-    for (const who of ['sales', 'hq', 'logi']) assert.equal((await act(who, 'H1', 'assessment', 'approve')).status, 200, who);
-    assert.equal(steps('H1').assessment.status, 'pending'); assert.equal(steps('H1').assessment.step, 3);
-    assert.equal((await act('chief', 'H1', 'assessment', 'approve')).status, 200);
-    assert.equal(steps('H1').assessment.status, 'approved'); assert.equal(steps('H1').assessment.approvedBy, '총괄국장');
+    assert.equal((await act('logi', 'H1', 'both', 'approve')).status, 409, 'not their turn yet');
+    assert.equal((await act('post', 'H1', 'both', 'approve')).status, 409);
+    for (const who of ['sales', 'hq', 'logi']) assert.equal((await act(who, 'H1', 'both', 'approve')).status, 200, who);
+    assert.deepEqual([steps('H1').assessment.step, steps('H1').result.step], [3, 3]);
+    assert.equal((await act('chief', 'H1', 'both', 'approve')).status, 200);
+    assert.deepEqual([steps('H1').assessment.status, steps('H1').result.status], ['approved', 'approved']);
+    assert.equal(steps('H1').assessment.approvedBy, '총괄국장');
     assert.equal((await patch('post', 'H1', { owner: 'x' })).status, 409, 'fixed after approval');
+    assert.equal((await act('post', 'H1', 'both', 'request')).status, 409, 'an approved item cannot go up again');
 
     // A person on the line twice signs once: 서무팀장 → 우편물류과장 → 국장; 소통팀장 → 서무팀장 → 우편물류과장(과장 겸) → 국장.
-    await act('hq', 'H2', 'assessment', 'request'); await act('comm', 'H3', 'assessment', 'request');
+    await act('hq', 'H2', 'both', 'request'); await act('comm', 'H3', 'both', 'request');
     assert.deepEqual(chainOf('H2'), ['logi:supervisor+logistics', 'chief:chief']);
     assert.deepEqual(chainOf('H3'), ['hq:collector', 'logi:supervisor+logistics', 'chief:chief']);
-    // 선택 결재: several at once; an item that is not the user's turn is reported, the rest go through.
-    let batch = (await decide('logi', 'approve', [{ id: 'H2', doc: 'assessment' }, { id: 'H3', doc: 'assessment' }])).body;
-    assert.equal(batch.done, 1); assert.match(batch.results.find(r => r.id === 'H3').error, /서무팀장/);
-    assert.equal((await decide('hq', 'approve', [{ id: 'H3', doc: 'assessment' }])).body.done, 1);
-    assert.equal((await decide('logi', 'approve', [{ id: 'H3', doc: 'assessment' }])).body.done, 1);
-    batch = (await decide('chief', 'approve', [{ id: 'H2', doc: 'assessment' }, { id: 'H3', doc: 'assessment' }])).body;
-    assert.equal(batch.done, 2);
-    assert.deepEqual([steps('H2').assessment.status, steps('H3').assessment.status], ['approved', 'approved']);
+    // Several at once (the API still takes a list); an item that is not the user's turn is reported, the rest go through.
+    const both = id => [{ id, doc: 'assessment' }, { id, doc: 'result' }];
+    let batch = (await decide('logi', 'approve', [...both('H2'), ...both('H3')])).body;
+    assert.equal(batch.done, 2); assert.match(batch.results.find(r => r.id === 'H3').error, /서무팀장/);
+    assert.equal((await act('hq', 'H3', 'both', 'approve')).status, 200);
+    assert.equal((await act('logi', 'H3', 'both', 'approve')).status, 200);
+    batch = (await decide('chief', 'approve', [...both('H2'), ...both('H3')])).body;
+    assert.equal(batch.done, 4);
+    assert.deepEqual([steps('H2').assessment.status, steps('H3').result.status], ['approved', 'approved']);
 
-    // Reject (reason required) goes back to the writer; sending again starts the line again; withdraw.
+    // Reject (reason required) goes back to the writer for both documents; sending again starts the line again; withdraw.
     assert.equal((await patch('post', 'I1', { riskLevel: '하', reduction: '1. 매트 교체' })).status, 200);
-    await act('post', 'I1', 'assessment', 'request');
-    assert.equal((await act('sales', 'I1', 'assessment', 'reject', '')).status, 400);
-    assert.equal((await decide('sales', 'reject', [{ id: 'I1', doc: 'assessment' }], '대책 보완')).body.done, 1);
-    assert.equal(steps('I1').assessment.status, 'rejected'); assert.equal(steps('I1').assessment.rejectReason, '대책 보완');
-    assert.equal((await patch('post', 'I1', { reduction: '1. 매트 교체 2. 미끄럼 방지' })).status, 200);
-    await act('post', 'I1', 'assessment', 'request');
-    assert.equal(steps('I1').assessment.step, 0); assert.ok(steps('I1').assessment.chain.every(s => s.status === 'waiting'));
-    assert.equal((await act('sales', 'I1', 'assessment', 'withdraw')).status, 403);
-    assert.equal((await act('post', 'I1', 'assessment', 'withdraw')).status, 200);
-    assert.equal(steps('I1').assessment.status, null);
-
-    // 이행결과서: written after the 평가표, sent after its approval, same line.
-    assert.equal((await act('post', 'H1', 'result', 'request')).status, 400, 'write it first');
     assert.equal((await call('post', 'POST', '/api/risk/items/I1/improve', { afterRiskLevel: '하', completedDate: '2026-08-21', resultNote: '매트 교체 확인' })).status, 200);
-    assert.equal((await act('post', 'I1', 'result', 'request')).status, 400, 'its 평가표 is not approved');
-    const improve = await call('post', 'POST', '/api/risk/items/H1/improve', { afterRiskLevel: '하', completedDate: '2026-08-21', resultNote: '바퀴 고정 확인', resultPerson: '우편팀장' });
-    assert.equal(improve.status, 200, JSON.stringify(improve.body));
-    assert.equal(RISK.items.find(it => it.id === 'H1').resultPerson, '우편팀장');
-    assert.equal((await act('post', 'H1', 'result', 'request')).status, 200);
-    for (const who of ['sales', 'hq', 'logi', 'chief']) assert.equal((await decide(who, 'approve', [{ id: 'H1', doc: 'result' }])).body.done, 1, who);
-    assert.equal(steps('H1').result.status, 'approved');
-
-    // Both together: the 평가표 and the 이행결과서 go up on the same line and are decided together; withdrawing takes both back.
-    item && RISK.items.push(item('H5', 'jangheung', 'post', { customProcess: '접수(창구)', factor: '번호표 전선 걸림', riskLevel: '중', doneAt: '2026-08-22T00:00:00Z', resultUpdatedAt: '2026-08-22T00:00:00Z', afterRiskLevel: '하', resultNote: '정리' }));
-    assert.equal((await act('post', 'H5', 'result', 'request')).status, 400, 'alone it waits for the 평가표');
-    assert.equal((await act('post', 'H5', 'both', 'request')).status, 200);
-    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], ['pending', 'pending']);
-    assert.equal((await act('post', 'H5', 'both', 'withdraw')).status, 200);
-    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], [null, null]);
-    await act('post', 'H5', 'both', 'request');
-    for (const who of ['sales', 'hq', 'logi', 'chief']) assert.equal((await decide(who, 'approve', [{ id: 'H5', doc: 'assessment' }, { id: 'H5', doc: 'result' }])).body.done, 2, who);
-    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], ['approved', 'approved']);
+    await act('post', 'I1', 'both', 'request');
+    assert.equal((await act('sales', 'I1', 'both', 'reject', '')).status, 400);
+    assert.equal((await act('sales', 'I1', 'both', 'reject', '대책 보완')).status, 200);
+    assert.deepEqual([steps('I1').assessment.status, steps('I1').result.status], ['rejected', 'rejected']);
+    assert.equal(steps('I1').assessment.rejectReason, '대책 보완');
+    assert.equal((await patch('post', 'I1', { reduction: '1. 매트 교체 2. 미끄럼 방지' })).status, 200);
+    await act('post', 'I1', 'both', 'request');
+    assert.equal(steps('I1').assessment.step, 0); assert.ok(steps('I1').assessment.chain.every(s => s.status === 'waiting'));
+    assert.equal((await act('sales', 'I1', 'both', 'withdraw')).status, 409);
+    assert.equal((await act('post', 'I1', 'both', 'withdraw')).status, 200);
+    assert.deepEqual([steps('I1').assessment.status, steps('I1').result.status], [null, null]);
+    // An older item whose 평가표 was approved on its own may still send its 이행결과서 alone.
+    RISK.items.push(item('H6', 'jangheung', 'post', { customProcess: '접수(창구)', factor: '옛 항목', riskLevel: '하', doneAt: '2026-08-22T00:00:00Z', resultUpdatedAt: '2026-08-22T00:00:00Z', afterRiskLevel: '하',
+      approvals: { assessment: { status: 'approved', approvedOnce: true, chain: [] } } }));
+    assert.equal((await act('post', 'H6', 'result', 'request')).status, 200);
     RISK.items.pop();
-    const failBoth = (await act('post', 'H1', 'both', 'request'));
-    assert.equal(failBoth.status, 409, 'an approved 평가표 cannot go up again');
 
     // Export: names of the steps that happened; 과장 and 우편물류과장 cells both carry the 우편물류과장 for 소통팀장's item.
     const sheets = await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=jangheung');
@@ -192,12 +188,13 @@ async function main() {
     assert.match(s1[2][0], /□ 평가일: 2026-07-01 ~ 2026-12-31.*□ 평가자: 관리감독자\(영업과장\), 우편팀장, 담당 직원/);
 
     // Branch: the writer sends to the 국장; once approved the head office sees it, read-only.
-    assert.equal((await act('dd', 'D2', 'assessment', 'request')).status, 400, 'no risk level');
-    await act('dd', 'D1', 'assessment', 'request');
+    assert.equal((await act('dd', 'D2', 'both', 'request')).status, 400, 'no risk level');
+    assert.equal((await call('dd', 'POST', '/api/risk/items/D1/improve', { afterRiskLevel: '하', completedDate: '2026-08-21', resultNote: '미끄럼 방지 부착' })).status, 200);
+    await act('dd', 'D1', 'both', 'request');
     assert.deepEqual(chainOf('D1'), ['ddHead:chief']);
     assert.deepEqual(await ids('ddHead'), ['D1'], 'the 국장 sees it once sent, D2 stays hidden');
     assert.ok(!(await ids('hq')).includes('D1'), 'pending branch items stay hidden');
-    assert.equal((await act('ddHead', 'D1', 'assessment', 'approve')).status, 200);
+    assert.equal((await act('ddHead', 'D1', 'both', 'approve')).status, 200);
     assert.ok((await ids('hq')).includes('D1'));
     assert.equal((await state('hq')).registered.find(it => it.id === 'D1').readOnly, true);
     assert.ok(!(await ids('post')).includes('D1'));
@@ -233,7 +230,7 @@ async function main() {
     assert.equal((await call('ddHead', 'POST', '/api/safety-knowledge/index-embeddings')).status, 403);
     assert.notEqual((await call('dd', 'GET', '/api/safety-knowledge')).status, 403);
     assert.notEqual((await call('hq', 'GET', '/api/safety-knowledge/backup')).status, 403);
-    console.log('PASS: roles and visibility, 배분, writer-only edits, per-document 결재선 (과장 → 서무팀장 → 우편물류과장 → 총괄국장, no double signing), turn checks, 선택 결재, reject/resend/withdraw, 이행결과서 after the 평가표, stamped 4-cell box, branch 국장 approval, 보완 요청, settings, library limits');
+    console.log('PASS: roles and visibility, 배분, writer-only edits, one 결재 for the 평가표 with its 이행결과서 on the 결재선 (과장 → 서무팀장 → 우편물류과장 → 총괄국장, no double signing), turn checks, several at once, reject/resend/withdraw, stamped 4-cell box, branch 국장 approval, 보완 요청, settings, library limits');
   } finally { await new Promise(r => server.close(r)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

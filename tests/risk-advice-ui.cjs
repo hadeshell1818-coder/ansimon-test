@@ -39,7 +39,9 @@ async function main(){
   release();await page.locator('#risk-answer-0').waitFor();
   await page.locator('#risk-answer-0').fill('한 개 10kg, 하루 20회');
   await page.getByRole('button',{name:'초안 작성 계속'}).click();
-  await page.getByText('개선대책과 관련근거 초안',{exact:true}).waitFor();
+  await page.getByText('AI 초안을 개선대책·관련근거 칸에 넣었습니다',{exact:true}).waitFor();
+  assert.equal(await page.locator('#risk-advice-result .advice-edit').count(),0,'the draft is not repeated below the form boxes');
+  assert.match(await page.locator('#e-reduction').inputValue(),/\S/);
   await page.getByText('소요 시간: 16.2초 (위험 이해 1.8초 · 근거 찾기 4.1초 · 초안 작성 5.9초 · 검토 2.0초)').waitFor();
   assert.equal(requests[1].answers[0].answer,'한 개 10kg, 하루 20회');
   assert.equal(item.factor,'소포 운반 작업 중 통로 충돌 위험','AI가 원본 위험요인을 덮어쓰지 않음');

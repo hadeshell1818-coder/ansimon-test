@@ -2499,14 +2499,22 @@ function decideApproval(u, it, doc, action, reason) {
 app.post('/api/risk/items/:id/approval/:doc/:action', (req, res) => {
   const u = userFromReq(req), it = RISK.items.find(x => x.id === req.params.id);
   const { doc, action } = req.params, reason = String(req.body?.reason || '').trim().slice(0, 500);
-  if (!it || !(RISK_DOCS.includes(doc) || (doc === 'both' && ['request', 'withdraw'].includes(action))) || !['request', 'withdraw', 'approve', 'reject'].includes(action)) return res.status(404).json({ error: 'not found' });
+  if (!it || !(RISK_DOCS.includes(doc) || doc === 'both') || !['request', 'withdraw', 'approve', 'reject'].includes(action)) return res.status(404).json({ error: 'not found' });
   let failed = null;
+  // One 결재 for both documents (2026-11-07 user decision): the 평가표 goes up only together with its written 이행결과서.
+  // A 이행결과서 alone is accepted only for an older item whose 평가표 was already approved on its own.
+  if (action === 'request' && doc === 'assessment') return res.status(400).json({ error: '평가표와 이행결과서를 한 번에 올립니다. 이행결과서를 작성한 뒤 결재를 올리세요.' });
   // both (2026-11-07 user decision): the 평가표 and the 이행결과서 go up together on the same 결재선 and are decided
   // together from the queue; if the 이행결과서 cannot go, the 평가표 is not sent either.
   if (doc === 'both' && action === 'request') {
     const before = approvalsOf(it).assessment;
     failed = requestApproval(u, it, 'assessment') || requestApproval(u, it, 'result', { withAssessment: true });
     if (failed) it.approvals = { ...approvalsOf(it), assessment: before };
+  } else if (doc === 'both' && action !== 'withdraw') {
+    // approve / reject from the 결재 cell: every document of the item that is the user's turn, together.
+    const docs = RISK_DOCS.filter(d => currentStep(approvalsOf(it)[d])?.id === u.id);
+    if (!docs.length) failed = { status: 409, error: '지금 결재할 차례가 아닙니다.' };
+    for (const d of docs) { failed = decideApproval(u, it, d, action, reason); if (failed) break; }
   } else if (doc === 'both') {
     const pending = RISK_DOCS.filter(d => approvalsOf(it)[d]?.status === 'pending' && approvalsOf(it)[d].requestedById === u.id);
     if (!pending.length) failed = { status: 409, error: '취소할 결재가 없습니다.' };
