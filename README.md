@@ -28,7 +28,7 @@ UI 테스트는 기본 Chromium으로 실행됩니다. Edge 등 다른 브라우
 | `load-knowledge-rows.cjs 파일.json…` | 위 두 도구가 만든 JSON을 SQL Editor 없이 서버 키(REST)로 적재: 자료는 출처 주소로, 조문·항목은 (자료·버전·위치)로 갱신하고 평가 근거로 쓰이지 않은 옛 버전 항목은 지움. 적재 후 「의미 검색 색인 만들기」와 `supabase/loaded-sources.json` 갱신 |
 | `preview-control.cjs`, `preview-safety.cjs` | 저장·발송 없는 소통실/위험성평가 화면 미리보기 |
 | `simulate-drafts.cjs` | 근거 검색·초안 시뮬레이션(사례별 후보·전달·인용 채점, 후보 저장 `--dump-pool`) |
-| `build-checklist-answers.cjs` | 「우체국 유해위험요인 점검항목(서식)」 401항목마다 근거를 찾아 gpt-4.1로 항목별 개선대책 3~5개를 만들고, 다른 모델이 대책·법적 의무를 조문 원문과 대조해 맞지 않는 근거를 뺌(`local-import/checklist-answers/`). `--refine` 확인된 법적 의무가 대책에 빠진 항목은 의무 이행 대책을 넣고, 항목마다 유사 SIF 사고사례를 찾아 같은 설비·작업·같은 위험 원인일 때만 대책을 보탬(별도 모델이 적용성 재확인). `--sheet` 검토용 엑셀, `--apply` Supabase 항목 본문에(다시 실행하면 바뀐 항목만 갱신) "AI 작성·담당자 검토 전"으로 반영(그 뒤 「의미 검색 색인 만들기」) |
+| `build-checklist-answers.cjs` | 「우체국 유해위험요인 점검항목(서식)」 409항목마다 근거를 찾아 gpt-4.1로 항목별 개선대책 3~5개를 만들고, 다른 모델이 대책·법적 의무를 조문 원문과 대조해 맞지 않는 근거를 뺌(`local-import/checklist-answers/`). `--refine` 확인된 법적 의무가 대책에 빠진 항목은 의무 이행 대책을 넣고, 항목마다 유사 SIF 사고사례를 찾아 같은 설비·작업·같은 위험 원인일 때만 대책을 보탬(별도 모델이 적용성 재확인). `--sheet` 검토용 엑셀, `--apply` Supabase 항목 본문에(다시 실행하면 바뀐 항목만 갱신) "AI 작성·담당자 검토 전"으로 반영(그 뒤 「의미 검색 색인 만들기」) |
 | `simulate-direct-measures.cjs --label 이름` | 일상 표현 위험 36건(`seed-assets/direct-measure-cases.json`)으로 실제 초안을 만들고 gpt-4.1이 직접 대책 포함·맞는 대책 수·엉뚱한 근거를 채점(`--set 변수=값`으로 설정 비교) |
 | `simulate-sectors.cjs` | 장흥 점검표 항목으로 만든 공정별 사례의 검색 순위·법령 판정 |
 | `rerank-eval.cjs`, `rerank_onnx.py`, `rerank-cohere.cjs` | 저장한 후보로 재순위 방식 비교(검색 순서·bge-reranker·Cohere) |
