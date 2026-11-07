@@ -84,14 +84,16 @@ async function main() {
   assert.deepEqual(roster.map(r => r.name).sort(), ['가나다', '김동명', '나다라', '다라마']);
   assert.deepEqual(groups.map(g => [g.name, g.kind, g.area]), [['1팀', 'team', '장흥읍'], ['장흥읍', 'zone', '장흥읍'], ['장흥대덕', 'branch', '대덕읍, 회진면']]);
   const town = name => zones.find(z => z.name === name);
-  assert.deepEqual(zones.map(z => z.name), ['장흥읍', '대덕읍', '회진면']);
+  assert.deepEqual(zones.map(z => z.name), ['장흥읍', '대덕읍·회진면'], 'areas with exactly the same carriers become one (대덕읍·회진면)');
   assert.deepEqual(roster.filter(r => r.zones.includes(town('장흥읍').id)).map(r => r.name).sort(), ['가나다', '나다라', '다라마'], 'the parcel carrier of 장흥읍 gets 1팀 alerts too');
   assert.deepEqual(town('장흥읍').teams, ['1팀', '장흥읍']);
   assert.ok(town('장흥읍').places.includes('장흥'), 'place names suggest the area for a reported location');
   assert.equal(roster.find(r => r.name === '가나다').group, '1팀');
   // 관산읍/관산면처럼 표기가 다른 같은 읍·면은 하나로 본다.
   const mixed = S.rosterFromStaff([{ id: 1, officeCode: 'jangheung', team: '천관팀', zone: '용산면,관산면', name: 'a', phone: '01011112222' }, { id: 2, officeCode: 'jangheung', team: '', zone: '관산읍,용산면', name: 'b', phone: '01011113333' }], OFFICES);
-  assert.deepEqual(mixed.zones.map(z => z.name), ['용산면', '관산읍']);
+  assert.deepEqual(mixed.zones.map(z => z.name), ['용산면·관산읍'], 'same place spelled 관산면/관산읍, and the same carriers for both towns');
+  const overlap = S.rosterFromStaff([{ id: 1, officeCode: 'jangheung', team: '억불팀', zone: '장흥읍,부산면,안양면', name: 'a', phone: '01011112222' }, { id: 2, officeCode: 'jangheung', team: '', zone: '장흥읍', name: 'b', phone: '01011113333' }], OFFICES);
+  assert.deepEqual(overlap.zones.map(z => [z.name, overlap.roster.filter(r => r.zones.includes(z.id)).map(r => r.name).join('')]), [['장흥읍', 'ab'], ['부산면·안양면', 'a']], 'a team member is listed under every area the team delivers');
 
   // 가입: 이름+번호가 맞아야 하고 동의·8자 이상 비밀번호가 필요하다. 이미 가입된 사람은 안내만.
   assert.equal((await dir.signup({ name: '가나다', phone: '01011110001', password: 'abcdefgh', consent: false })).status, 400);
