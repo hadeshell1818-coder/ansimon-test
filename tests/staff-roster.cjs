@@ -51,6 +51,12 @@ async function main() {
   assert.deepEqual(messyParsed.errors, []);
   assert.deepEqual(messyParsed.rows.map(r => [r.name, r.phone, r.officeCode, r.team, r.zone, r.duty]), [['가나다', '01011110001', 'jangheung', '1팀', '장흥읍', '집배'], ['나다라', '01011110002', 'daedeok', '', '대덕읍', '집배']]);
   assert.equal(messyParsed.rows[0].line, 4, 'line numbers count the title rows');
+  // 칸 이름 줄 없이 첫 줄부터 직원인 명단(2026-11-07 실제 파일 모양): 정해진 칸 순서로 읽는다.
+  const bare = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(bare, XLSX.utils.aoa_to_sheet([['장흥우체국', '물류과', '가나다', '010-1111-0001', '우편물류과장'], ['장흥우체국', '물류과', '나다라', '010-1111-0002', '집배', '장흥읍', '1팀'], ['장흥대덕우체국', '', '다라마', '010-1111-0003', '집배', '대덕읍']]), 'Sheet1');
+  const bareParsed = S.parseRosterBook(XLSX.write(bare, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES);
+  assert.deepEqual(bareParsed.errors, []);
+  assert.deepEqual(bareParsed.rows.map(r => [r.line, r.name, r.duty, r.zone, r.team, r.officeCode]), [[1, '가나다', '우편물류과장', '', '', 'jangheung'], [2, '나다라', '집배', '장흥읍', '1팀', 'jangheung'], [3, '다라마', '집배', '대덕읍', '', 'daedeok']]);
   const titleOnly = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(titleOnly, XLSX.utils.aoa_to_sheet([['직원', '연락']]), '시트1');
   assert.match(S.parseRosterBook(XLSX.write(titleOnly, { type: 'buffer', bookType: 'xlsx' }), XLSX, OFFICES).errors[0], /첫 줄: 직원 \| 연락/, 'says what it read');
   assert.equal(S.officeFor('장흥총괄', OFFICES).code, 'jangheung');

@@ -47,7 +47,7 @@ function headerColumns(row) {
   for (const key of Object.keys(COLUMNS)) if (!(col[key] >= 0)) col[key] = -1;
   return col;
 }
-// 엑셀 → 명단 행. 칸 이름 줄이 있는 첫 시트를 쓰고(위쪽 30줄 안), 합친 셀(!merges)은 그 범위 모두 같은 값으로 채운다
+// 엑셀 → 명단 행. 칸 이름 줄이 있는 첫 시트를 쓰고(위쪽 30줄 안, 칸 이름 줄이 없으면 정해진 칸 순서로 읽음), 합친 셀(!merges)은 그 범위 모두 같은 값으로 채운다
 // (팀·국이 여러 줄에 걸친 경우). 숫자로 저장돼 앞의 0이 빠진 휴대폰 번호(1012345678)는 0을 붙여 읽는다.
 function parseRosterBook(buffer, XLSX, offices) {
   const book = XLSX.read(buffer, { type: 'buffer' });
@@ -62,6 +62,21 @@ function parseRosterBook(buffer, XLSX, offices) {
     }
     const found = rowsOf.slice(0, 30).findIndex(row => { const c = headerColumns(row || []); return c.name >= 0 && c.phone >= 0; });
     if (found >= 0) { grid = rowsOf; headerRow = found; col = headerColumns(rowsOf[found]); break; }
+  }
+  if (!grid) {
+    // 칸 이름 줄이 없는 명단: 정해진 순서(우체국명 | 부서 | 이름 | 전화번호 | 담당업무 | 배달구역 | 팀이름)로 읽는다.
+    // 첫 칸이 아는 우체국이고 넷째 칸이 휴대폰 번호인 줄이 있는 시트를 쓴다.
+    for (const sheetName of book.SheetNames) {
+      const sheet = book.Sheets[sheetName];
+      const rowsOf = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: true, raw: false });
+      for (const merge of sheet['!merges'] || []) {
+        const value = rowsOf[merge.s.r]?.[merge.s.c];
+        for (let r = merge.s.r; r <= merge.e.r; r++) for (let c = merge.s.c; c <= merge.e.c; c++) { rowsOf[r] = rowsOf[r] || []; rowsOf[r][c] = value; }
+      }
+      const looksLikeStaff = row => !!(row && officeFor(row[0], offices) && validPhone(normPhone(row[3])));
+      const start = rowsOf.slice(0, 30).findIndex(looksLikeStaff);
+      if (start >= 0) { grid = rowsOf; headerRow = start - 1; col = { office: 0, dept: 1, name: 2, phone: 3, duty: 4, zone: 5, team: 6 }; break; }
+    }
   }
   if (!grid) {
     // 무엇을 읽었는지 보여 준다(전화번호처럼 보이는 숫자가 있는 줄은 개인정보라 보여 주지 않음).
