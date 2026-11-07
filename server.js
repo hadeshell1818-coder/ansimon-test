@@ -64,7 +64,7 @@ if (PERSISTENT_STORAGE && fs.existsSync(path.join(__dirname, 'uploads'))) {
 }
 // Public health check: whether data survives a redeploy (no paths or counts are shown).
 // 명단 반영 여부는 인원 수와 명부 출처만 알려 준다(이름·번호 없음).
-function staffHealth() { try { const s = staffDir.status(); return { ready: s.ready, count: s.count, rosterSource: ROSTER_SOURCE, groups: ZONES.length, roster: ROSTER.length }; } catch { return null; } }
+function staffHealth() { try { const s = staffDir.status(); return { ready: s.ready, count: s.count, rosterSource: ROSTER_SOURCE, groups: GROUPS.length, areas: ZONES.length, roster: ROSTER.length }; } catch { return null; } }
 app.get('/api/health', (_req, res) => res.json({ ok: true, storage: { persistent: PERSISTENT_STORAGE }, staff: staffHealth() }));
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -1152,9 +1152,11 @@ let ZONES = structuredClone(POSTAL_PROTOTYPE.zones);
 let ROSTER = structuredClone(POSTAL_PROTOTYPE.roster);
 // 'staff': 소통실 명부·팀을 직원 명단에서 자동으로 만든다(명단 올린 뒤). 그때는 소통실 화면에서 명부를 고치지 않는다.
 let ROSTER_SOURCE = 'manual';
+// 명단으로 만든 명부의 표시 묶음(팀·장흥대덕·팀 없는 배달구역). 알림 대상 단위(ZONES)는 읍·면이다.
+let GROUPS = [];
 const zoneById = id => ZONES.find(z => z.id === id);
 const rosterById = id => ROSTER.find(r => r.id === id);
-const carrierLabel = r => r ? `${r.name}(${zoneById(r.zone)?.name || r.zone})` : '-';
+const carrierLabel = r => r ? `${r.name}(${(r.group || zoneById(r.zone)?.name || r.zone)})` : '-';
 const callLabel = c => c.callerName
   ? `${c.callerName}${c.zoneName ? '(' + c.zoneName + ')' : ''}`
   : (rosterById(c.carrierId) ? carrierLabel(rosterById(c.carrierId)) : '발신자 미상');
@@ -1241,7 +1243,7 @@ function withNeighbors(ids) {
 function stubDraft(text, h) {
   const t = String(text || '').trim();
   let base = matchZones(t);
-  if (!base.length) { const r = rosterById(h.carrierId); if (r) base = [r.zone]; }
+  if (!base.length) { const r = rosterById(h.carrierId); if (r) base = Array.isArray(r.zones) && r.zones.length ? [...r.zones] : [r.zone]; }
   if (!base.length) { const n = nearestZone(h.lat, h.lng); if (n) base = [n]; }
   const level = URGENT_WORDS.some(w => t.includes(w)) ? 'urgent' : 'caution';
   const body = t ? t.replace(/\s+/g, ' ').slice(0, 80).replace(/[.!?]*$/, '.') : '현장 위험 신고가 접수되었습니다.';
@@ -1265,11 +1267,12 @@ async function openaiTranscribe(buf, mime, ext) {
 async function openaiDraft(text, h) {
   const key = process.env.OPENAI_API_KEY; if (!key || !text) return null;
   const reporter = rosterById(h.carrierId);
-  const zoneList = ZONES.map(z => `${z.id}: ${z.name}(${z.area}) 지명:${z.places.join(',')} 인접:${z.near.join(',')}`).join('\n');
+  const zoneList = ZONES.map(z => `${z.id}: ${z.name}(${z.area})${Array.isArray(z.teams) && z.teams.length ? ' 배달: ' + z.teams.join(',') : ''} 지명:${z.places.join(',')} 인접:${z.near.join(',')}`).join('\n');
+  const reporterZones = reporter ? (Array.isArray(reporter.zones) && reporter.zones.length ? reporter.zones : [reporter.zone]).map(id => zoneById(id)?.name || id).join(', ') : '';
   const prompt = `우체국 집배원이 배달 중 발견한 위험을 음성으로 신고했습니다. 같은 우체국 집배원들에게 보낼 안전 알림 초안을 만드세요.
 신고 내용: "${text}"
-신고자 담당 구역: ${reporter ? reporter.zone : '알 수 없음'}
-집배 구역 목록:
+신고자 담당 구역: ${reporterZones || '알 수 없음'}
+집배 구역 목록(읍·면 단위면 그 읍·면을 배달하는 팀·배달원 모두에게 간다):
 ${zoneList}
 
 규칙:
@@ -1320,8 +1323,9 @@ function hazardForCtl(h) {
     audioFile: undefined, photoFile: undefined, dups: dupHints(h),
   };
 }
+// 알림 대상: 고른 읍·면(옛 명부는 집배구) 중 하나라도 배달하면 받는다. 표시용 소속은 팀(group), 없으면 집배구 이름.
 function alertTargets(zones) {
-  return ROSTER.filter(r => zones === 'all' || (Array.isArray(zones) && zones.includes(r.zone))).map(r => r.id);
+  return ROSTER.filter(r => zones === 'all' || (Array.isArray(zones) && (Array.isArray(r.zones) && r.zones.length ? r.zones : [r.zone]).some(z => zones.includes(z)))).map(r => r.id);
 }
 const isToday = iso => kstDate(new Date(iso).getTime()) === kstDate();
 
@@ -1337,7 +1341,7 @@ app.get('/api/safety/state', (req, res) => {
   const today = kstDate();
   if (isSafetyCtl(u)) {
     return res.json({
-      role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, rosterSource: ROSTER_SOURCE, levels: LEVELS,
+      role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, groups: GROUPS, rosterSource: ROSTER_SOURCE, levels: LEVELS,
       push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
       calls: SAFE.calls.filter(c => isToday(c.at)).map(callForCtl),
@@ -1347,7 +1351,7 @@ app.get('/api/safety/state', (req, res) => {
   const me = safetyCarrier(u);
   if (!me) return res.json({ role: 'none' });
   res.json({
-    role: 'carrier', today, callNumber: SAFETY_CALL_NUMBER, me: { id: me.id, name: me.name, zone: me.zone, zoneName: zoneById(me.zone)?.name },
+    role: 'carrier', today, callNumber: SAFETY_CALL_NUMBER, me: { id: me.id, name: me.name, zone: me.zone, zoneName: (me.group || zoneById(me.zone)?.name || me.zone) },
     alerts: SAFE.alerts.filter(a => !a.deletedAt && a.targets.includes(me.id) &&
       (isToday(a.createdAt) || (a.repeatUntilAck && !(a.acks || {})[me.id])))
       .map(a => ({ id: a.id, level: a.level, text: a.text, createdAt: a.createdAt,
@@ -1588,7 +1592,7 @@ app.post('/api/safety/calls', (req, res) => {
   const me = safetyCarrier(userFromReq(req)); if (!me) return res.status(403).json({ error: 'forbidden' });
   const b = req.body || {};
   const c = { id: nextSafeId('C'), carrierId: me.id, callerName: me.name,
-    zoneName: zoneById(me.zone)?.name || me.zone, phone: me.phone || '', at: new Date().toISOString(),
+    zoneName: (me.group || zoneById(me.zone)?.name || me.zone), phone: me.phone || '', at: new Date().toISOString(),
     lat: typeof b.lat === 'number' ? b.lat : null, lng: typeof b.lng === 'number' ? b.lng : null, note: '', alertId: null, source: 'app_dial' };
   SAFE.calls.unshift(c); saveSafety(); broadcastSafety();
   res.json({ ok: true, callNumber: SAFETY_CALL_NUMBER });
@@ -1646,7 +1650,7 @@ function ensureSafetyCollections(){
   SAFE.pushSubscriptions = SAFE.pushSubscriptions || {}; SAFE.rosterSnapshots = SAFE.rosterSnapshots || {};
   const today=kstDate();
   if(SAFE.rosterSnapshots[today]){
-    const current=ROSTER.map(r=>({...r,zoneName:zoneById(r.zone)?.name||r.zone}));
+    const current=ROSTER.map(r=>({...r,zoneName:(r.group || zoneById(r.zone)?.name || r.zone)}));
     if(JSON.stringify(current)!==JSON.stringify(SAFE.rosterSnapshots[today])){
       SAFE.rosterSnapshotHistory=SAFE.rosterSnapshotHistory||{};
       SAFE.rosterSnapshotHistory[today]=SAFE.rosterSnapshotHistory[today]||[];
@@ -1658,11 +1662,11 @@ function ensureSafetyCollections(){
 }
 function snapshotRoster(d) {
   ensureSafetyCollections();
-  if (!SAFE.rosterSnapshots[d]) SAFE.rosterSnapshots[d] = ROSTER.map(r => ({ ...r, zoneName: zoneById(r.zone)?.name || r.zone }));
+  if (!SAFE.rosterSnapshots[d]) SAFE.rosterSnapshots[d] = ROSTER.map(r => ({ ...r, zoneName: (r.group || zoneById(r.zone)?.name || r.zone) }));
 }
 function returnRows(d){
   ensureSafetyCollections(); const day=SAFE.returns[d]||{}, absent=SAFE.absences[d]||{};
-  return (SAFE.rosterSnapshots[d] || ROSTER).map(r=>({id:r.id,name:rosterById(r.id)?.name||r.name,zone:r.zone,zoneName:zoneById(r.zone)?.name||r.zoneName||r.zone,phone:rosterById(r.id)?.phone||r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
+  return (SAFE.rosterSnapshots[d] || ROSTER).map(r=>({id:r.id,name:rosterById(r.id)?.name||r.name,zone:r.zone,zoneName:(rosterById(r.id)?.group)||r.group||zoneById(r.zone)?.name||r.zoneName||r.zone,phone:rosterById(r.id)?.phone||r.phone||'',absence:absent[r.id]||null,report:day[r.id]||null}));
 }
 function returnSummary(rows){
   const active=rows.filter(r=>!r.absence), reportedRows=active.filter(r=>r.report), reported=reportedRows.length;
@@ -1820,7 +1824,7 @@ app.get('/api/safety/evidence',(req,res)=>{
   const actionPending=reports.filter(r=>returnActionPending(r.report)).length;
   res.json({start,end,summary:{voice:hazards.length,calls:calls.length,alerts:alerts.length,alertBroadcasts:alertEvents.length,callBroadcasts,alertFollowups:alertFollowups.length,notices:notices.length,alertTargets:eventTargets,alertConfirmed:appConfirmed,alertPhoneConfirmed:phoneConfirmed,noticeTargets:notices.reduce((n,a)=>n+a.targets.length,0),noticeConfirmed:notices.reduce((n,a)=>n+a.targets.filter(id=>a.acks?.[id]).length,0),returnTarget,returnMissing,returnReports:reports.length,bodyIssues:body.length,equipmentIssues:equipment.length,bothIssues,actionPending,normalReturns:reports.filter(r=>!r.report.bodyIssue&&!r.report.equipmentIssue).length,controlConfirmed:reports.filter(r=>r.report.source==='control').length,absences:absences.length},hazards,calls,alerts:alertEvidence,notices:noticeEvidence,returns,daily,healthLedger,equipmentLedger});
 });
-app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER,rosterSource:ROSTER_SOURCE});});
+app.get('/api/safety/config',(req,res)=>{const u=userFromReq(req);if(!isSafetyCtl(u))return res.status(403).json({error:'forbidden'});res.json({zones:ZONES,roster:ROSTER,groups:GROUPS,rosterSource:ROSTER_SOURCE});});
 // 직원 명단으로 만든 명부는 명단(위험성평가 「직원 명단」, 관리자 서무팀장)에서만 고친다. 홈페이지마다 명부를 따로 두지 않는다.
 app.use('/api/safety/config',(req,res,next)=>req.method==='GET'||ROSTER_SOURCE!=='staff'?next():res.status(409).json({error:'집배원 명부는 직원 명단에서 자동으로 만들어집니다. 소속·배달구역·팀은 위험성평가 홈페이지 「직원 명단」(관리자: 서무팀장)에서 고치세요.'}));
 app.get('/api/safety/ledger',(req,res)=>{
@@ -2787,10 +2791,11 @@ const staffDir = staffRoster.createStaffDirectory({ store: staffStore, users: US
 // 시험 집배원(jip11~16)을 명부의 「시험 계정」 묶음에 함께 둔다. 실제 운영을 시작하면 SAFETY_TEST_ROSTER=off.
 const TEST_ROSTER_ON = process.env.SAFETY_TEST_ROSTER !== 'off';
 function applyStaffRoster() {
-  const { zones, roster } = staffRoster.rosterFromStaff(staffDir.active(), RISK_OFFICES);
+  const { zones, groups, roster } = staffRoster.rosterFromStaff(staffDir.active(), RISK_OFFICES);
   if (!roster.length) return;
-  const test = TEST_ROSTER_ON ? POSTAL_PROTOTYPE.roster.filter(r => USERS[r.id]).map(r => ({ ...r, name: `${r.name}(시험)`, zone: 'test', test: true })) : [];
+  const test = TEST_ROSTER_ON ? POSTAL_PROTOTYPE.roster.filter(r => USERS[r.id]).map(r => ({ ...r, name: `${r.name}(시험)`, zone: 'test', zones: ['test'], group: '시험 계정', groupId: 'test', test: true })) : [];
   ZONES = [...zones, ...(test.length ? [{ id: 'test', group: '시험', name: '시험 계정(집배원1~6)', area: '', places: [], near: [], lat: null, lng: null }] : [])];
+  GROUPS = [...groups, ...(test.length ? [{ id: 'test', kind: 'test', name: '시험 계정(집배원1~6)', area: '', towns: ['test'] }] : [])];
   ROSTER = [...roster, ...test];
   ROSTER_SOURCE = 'staff';
   ensureSafetyCollections(); saveSafety(); broadcastSafety();

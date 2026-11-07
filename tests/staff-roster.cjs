@@ -78,14 +78,20 @@ async function main() {
   assert.ok(Object.keys(users).filter(id => users[id].staff).length === 7 && users.jip5, 'staff accounts join the fixed ones');
   assert.ok(store.logs.some(l => l.action === 'added' && l.by === '안전보건담당자'));
 
-  // 소통실 명부: 장흥총괄·대덕 외근만, 팀(없으면 배달구역)별 묶음. 내근·회진은 빠진다.
-  const { zones, roster } = S.rosterFromStaff(dir.active(), OFFICES);
+  // 소통실 명부: 장흥총괄·대덕 외근만. 알림 대상은 읍·면(겹치는 팀·소포배달원 모두), 표시 묶음은 팀
+  // (팀이 없으면 관내국은 국 이름, 총괄국은 배달구역). 내근·회진국은 빠진다.
+  const { zones, groups, roster } = S.rosterFromStaff(dir.active(), OFFICES);
   assert.deepEqual(roster.map(r => r.name).sort(), ['가나다', '김동명', '나다라', '다라마']);
-  assert.equal(zones.length, 3, '1팀, 소포 배달구역, 대덕 배달구역');
-  const team = zones.find(z => z.name === '1팀');
-  assert.equal(roster.filter(r => r.zone === team.id).length, 2);
-  assert.ok(team.places.includes('건산리') && team.places.includes('건산'), 'place names from the 배달구역 suggest the team for a reported location');
-  assert.match(zones.find(z => z.group === '장흥대덕').name, /대덕 · 대덕읍, 회진면/);
+  assert.deepEqual(groups.map(g => [g.name, g.kind, g.area]), [['1팀', 'team', '장흥읍'], ['장흥읍', 'zone', '장흥읍'], ['장흥대덕', 'branch', '대덕읍, 회진면']]);
+  const town = name => zones.find(z => z.name === name);
+  assert.deepEqual(zones.map(z => z.name), ['장흥읍', '대덕읍', '회진면']);
+  assert.deepEqual(roster.filter(r => r.zones.includes(town('장흥읍').id)).map(r => r.name).sort(), ['가나다', '나다라', '다라마'], 'the parcel carrier of 장흥읍 gets 1팀 alerts too');
+  assert.deepEqual(town('장흥읍').teams, ['1팀', '장흥읍']);
+  assert.ok(town('장흥읍').places.includes('장흥'), 'place names suggest the area for a reported location');
+  assert.equal(roster.find(r => r.name === '가나다').group, '1팀');
+  // 관산읍/관산면처럼 표기가 다른 같은 읍·면은 하나로 본다.
+  const mixed = S.rosterFromStaff([{ id: 1, officeCode: 'jangheung', team: '천관팀', zone: '용산면,관산면', name: 'a', phone: '01011112222' }, { id: 2, officeCode: 'jangheung', team: '', zone: '관산읍,용산면', name: 'b', phone: '01011113333' }], OFFICES);
+  assert.deepEqual(mixed.zones.map(z => z.name), ['용산면', '관산읍']);
 
   // 가입: 이름+번호가 맞아야 하고 동의·8자 이상 비밀번호가 필요하다. 이미 가입된 사람은 안내만.
   assert.equal((await dir.signup({ name: '가나다', phone: '01011110001', password: 'abcdefgh', consent: false })).status, 400);

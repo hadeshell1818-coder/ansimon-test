@@ -369,18 +369,37 @@ function placesFrom(text) {
 }
 const groupKey = s => s.team ? `팀:${s.team}` : `구역:${s.officeCode}:${s.zone}`;
 const groupId = key => 'g' + crypto.createHash('sha1').update(key).digest('hex').slice(0, 10);
-// 소통실 명부: 장흥총괄·대덕의 외근(배달구역 있음). 알림·공지 대상 묶음은 팀(팀이 없으면 배달구역)이다.
+// 배달구역 글 → 읍·면 목록. "장흥읍,부산면" → [장흥읍, 부산면]. 읍·면이 없으면 글 전체를 한 지역으로 본다.
+const townsOf = text => { const tokens = String(text || '').split(/[,·/\s()]+/).map(t => t.trim()).filter(Boolean); const towns = tokens.filter(t => /(읍|면)$/.test(t)); return towns.length ? towns : (String(text || '').trim() ? [String(text).trim()] : []); };
+const townStem = name => name.replace(/(읍|면)$/, '');
+/* 소통실 명부(2026-11-07 사용자 결정): 장흥총괄·대덕의 외근(배달구역 있음).
+ * - 알림 대상 단위는 읍·면이다(zones). 팀과 팀 없는 소포배달원의 배달구역이 겹치므로, 한 읍·면을 고르면 그곳을
+ *   배달하는 팀원과 소포배달원 모두에게 간다(예: 장흥읍 → 억불팀·예양팀·장흥읍 소포배달). 관산읍/관산면처럼 표기가
+ *   다르면 같은 곳으로 본다(읍 표기 우선).
+ * - 명부·공지 화면의 묶음은 팀(groups): 팀이 없으면 관내국은 국 이름(장흥대덕), 총괄국은 배달구역 글.
+ *   각 묶음은 실제 배달지역(area, 예: 대덕읍, 회진면)과 그 읍·면(towns)을 가진다. */
 function rosterFromStaff(list, offices) {
   const field = list.filter(s => !s.disabled && s.zone && ['jangheung', 'daedeok'].includes(s.officeCode));
-  const groups = new Map();
+  const towns = new Map(), groups = new Map();
+  const townFor = name => {
+    const stem = townStem(name), found = towns.get(stem);
+    if (found) { if (/읍$/.test(name) && !/읍$/.test(found.name)) found.name = name; return found; }
+    const town = { id: groupId(`읍면:${stem}`), group: '읍면', name, near: [], lat: null, lng: null, teams: new Set() };
+    towns.set(stem, town); return town;
+  };
   for (const s of field) {
-    const key = groupKey(s), office = offices.find(o => o.code === s.officeCode);
-    const g = groups.get(key) || { id: groupId(key), group: s.team ? '팀' : (office && !office.head ? shortOffice(office) : '배달구역'), name: s.team || `${office && !office.head ? shortOffice(office) + ' · ' : ''}${s.zone}`, zones: new Set(), near: [], lat: null, lng: null };
-    g.zones.add(s.zone); groups.set(key, g);
+    const key = groupKey(s), office = offices.find(o => o.code === s.officeCode), branch = !!(office && !office.head);
+    const g = groups.get(key) || { id: groupId(key), kind: s.team ? 'team' : branch ? 'branch' : 'zone', name: s.team || (branch ? shortOffice(office) : townsOf(s.zone).join('·')), towns: new Set(), areas: new Set() };
+    for (const t of townsOf(s.zone)) { const town = townFor(t); g.towns.add(town.id); g.areas.add(town); town.teams.add(g.name); }
+    groups.set(key, g);
   }
-  const zones = [...groups.values()].map(({ zones: set, ...g }) => ({ ...g, area: [...set].join(', ').slice(0, 200), places: placesFrom([...set].join(' ')) }));
-  const roster = field.map(s => ({ id: `st${s.id}`, name: s.name, zone: groupId(groupKey(s)), phone: formatPhone(s.phone), team: s.team, deliveryZone: s.zone, staff: true }));
-  return { zones, roster };
+  const zones = [...towns.values()].map(({ teams, ...t }) => ({ ...t, area: t.name, places: placesFrom(t.name), teams: [...teams] }));
+  const groupList = [...groups.values()].map(g => ({ id: g.id, kind: g.kind, name: g.name, area: [...g.areas].map(t => t.name).join(', '), towns: [...g.towns] }));
+  const roster = field.map(s => {
+    const g = groups.get(groupKey(s)), ids = townsOf(s.zone).map(t => towns.get(townStem(t)).id);
+    return { id: `st${s.id}`, name: s.name, zone: ids[0], zones: [...new Set(ids)], group: g.name, groupId: g.id, phone: formatPhone(s.phone), team: s.team, deliveryZone: s.zone, staff: true };
+  });
+  return { zones, groups: groupList, roster };
 }
 
-module.exports = { parseRosterBook, diffRoster, assignLoginIds, officeFor, normPhone, supabaseStaffStore, memoryStaffStore, createStaffDirectory, rosterFromStaff, placesFrom, COLUMNS };
+module.exports = { parseRosterBook, diffRoster, assignLoginIds, officeFor, normPhone, supabaseStaffStore, memoryStaffStore, createStaffDirectory, rosterFromStaff, placesFrom, townsOf, COLUMNS };
