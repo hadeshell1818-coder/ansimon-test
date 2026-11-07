@@ -4,9 +4,10 @@ const os = require('node:os');
 const express = require('express');
 const { chromium } = require('playwright');
 
-// Risk screens by role (2026-11-07, 2nd decision): the collector assigns app reports, follows progress before approval,
-// asks for 보완 and sets roles; a writer sends each 평가표 and 이행결과서 up one by one; whoever's turn it is approves
-// several at once from the queue and only views the table. Printed forms carry □ 공정명 □ 평가일 □ 평가자 and an approval
+// Risk screens by role (2026-11-07 decisions): the collector assigns app reports, follows progress before approval in
+// the table, asks for 보완 and sets roles; a writer sends the 평가표 with its 이행결과서 in one 결재 from the table's
+// 결재 cell (미결재 → 결재중 → 결재완료, no separate 결재 tab); whoever's turn it is approves in that cell or in the
+// 「결재할 문서」 box above the table, and only views the table. Printed forms carry □ 공정명 □ 평가일 □ 평가자 and an approval
 // box (담당 · 과장 · 우편물류과장 · 국장 at the head office, 담당 · 국장 at a branch) stamped with the names of the steps
 // that happened. 청 보고 is a period export; there is no in-app yearly approval.
 const offices = [{ code: 'jangheung', name: '장흥우체국', head: true }, { code: 'daedeok', name: '장흥대덕우체국', head: false }];
@@ -26,21 +27,24 @@ const H1 = base('H1', { factor: '창구 의자 바퀴 미끄러짐', assignedTo:
 const step = (id, name, title, roles, status = 'done') => ({ id, name, title, roles, status, at: status === 'done' ? today + 'T02:00:00Z' : null });
 const hqChain = status => [step('sales', '영업과장(시험)', '영업과장', ['supervisor'], status), step('hq', '서무팀장(시험)', '서무팀장', ['collector'], status), step('logi', '우편물류과장(시험)', '우편물류과장', ['logistics'], status), step('chief', '총괄국장(시험)', '총괄국장', ['chief'], status)];
 const H3 = base('H3', { factor: '번호표 발행기 전선 걸림', assignedTo: 'post', assignedName: '우편팀장(시험)', doneAt: today + 'T03:00:00Z', resultUpdatedAt: today + 'T03:00:00Z', afterRiskLevel: '하',
-  approvals: { assessment: { status: 'approved', requestedBy: '우편팀장(시험)', requestedById: 'post', chain: hqChain('done'), step: 3, approvedBy: '총괄국장(시험)', approvedOnce: true } } });
+  approvals: { assessment: { status: 'approved', requestedBy: '우편팀장(시험)', requestedById: 'post', chain: hqChain('done'), step: 3, approvedBy: '총괄국장(시험)', approvedOnce: true },
+    result: { status: 'approved', requestedBy: '우편팀장(시험)', requestedById: 'post', chain: hqChain('done'), step: 3, approvedBy: '총괄국장(시험)', approvedOnce: true } } });
+const H4 = base('H4', { factor: '롤파렛트 밑판 미고정', assignedTo: 'post', assignedName: '우편팀장(시험)', doneAt: today + 'T03:00:00Z', resultUpdatedAt: today + 'T03:00:00Z', afterRiskLevel: '하' });
 const D1 = base('D1', { officeCode: 'daedeok', officeName: '장흥대덕우체국', customProcess: '집배', factor: '대덕 계단 넘어짐', assignedTo: 'dd', readOnly: true, canImprove: false,
   approvals: { assessment: { status: 'approved', requestedBy: '대덕 담당자', chain: [step('ddHead', '대덕 국장', '국장', ['chief'])], step: 0, approvedBy: '대덕 국장', approvedOnce: true } } });
-const H1pending = { ...H1, readOnly: true, canImprove: false, approvals: { assessment: { status: 'pending', requestedBy: '우편팀장(시험)', requestedById: 'post', chain: hqChain('waiting'), step: 0 } } };
+const pendingDoc = { status: 'pending', requestedBy: '우편팀장(시험)', requestedById: 'post', chain: hqChain('waiting'), step: 0 };
+const H1pending = { ...H1, doneAt: today + 'T03:00:00Z', resultUpdatedAt: today + 'T03:00:00Z', readOnly: true, canImprove: false, approvals: { assessment: pendingDoc, result: pendingDoc } };
 const me = id => { const a = accounts.find(x => x.id === id); return { id, name: a.name, title: a.title, collector: a.collector, writer: a.writer, approver: a.approver, chief: a.chief, supervisorId: a.supervisorId, processes: a.processes }; };
 const views = {
   writer: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '우편팀장(시험)', test: true },
-    state: { me: me('post'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'writer' }, registered: [H1, H3] } },
+    state: { me: me('post'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'writer' }, registered: [H1, H3, H4] } },
   approver: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '영업과장(시험)', test: true },
     state: { me: me('sales'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'head' },
       registered: [H1pending] } },
   collector: { user: { kind: 'safety_mgr', org: '장흥우체국', name: '서무팀장(시험)', test: true },
     state: { me: me('hq'), office: { code: 'jangheung', name: '장흥우체국', head: true, role: 'collector' },
       inbox: [{ id: 'I1', status: 'inbox', source: 'staff', reporter: '직원', createdAt: today + 'T00:00:00Z', note: '창구 앞 매트 들림', officeCode: 'jangheung' }],
-      registered: [{ ...H1pending, approvals: { assessment: { ...H1pending.approvals.assessment, chain: hqChain('waiting').map((s, i) => i === 0 ? { ...s, status: 'done' } : s), step: 1 } } }, { ...H3, readOnly: true }, D1] } },
+      registered: [(() => { const doc = { ...pendingDoc, chain: hqChain('waiting').map((s, i) => i === 0 ? { ...s, status: 'done' } : s), step: 1 }; return { ...H1pending, approvals: { assessment: doc, result: doc } }; })(), { ...H3, readOnly: true }, D1] } },
   branch: { user: { kind: 'safety_mgr', org: '장흥대덕우체국', name: '대덕 담당자', test: true },
     state: { me: me('dd'), office: { code: 'daedeok', name: '장흥대덕우체국', head: false, role: 'collector' }, registered: [{ ...D1, readOnly: false, canImprove: true, approvals: {} }] } },
 };
@@ -87,18 +91,19 @@ async function main() {
     assert.equal(await writer.page.locator('#e-evaluator').inputValue(), '우편팀장(시험)', '담당자(성명) is the employee, not whoever opens it');
     assert.equal(await writer.page.locator('label', { hasText: /^감독자\(성명\)$/ }).count(), 1);
     assert.equal(await writer.page.locator('#e-owner').inputValue(), '영업과장(시험)', '감독자 defaults to the writer’s 결재자');
-    assert.equal(await writer.page.locator('#modalCard').getByRole('button', { name: '위험성평가표 결재 올리기' }).count(), 1);
+    assert.equal(await writer.page.locator('#modalCard').getByRole('button', { name: /결재 올리기/ }).count(), 0, 'sending is done in the 결재 cell');
     await writer.page.getByRole('button', { name: '닫기', exact: true }).click();
-    await writer.page.locator('#tab-approval').click();
-    const mine = writer.page.locator('.mine-table');
-    assert.match(await mine.locator('tr', { hasText: 'H3' }).innerText(), /결재 완료[\s\S]*결재 올리기 전/);
-    assert.equal(await mine.locator('tr', { hasText: 'H3' }).getByRole('button', { name: '이행결과서 결재 올리기' }).count(), 1);
-    assert.equal(await mine.locator('tr', { hasText: 'H1' }).getByRole('button', { name: '이행결과서 결재 올리기' }).count(), 0, 'not before the 평가표 is approved');
-    await mine.locator('tr', { hasText: 'H1' }).getByRole('button', { name: '위험성평가표 결재 올리기' }).click();
+    // No separate 결재 tab: the table carries a 결재 cell (미결재 → 결재중 → 결재완료); one 결재 after the 이행결과서.
+    assert.equal(await writer.page.locator('#tab-approval').count(), 0);
+    assert.match(await group.locator('thead').innerText(), /결재/);
+    const cell = (page, factor) => page.locator('.three-step tr', { hasText: factor }).locator('.approval-cell');
+    assert.match(await cell(writer.page, '창구 의자 바퀴 미끄러짐').innerText(), /미결재[\s\S]*이행결과서 작성 후 결재/);
+    assert.equal(await cell(writer.page, '창구 의자 바퀴 미끄러짐').getByRole('button').count(), 0);
+    assert.match(await cell(writer.page, '번호표 발행기 전선 걸림').innerText(), /결재완료/);
+    await cell(writer.page, '롤파렛트 밑판 미고정').getByRole('button', { name: '결재 올리기' }).click();
     await toast(writer.page, '결재를 올렸습니다');
-    assert.ok(writer.sent.some(p => p.path === '/api/risk/items/H1/approval/assessment/request'));
-    assert.match(await writer.page.locator('.psub').first().innerText(), /담당 팀장 → 소속 과장 검토 → 서무팀장 확인 → 우편물류과장 검토 → 총괄국장 결재/);
-    assert.equal(await writer.page.getByRole('button', { name: '총괄국장 결재 올리기' }).count(), 0, 'no in-app yearly approval');
+    assert.ok(writer.sent.some(p => p.path === '/api/risk/items/H4/approval/both/request'));
+    assert.doesNotMatch(await writer.page.evaluate(() => assessmentPrintTable(R.registered)), /<th>결재<\/th>/, 'printouts leave the 결재 cell out');
     // 이행결과서: 담당자(성명) with the writer's name; its box has four cells.
     await writer.page.locator('#tab-table').click();
     await writer.page.evaluate(() => openImprove('H1'));
@@ -107,29 +112,24 @@ async function main() {
     const resultForm = await writer.page.evaluate(() => resultFormHtml(R.registered.find(it => it.id === 'H3')));
     assert.match(resultForm, /<th>담당자\(성명\)<\/th>/);
     assert.match(resultForm, /approval-box four/);
-    // Both ready: one button sends the 평가표 and the 이행결과서 together; nothing to reopen on one's own items.
-    const both = await writer.page.evaluate(() => approvalButtons({ ...R.registered.find(it => it.id === 'H1'), doneAt: '2026-11-07T01:00:00Z' }));
-    assert.match(both, /평가표·이행결과서 함께 결재 올리기/); assert.match(both, /평가표만 결재 올리기/);
     assert.equal(await writer.page.evaluate(() => reopenButton(R.registered.find(it => it.id === 'H3'))), '', 'a writer fixes their own document directly');
     // 담당 is the writer once the document exists; a returned document shows its reason at the top.
     assert.match(await writer.page.evaluate(() => approvalBox('jangheung', [R.registered.find(it => it.id === 'H1')])), /<td>우편팀장\(시험\)<\/td><td><\/td><td><\/td><td><\/td>/);
     assert.match(await writer.page.evaluate(() => returnNotice({ approvals: { assessment: { status: 'rejected', rejectedBy: '영업과장(시험)', rejectReason: '대책 보완' } } }, 'assessment')), /반려\(영업과장\(시험\)\): 대책 보완 — 이 창에서 고친 뒤 다시 결재를 올리세요/);
     assert.deepEqual(writer.errors, []);
 
-    // Approver: lands on 결재, sees what is their turn, approves several at once; the table is view-only.
+    // Approver: sees what is their turn above the table and in the 결재 cell, approves both documents at once.
     const approver = await open('approver');
-    assert.equal(await approver.page.locator('#tab-approval').getAttribute('class').then(c => c.includes('on')), true);
+    assert.equal(await approver.page.locator('#tab-table').getAttribute('class').then(c => c.includes('on')), true);
     assert.equal(await approver.page.locator('#approvalN').innerText(), '1');
-    assert.match(await approver.page.locator('.queue-table').innerText(), /위험성평가표[\s\S]*창구 의자 바퀴 미끄러짐[\s\S]*검토/);
-    await approver.page.getByLabel('모두 선택').check();
-    await approver.page.getByRole('button', { name: '선택 결재(검토)' }).click();
-    await toast(approver.page, '1개 문서');
-    assert.deepEqual(approver.sent.find(p => p.path === '/api/risk/approvals/decide').body, { action: 'approve', items: [{ id: 'H1', doc: 'assessment' }], reason: '' });
-    await approver.page.locator('#tab-table').click();
+    assert.match(await approver.page.locator('.approval-banner').innerText(), /결재할 문서 1건[\s\S]*창구 의자 바퀴 미끄러짐/);
+    assert.match(await cell(approver.page, '창구 의자 바퀴 미끄러짐').innerText(), /결재중[\s\S]*영업과장 검토 대기/);
+    await approver.page.locator('.approval-banner').getByRole('button', { name: '검토', exact: true }).click();
+    await toast(approver.page, '결재(검토)했습니다');
+    assert.ok(approver.sent.some(p => p.path === '/api/risk/items/H1/approval/both/approve'));
     assert.equal(await approver.page.locator('.three-step select').count(), 0);
     assert.equal(await approver.page.locator('[contenteditable="true"]').count(), 0);
     assert.equal(await approver.page.getByRole('button', { name: '위험성평가 추가' }).count(), 0);
-    assert.match(await approver.page.locator('.locked-row').innerText(), /평가표: 영업과장 검토 대기/);
     assert.deepEqual(approver.errors, []);
 
     // Collector: assigns an app report, sees progress (whose turn) before approval, asks for 보완, sets roles.
@@ -139,19 +139,16 @@ async function main() {
     await collector.page.getByRole('button', { name: '배분', exact: true }).click();
     await toast(collector.page, '배분했습니다');
     assert.deepEqual(collector.sent.find(p => p.path === '/api/risk/items/I1/assign').body, { writerId: 'post' });
-    await collector.page.locator('#tab-approval').click();
-    assert.match(await collector.page.locator('.queue-table').innerText(), /창구 의자 바퀴 미끄러짐[\s\S]*확인/, 'the 서무팀장 confirms in turn');
-    const progress = await collector.page.locator('.progress-table').innerText();
-    assert.match(progress, /우편팀장 우편팀장\(시험\)[\s\S]*창구 의자 바퀴 미끄러짐[\s\S]*평가표: 서무팀장 확인 대기/);
-    assert.match(progress, /이행결과서: 결재 올리기 전/);
-    assert.equal(await collector.page.locator('.progress-table').getByRole('button', { name: /보완 요청/ }).count(), 0, 'no 보완 요청 marks in the list');
-    assert.equal(await collector.page.locator('.locked-row').count(), 0);
+    await collector.page.locator('#tab-table').click();
+    assert.match(await collector.page.locator('.approval-banner').innerText(), /창구 의자 바퀴 미끄러짐[\s\S]*확인/, 'the 서무팀장 confirms in turn');
+    assert.match(await cell(collector.page, '창구 의자 바퀴 미끄러짐').innerText(), /결재중[\s\S]*서무팀장 확인 대기/, 'progress shows in the table');
+    assert.match(await cell(collector.page, '번호표 발행기 전선 걸림').innerText(), /결재완료/);
+    assert.equal(await collector.page.locator('.three-step').getByRole('button', { name: /보완 요청/ }).count(), 0, 'no 보완 요청 marks in the list');
     assert.equal(await collector.page.evaluate(() => reopenButton(R.registered.find(it => it.id === 'D1'))), '', 'no 보완 요청 on branch items');
     await collector.page.evaluate(() => editRow('H3'));
     await collector.page.getByRole('button', { name: '보완 요청 보내기' }).click();
     await toast(collector.page, '보완을 요청');
     assert.deepEqual(collector.sent.find(p => p.path === '/api/risk/items/H3/reopen').body, { reason: '보완 내용' });
-    assert.match(await collector.page.locator('.form-section', { hasText: '진행 현황' }).innerText(), /청 보고: 「위험성평가표」 탭에서 기간/);
     // Approval box and info line: names only for steps that happened.
     const head = await collector.page.evaluate(() => { assessmentStart = '2026-01-01'; assessmentEnd = '2026-12-31'; return docHead('장흥우체국 위험성평가표', 'jangheung', R.registered.filter(it => it.id === 'H3'), '접수(창구)'); });
     assert.match(head, /<th>담당<\/th><th>과장<\/th><th>우편물류과장<\/th><th>국장<\/th><\/tr><tr><td>우편팀장\(시험\)<\/td><td>영업과장\(시험\)<\/td><td>우편물류과장\(시험\)<\/td><td>총괄국장\(시험\)<\/td>/);
@@ -166,7 +163,6 @@ async function main() {
     assert.deepEqual(grouped, ['assessment', 'result']);
     assert.match(branchBox, /<th>담당<\/th><th>국장<\/th><\/tr><tr><td>대덕 담당자<\/td><td>대덕 국장<\/td>/);
     // Office picker and 관내 전체 print: head office first, branch after it, no page break.
-    await collector.page.locator('#tab-table').click();
     assert.deepEqual(await collector.page.getByLabel('볼 국').locator('option').allInnerTexts(), ['장흥우체국', '장흥대덕우체국', '관내 전체']);
     const printed = await collector.page.evaluate(() => { officeView = 'all'; return officeDocuments(assessmentRows(), (code, items) => '<h1>' + officeName(code) + '</h1>'); });
     assert.match(printed, /<h1>장흥우체국<\/h1>[\s\S]*<h1>장흥대덕우체국<\/h1>/);
@@ -189,14 +185,15 @@ async function main() {
     // Branch: its 담당자 is collector and writer; no settings; the library is read-only.
     const branch = await open('branch');
     assert.equal(await branch.page.locator('#tab-roles').isHidden(), true);
-    await branch.page.locator('#tab-approval').click();
-    assert.match(await branch.page.locator('.psub').first().innerText(), /결재선: 담당자 → 국장 결재/);
-    assert.equal(await branch.page.locator('.mine-table tr', { hasText: 'D1' }).getByRole('button', { name: '위험성평가표 결재 올리기' }).count(), 1);
+    assert.equal(await branch.page.locator('#tab-approval').count(), 0, 'no 결재할 문서·내 건·진행 현황 page');
+    await branch.page.locator('#tab-table').click();
+    assert.equal(await branch.page.locator('.approval-banner').count(), 0);
+    assert.match(await cell(branch.page, '대덕 계단 넘어짐').innerText(), /미결재[\s\S]*이행결과서 작성 후 결재/);
     await branch.page.locator('#tab-library').click();
     assert.equal(await branch.page.getByRole('button', { name: '공식 법령 최신본 적재' }).count(), 0);
     assert.equal(await branch.page.getByRole('button', { name: '근거 자료 백업 내려받기' }).count(), 0);
     assert.deepEqual(branch.errors, []);
-    console.log('PASS: writer sends each 평가표/이행결과서 up (이행결과서 after approval), 감독자 and 담당자(성명) defaults, approver queue with 선택 결재 and view-only table, collector assigns, confirms in turn, follows progress, asks for 보완 and sets roles, stamped 4-cell box and 평가자 line, 관내 전체 print, branch 국장 line and limits');
+    console.log('PASS: 결재 cell in the table (미결재/결재중/결재완료, one 결재 after the 이행결과서, left out of printouts), no 결재 tab, 결재할 문서 box above the table, 감독자 and 담당자(성명) defaults, view-only table for reviewers, collector assigns, confirms in turn, follows progress, asks for 보완 and sets roles, stamped 4-cell box and 평가자 line, 관내 전체 print, branch limits');
   } finally { await browser?.close(); await new Promise(r => server.close(r)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

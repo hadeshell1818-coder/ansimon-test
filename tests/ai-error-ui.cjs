@@ -32,7 +32,7 @@ async function main() {
     await page.locator('#risk-advice-button').click();
     // Without evidence the draft goes straight into the form boxes, marked unverified, and is not saved until 「저장」.
     await page.getByText(/공식 근거 검색 결과가 없습니다/).waitFor();
-    assert.ok(await page.getByText('출입문 고정 장치를 설치한다.', { exact: false }).first().isVisible());
+    assert.doesNotMatch(await page.locator('#risk-advice-result').innerText(), /출입문 고정 장치를 설치한다/, 'the draft is shown once, in the form box');
     assert.match(await page.locator('#e-reduction').inputValue(), /출입문 고정 장치를 설치한다/);
     assert.equal(await page.getByRole('button', { name: '담당자 검토 후 초안 반영' }).count(), 0);
     assert.equal(await page.locator('#e-factor').inputValue(), item.factor);
