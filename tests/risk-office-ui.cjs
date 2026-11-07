@@ -146,6 +146,7 @@ async function main() {
     assert.match(progress, /이행결과서: 결재 올리기 전/);
     assert.equal(await collector.page.locator('.progress-table').getByRole('button', { name: /보완 요청/ }).count(), 0, 'no 보완 요청 marks in the list');
     assert.equal(await collector.page.locator('.locked-row').count(), 0);
+    assert.equal(await collector.page.evaluate(() => reopenButton(R.registered.find(it => it.id === 'D1'))), '', 'no 보완 요청 on branch items');
     await collector.page.evaluate(() => editRow('H3'));
     await collector.page.getByRole('button', { name: '보완 요청 보내기' }).click();
     await toast(collector.page, '보완을 요청');

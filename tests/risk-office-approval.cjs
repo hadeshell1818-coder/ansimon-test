@@ -214,8 +214,9 @@ async function main() {
     const reopenedSheet = (await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=jangheung')).find(rows => String(rows[2]?.[0] || '').includes('□ 공정명: 접수(창구)'));
     assert.deepEqual(reopenedSheet[1].slice(5, 9).map(v => v ?? ''), ['우편팀장', '', '', ''], 'only the writer while reopened');
     assert.equal((await patch('post', 'H1', { dueDate: '12.31' })).status, 200);
-    assert.equal((await call('hq', 'POST', '/api/risk/items/D1/reopen', { reason: '사진 보완' })).status, 200, 'the head office asks a branch for 보완');
-    assert.equal((await patch('dd', 'D1', { dueDate: '12.31' })).status, 200);
+    assert.equal((await call('hq', 'POST', '/api/risk/items/D1/reopen', { reason: '사진 보완' })).status, 403, 'no 보완 요청 on a branch item approved by its 국장');
+    assert.equal(steps('D1').assessment.status, 'approved');
+    assert.equal((await patch('dd', 'D1', { dueDate: '12.31' })).status, 409, 'the approved branch item stays fixed');
 
     // Settings: only the head-office collector; changes are recorded; handing over the collector role needs confirmation.
     assert.equal((await call('post', 'GET', '/api/risk/roles')).status, 403);
