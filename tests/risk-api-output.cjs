@@ -26,9 +26,9 @@ routes['GET /api/risk/export.xlsx']({query:{from:'2026-10-01',to:new Date(Date.n
 assert.ok(Buffer.isBuffer(payload));
 const book=XLSX.read(payload,{type:'buffer'}),sheet=book.Sheets['소포'];
 assert.ok(sheet);const data=XLSX.utils.sheet_to_json(sheet,{header:1});
-// Rows 0–1 hold the title and the approval box (담당 · 과장 · 국장 at the head office) at the top right; row 2 is
+// Rows 0–1 hold the title and the approval box (담당 · 과장 · 우편물류과장 · 국장 at the head office) at the top right; row 2 is
 // □ 공정명 □ 평가일 □ 평가자; row 3 is the header, data from row 4. Names appear only once a step happens (none yet).
-assert.deepEqual([data[0][6],data[0][7],data[0][8]],['담당','과장','국장']);assert.deepEqual([data[1][6]||'',data[1][7]||'',data[1][8]||''],['','',''],'no names before anyone sent or approved it');
+assert.deepEqual(data[0].slice(5,9),['담당','과장','우편물류과장','국장']);assert.deepEqual(data[1].slice(5,9).map(v=>v||''),['','','',''],'no names before anyone sent or approved it');
 assert.match(String(data[2][0]),/□ 공정명: 소포 .*□ 평가일: 2026-10-01 ~ .*□ 평가자: .*담당 직원/);
 assert.equal(data[3][3],'개선대책');
 assert.equal(data.slice(4).map(row=>row[3]).join('').replace(/\n/g,''),item.reduction);

@@ -1868,9 +1868,9 @@ const isSafetyMgr = u => !!u && u.kind === 'safety_mgr' && (u.org === SAFETY_OFF
 
 /* 국 구분(관내국)과 위험성평가 역할(2026-11-07 사용자 결정, AGENTS.md 1-1절).
  * 국마다 총괄 안전담당자(장흥: 서무팀장, 큰 국: 산업안전보건실장)가 앱 신고를 받아 공정 담당자(우편팀장·소통팀장 등)에게
- * 배분하고, 담당자는 자기 건만 작성한다. 담당자는 평가표·이행결과서를 한 달이든 분기든 모아 자기 결재자(과장, 관내국은
- * 국장)에게 한 번에 결재를 올린다. 정기평가(연 1회)는 각 담당자가 기간분을 제출하면 총괄 담당자가 국 전체(관내국 포함)를
- * 한 문서로 총괄국장에게 올려 한 번 결재받고 청에 보고한다. 역할·결재자·공정은 총괄 담당자가 설정 화면에서 정한다.
+ * 배분하고, 담당자는 자기 건만 작성한다. 평가표와 이행결과서는 각각 한 건씩 결재를 올린다(2026-11-07 2차 결정, 기간 묶음
+ * 결재를 대체): 총괄국은 담당 팀장 → 소속 과장 검토 → 서무팀장 확인 → 우편물류과장 검토 → 총괄국장 결재, 관내국은 담당자 →
+ * 국장 결재. 청 보고는 기간을 골라 출력·엑셀로 받아 공식 결재에 붙인다. 역할·결재자·공정은 총괄 담당자가 설정 화면에서 정한다.
  * 결재된 내용은 고정되고 총괄 담당자의 보완 요청으로만 다시 연다. 기록의 국 코드가 없으면 총괄국이다. */
 const HEAD_OFFICE_CODE = 'jangheung';
 const RISK_OFFICES = [
@@ -1899,11 +1899,14 @@ const approvalsOf = it => (it && it.approvals && typeof it.approvals === 'object
 const stepStatus = (it, step) => approvalsOf(it)[step]?.status || null;
 // A branch item reaches the head office once its own head approved its assessment (it stays visible during a reopen).
 const branchApproved = it => !!approvalsOf(it).assessment?.approvedOnce;
+const RISK_DOCS = ['assessment', 'result'];
+// Whether the account is (or was) on the 결재선 of either document of the item: reviewers see what they review.
+const inChain = (it, id) => RISK_DOCS.some(doc => (approvalsOf(it)[doc]?.chain || []).some(step => step.id === id));
 function riskItemVisible(u, it) {
   if (!isSafetyMgr(u)) return false;
   const role = riskRole(u), own = itemOfficeCode(it) === userOfficeCode(u);
   if (own) {
-    if (role.collector || role.chief) return true;
+    if (role.collector || role.chief || inChain(it, u.id)) return true;
     if (role.writer && (it.assignedTo === u.id || (!it.assignedTo && it.createdById === u.id))) return true;
     if (role.approver) { const writer = accountById(it.assignedTo); return !!writer && riskRole(writer).supervisorId === u.id; }
     return false;
@@ -1917,7 +1920,6 @@ function riskItemDenied(u, it, { part = 'assessment' } = {}) {
   if (itemOfficeCode(it) !== userOfficeCode(u)) return { status: 403, error: '다른 국의 위험성평가는 수정할 수 없습니다.' };
   const role = riskRole(u), mine = it.assignedTo ? it.assignedTo === u.id : (role.collector || it.createdById === u.id);
   if (!mine) return { status: 403, error: role.approver || role.chief ? '결재자 계정은 보기와 결재만 할 수 있습니다.' : '배분받은 담당자만 수정할 수 있습니다.' };
-  if (stepStatus(it, 'annual') === 'approved' || stepStatus(it, 'annual') === 'pending') return { status: 409, error: '정기평가 결재에 들어간 항목입니다. 고치려면 총괄 담당자의 보완 요청이 필요합니다.' };
   const steps = part === 'result' ? ['result'] : ['assessment'];
   for (const step of steps) {
     if (stepStatus(it, step) === 'pending') return { status: 409, error: '결재 대기 중인 항목입니다. 고치려면 결재 요청을 취소하세요.' };
@@ -1925,14 +1927,41 @@ function riskItemDenied(u, it, { part = 'assessment' } = {}) {
   }
   return null;
 }
+// 결재선 for one document (2026-11-07 2nd user decision). Head office: the writer's 과장 (supervisor) → the 서무팀장
+// (collector) confirms → the collector's 결재자 (우편물류과장) → the 총괄국장. Nobody signs twice: a person who appears
+// again keeps only the later step, with both roles (e.g. 소통팀장's 과장 is the 우편물류과장), and the writer is skipped.
+// Branch: the writer's 결재자, the 국장, approves.
+const officeCollectors = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).collector);
+const officeChiefs = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).chief);
+function approvalChain(writer) {
+  const code = userOfficeCode(writer), supervisor = accountById(riskRole(writer).supervisorId);
+  if (!supervisor) return { error: '결재자(과장, 관내국은 국장)가 설정되지 않았습니다. 총괄 담당자에게 설정을 요청하세요.' };
+  const raw = [{ account: supervisor, role: code === HEAD_OFFICE_CODE ? 'supervisor' : 'chief' }];
+  if (code === HEAD_OFFICE_CODE) {
+    const collector = officeCollectors(code)[0], logistics = collector && accountById(riskRole(collector).supervisorId), chief = officeChiefs(code)[0];
+    if (!chief) return { error: '총괄국장 계정이 설정되지 않았습니다. 설정 화면에서 지정하세요.' };
+    raw.push({ account: collector, role: 'collector' }, { account: logistics, role: 'logistics' }, { account: chief, role: 'chief' });
+  }
+  const steps = [];
+  for (const { account, role } of raw.filter(x => x.account && x.account.id !== writer.id)) {
+    const before = steps.findIndex(step => step.id === account.id), roles = before >= 0 ? [...steps.splice(before, 1)[0].roles, role] : [role];
+    steps.push({ id: account.id, name: account.name, title: riskRole(account).title || '', roles, status: 'waiting', at: null });
+  }
+  return steps.length ? { chain: steps } : { error: '결재할 사람이 없습니다. 설정 화면에서 결재자를 지정하세요.' };
+}
+// The 우편물류과장 cell is named by the head-office collector's 결재자 title (the same person reviews every item).
+function logisticsTitle() { const collector = officeCollectors(HEAD_OFFICE_CODE)[0], logistics = collector && accountById(riskRole(collector).supervisorId); return (logistics && riskRole(logistics).title) || '우편물류과장'; }
 // Names stamped in the approval box at the top right of printed and exported forms, only for steps that happened:
-// 담당 = who sent it for approval, 과장 = who approved it, 국장 = the 총괄국장 who approved the yearly report. A branch
-// form has 담당 and 국장 (its head). step: 'assessment' for the 위험성평가표, 'result' for the 이행결과서.
-function riskApprovalNames(code, rows, step = 'assessment') {
-  const names = pick => [...new Set(rows.map(pick).filter(Boolean))].join(', ');
-  const writer = names(it => approvalsOf(it)[step]?.requestedBy), reviewer = names(it => approvalsOf(it)[step]?.approvedBy);
-  if (code !== HEAD_OFFICE_CODE) return { branch: true, writer, reviewer: '', chief: reviewer };
-  return { branch: false, writer, reviewer, chief: names(it => approvalsOf(it).annual?.approvedBy) };
+// 담당 = who sent it, then each cell the person who approved in that role (head office 담당 | 과장 | 우편물류과장 | 국장,
+// branch 담당 | 국장). doc: 'assessment' for the 위험성평가표, 'result' for the 이행결과서.
+function riskApprovalNames(code, rows, doc = 'assessment') {
+  const names = pick => [...new Set(rows.flatMap(pick).filter(Boolean))].join(', ');
+  // A rejected, withdrawn or reopened document shows no names until it goes up again.
+  const live = it => ['pending', 'approved'].includes(approvalsOf(it)[doc]?.status) ? approvalsOf(it)[doc] : null;
+  const signed = role => names(it => (live(it)?.chain || []).filter(step => step.status === 'done' && step.roles.includes(role)).map(step => step.name));
+  const writer = names(it => [live(it)?.requestedBy]);
+  if (code !== HEAD_OFFICE_CODE) return { branch: true, labels: ['담당', '국장'], values: [writer, signed('chief')] };
+  return { branch: false, labels: ['담당', '과장', logisticsTitle(), '국장'], values: [writer, signed('supervisor'), signed('logistics'), signed('chief')] };
 }
 // 평가자 line: 관리감독자(the supervisors' titles), the writers' titles, then 담당 직원 (2026-11-07 user decision).
 function riskAssessors(rows) {
@@ -2059,8 +2088,8 @@ app.use(['/api/risk/state', '/api/risk/items'], (req, res, next) => {
   if (item) {
     if (!riskItemVisible(user, item)) return res.status(404).json({ error: 'not found' });
     const action = String(req.path || '').split('/')[2] || '';
-    // Assignment and reopening have their own checks below; the 이행결과서 is its own step.
-    const denied = ['assign', 'reopen'].includes(action) || req.method === 'GET' ? null : riskItemDenied(user, item, { part: action === 'improve' ? 'result' : 'assessment' });
+    // Assignment, reopening and approval have their own checks below; the 이행결과서 is its own step.
+    const denied = ['assign', 'reopen', 'approval'].includes(action) || req.method === 'GET' ? null : riskItemDenied(user, item, { part: action === 'improve' ? 'result' : 'assessment' });
     if (denied) return res.status(denied.status).json({ error: denied.error });
   }
   next();
@@ -2084,8 +2113,6 @@ app.get('/api/risk/state', async (req, res) => {
     accounts: riskAccounts().filter(a => userOfficeCode(a) === own || own === HEAD_OFFICE_CODE).map(account),
     inbox: role.collector ? visible.filter(it => itemOfficeCode(it) === own && !it.routingInactive && ['inbox','referred'].includes(it.status)).map(view) : [],
     registered: visible.filter(it => !it.routingInactive && !['inbox','referred'].includes(it.status)).map(view),
-    bundles: riskBundles().filter(b => bundleVisible(u, b)).map(bundleView),
-    submissions: annualSubmissions().filter(x => x.officeCode === own || own === HEAD_OFFICE_CODE),
   });
 });
 app.get('/api/risk/export.xlsx', (req, res) => {
@@ -2110,12 +2137,11 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const headStyle = { border, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
   const bodyStyle = c => ({ border, font: { sz: 10 }, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } });
   const setCell = (sheet, r, c, style) => { const address = XLSXStyle.utils.encode_cell({ r, c }); const cell = sheet[address] || (sheet[address] = { t: 's', v: '' }); cell.s = style; };
-  // One block per process, as on the paper form: the title with the approval box at the top right (담당 · 과장 · 국장 at
-  // the head office, 담당 · 국장 at a branch; names only for steps that happened), then □ 공정명 □ 평가일 □ 평가자, then
+  // One block per process, as on the paper form: the title with the approval box at the top right (담당 · 과장 ·
+  // 우편물류과장 · 국장 at the head office, 담당 · 국장 at a branch; names only for steps that happened), then □ 공정명 □ 평가일 □ 평가자, then
   // the table. The body columns are unchanged.
   const processBlock = (code, processName, group) => {
-    const names = riskApprovalNames(code, group), labels = names.branch ? ['담당', '국장'] : ['담당', '과장', '국장'];
-    const values = names.branch ? [names.writer, names.chief] : [names.writer, names.reviewer, names.chief];
+    const { labels, values } = riskApprovalNames(code, group);
     const boxStart = headers.length - labels.length, pad = n => Array(n).fill('');
     const info = `□ 공정명: ${processName}     □ 평가일: ${from} ~ ${to}     □ 평가자: ${riskAssessors(group)}`;
     const { rows, heights } = riskExportRows(group);
@@ -2425,120 +2451,82 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   res.json({ ok: true });
 });
 
-/* 위험성평가 결재 묶음(2026-11-07 사용자 결정).
- * 평소: 담당자가 기간을 골라 결재 안 받은 평가표와 이행결과서를 함께 묶어 자기 결재자(과장, 관내국은 국장)에게 올리고,
- * 결재자가 한 번에 결재 또는 반려(사유)한다. 결재된 단계는 고정된다.
- * 정기평가(연 1회): 각 담당자가 기간분을 「정기평가 제출」하고, 총괄 담당자가 국 전체(관내국 결재분 포함)를 한 문서로
- * 총괄국장에게 올려 한 번 결재받는다. 그 결재본이 청 보고서다.
- * 총괄 담당자는 결재 전에도 배분한 건의 진행 상태를 보고, 결재된 건에 보완 요청(사유)을 해 다시 열 수 있다.
- * 앱 결재는 공식 전자결재(온나라 등)를 대신하지 않는다. 요청·결재·반려·보완 요청의 사람·시각·사유를 남긴다. */
-const riskBundles = () => { if (!Array.isArray(RISK.bundles)) RISK.bundles = []; return RISK.bundles; };
-const annualSubmissions = () => { if (!Array.isArray(RISK.annualSubmissions)) RISK.annualSubmissions = []; return RISK.annualSubmissions; };
+/* 위험성평가 결재(2026-11-07 사용자 결정 2차, 기간 묶음 결재와 앱 안 정기평가 결재를 대체).
+ * 평가표와 이행결과서를 각각 한 건씩 결재선(approvalChain)대로 올린다. 지금 차례인 사람만 검토·확인·결재하거나 반려(사유)한다.
+ * 반려되면 담당자에게 돌아가고, 고쳐서 다시 올리면 결재선 처음부터 다시 간다. 이행결과서는 평가표 결재가 끝난 뒤에 올린다.
+ * 결재된 문서는 고정되고 총괄 담당자의 보완 요청으로만 다시 연다. 청 보고는 기간을 골라 출력·엑셀로 받아 공식 결재에 붙인다.
+ * 앱 결재는 공식 전자결재(온나라 등)를 대신하지 않는다. 요청·검토·결재·반려·보완 요청의 사람·시각·사유를 남긴다. */
 const assessedStatuses = ['assessing', 'assessed', 'done'];
 const resultWritten = it => !!(it.resultUpdatedAt || it.doneAt);
-function bundleVisible(u, bundle) {
-  if (bundle.requestedById === u.id || bundle.approverId === u.id) return true;
-  const role = riskRole(u);
-  return (role.collector || role.chief) && (bundle.officeCode === userOfficeCode(u) || (userOfficeCode(u) === HEAD_OFFICE_CODE && bundle.status === 'approved'));
-}
-function bundleView(bundle) {
-  const title = id => RISK.items.find(it => it.id === id);
-  return { ...bundle, officeName: riskOffice(bundle.officeCode).name,
-    items: [...new Set([...(bundle.assessmentIds || []), ...(bundle.resultIds || []), ...(bundle.itemIds || [])])].map(title).filter(Boolean)
-      .map(it => ({ id: it.id, factor: it.factor || '', process: it.customProcess || it.assessmentTarget || '', riskLevel: it.riskLevel || '', officeCode: itemOfficeCode(it) })) };
-}
 const recordStep = (it, step, data) => { it.approvals = { ...approvalsOf(it), [step]: { ...(approvalsOf(it)[step] || {}), ...data } }; };
 const pushHistory = (target, action, u, reason = '') => { target.history = [...(target.history || []), { action, by: u.name, byId: u.id, at: new Date().toISOString(), ...(reason ? { reason } : {}) }].slice(-100); };
-// Approvers a writer may send to: approvers of the same office (the 결재선 is chosen by the writer, as in office mail).
-const officeApprovers = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).approver);
-const officeChiefs = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).chief);
-
-app.post('/api/risk/bundles', (req, res) => {
+const currentStep = a => a && a.status === 'pending' ? (a.chain || [])[a.step || 0] || null : null;
+const docName = doc => doc === 'result' ? '이행결과서' : '위험성평가표';
+// Send one document of one item into its 결재선 (the assigned writer; the collector for an item not given to anyone).
+function requestApproval(u, it, doc) {
+  const a = approvalsOf(it)[doc] || {}, role = riskRole(u);
+  if (!(it.assignedTo ? it.assignedTo === u.id : (role.collector || it.createdById === u.id))) return { status: 403, error: '배분받은 담당자만 결재를 올릴 수 있습니다.' };
+  if (['pending', 'approved'].includes(a.status)) return { status: 409, error: a.status === 'pending' ? '이미 결재 중입니다.' : '결재가 끝난 문서입니다. 고치려면 총괄 담당자의 보완 요청이 필요합니다.' };
+  if (!assessedStatuses.includes(it.status)) return { status: 400, error: '평가 중인 항목만 결재를 올릴 수 있습니다.' };
+  if (doc === 'assessment' && !it.riskLevel) return { status: 400, error: '위험성 수준(상·중·하)을 정한 뒤 올리세요.' };
+  if (doc === 'result') {
+    if (!resultWritten(it)) return { status: 400, error: '이행결과서를 먼저 작성하세요.' };
+    if (stepStatus(it, 'assessment') !== 'approved') return { status: 400, error: '위험성평가표 결재가 끝난 뒤 이행결과서를 올리세요.' };
+  }
+  const { chain, error } = approvalChain(accountById(it.assignedTo) || u);
+  if (error) return { status: 400, error };
+  const now = new Date().toISOString();
+  recordStep(it, doc, { status: 'pending', chain, step: 0, requestedBy: u.name, requestedById: u.id, requestedAt: now, approvedBy: null, approvedAt: null, rejectReason: null });
+  pushHistory(it.approvals[doc], 'request', u);
+  return null;
+}
+// Approve or reject the step that is the user's turn. The last step finishes the document.
+function decideApproval(u, it, doc, action, reason) {
+  const a = approvalsOf(it)[doc], step = currentStep(a);
+  if (!step) return { status: 409, error: `${docName(doc)} 결재 대기 중이 아닙니다.` };
+  if (step.id !== u.id) return { status: 403, error: `지금은 ${step.title || step.name}의 차례입니다.` };
+  if (action === 'reject' && !reason) return { status: 400, error: '반려 사유를 입력하세요.' };
+  const now = new Date().toISOString(), chain = a.chain.map((s, i) => i === a.step ? { ...s, status: action === 'approve' ? 'done' : 'rejected', at: now, ...(reason ? { reason } : {}) } : s);
+  if (action === 'reject') recordStep(it, doc, { chain, status: 'rejected', rejectReason: reason, rejectedBy: u.name, rejectedAt: now });
+  else if (a.step + 1 >= chain.length) recordStep(it, doc, { chain, status: 'approved', approvedBy: u.name, approvedById: u.id, approvedAt: now, approvedOnce: true });
+  else recordStep(it, doc, { chain, step: a.step + 1 });
+  pushHistory(it.approvals[doc], action, u, reason);
+  return null;
+}
+// request / withdraw by the writer; approve / reject by whoever's turn it is (the item routes pass the office check first).
+app.post('/api/risk/items/:id/approval/:doc/:action', (req, res) => {
+  const u = userFromReq(req), it = RISK.items.find(x => x.id === req.params.id);
+  const { doc, action } = req.params, reason = String(req.body?.reason || '').trim().slice(0, 500);
+  if (!it || !RISK_DOCS.includes(doc) || !['request', 'withdraw', 'approve', 'reject'].includes(action)) return res.status(404).json({ error: 'not found' });
+  let failed = null;
+  if (action === 'request') failed = requestApproval(u, it, doc);
+  else if (action === 'withdraw') {
+    const a = approvalsOf(it)[doc];
+    if (!a || a.status !== 'pending') failed = { status: 409, error: '결재 대기 중인 문서만 취소할 수 있습니다.' };
+    else if (a.requestedById !== u.id) failed = { status: 403, error: '결재는 올린 사람만 취소할 수 있습니다.' };
+    else { recordStep(it, doc, { status: a.approvedOnce ? 'reopened' : null, step: 0 }); pushHistory(it.approvals[doc], 'withdraw', u); }
+  } else failed = decideApproval(u, it, doc, action, reason);
+  if (failed) return res.status(failed.status).json({ error: failed.error });
+  saveRisk(); broadcastRisk();
+  res.json({ ok: true, approval: approvalsOf(it)[doc] });
+});
+// 선택 결재: several items at once (each recorded separately); items that fail are reported, the rest go through.
+app.post('/api/risk/approvals/decide', (req, res) => {
   const u = userFromReq(req);
   if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
   if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
-  const b = req.body || {}, role = riskRole(u), code = userOfficeCode(u), now = new Date().toISOString();
-  const date = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
-  if (b.kind === 'annual') {
-    if (!role.collector || code !== HEAD_OFFICE_CODE) return res.status(403).json({ error: '정기평가 결재는 총괄국 총괄 안전담당자가 올립니다.' });
-    const from = date(b.from), to = date(b.to);
-    if (!from || !to || from > to) return res.status(400).json({ error: '정기평가 기간을 확인하세요.' });
-    const chief = officeChiefs(code).find(a => a.id === b.approverId) || officeChiefs(code)[0];
-    if (!chief) return res.status(400).json({ error: '총괄국장 계정이 설정되지 않았습니다. 설정 화면에서 지정하세요.' });
-    const items = RISK.items.filter(it => !it.routingInactive && assessedStatuses.includes(it.status) && riskItemDate(it) >= from && riskItemDate(it) <= to
-      && (itemOfficeCode(it) === code || branchApproved(it)) && stepStatus(it, 'annual') !== 'approved');
-    if (!items.length) return res.status(400).json({ error: '그 기간에 정기평가로 올릴 항목이 없습니다.' });
-    // Every own-office item must have its 평가표 approved first (the routine 과장 approval); branch items are approved already.
-    const unapproved = items.filter(it => itemOfficeCode(it) === code && stepStatus(it, 'assessment') !== 'approved');
-    if (unapproved.length) return res.status(400).json({ error: `평가표 결재가 끝나지 않은 항목이 ${unapproved.length}건 있습니다(${unapproved.slice(0, 5).map(it => it.id).join(', ')}). 담당자 결재를 마친 뒤 올리세요.` });
-    if (riskBundles().some(x => x.kind === 'annual' && x.status === 'pending' && x.officeCode === code)) return res.status(409).json({ error: '이미 총괄국장 결재 대기 중인 정기평가가 있습니다.' });
-    RISK.bundleSeq = (Number(RISK.bundleSeq) || 0) + 1;
-    const bundle = { id: 'AB' + RISK.bundleSeq, kind: 'annual', officeCode: code, from, to, itemIds: items.map(it => it.id), status: 'pending',
-      requestedBy: u.name, requestedById: u.id, requestedAt: now, approverId: chief.id, approverName: chief.name, history: [] };
-    for (const it of items) recordStep(it, 'annual', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null });
-    pushHistory(bundle, 'request', u); riskBundles().push(bundle); saveRisk(); broadcastRisk();
-    return res.json({ ok: true, bundle: bundleView(bundle) });
-  }
-  if (!role.writer) return res.status(403).json({ error: '결재 요청은 공정 담당자가 합니다.' });
-  const approver = officeApprovers(code).find(a => a.id === (b.approverId || role.supervisorId));
-  if (!approver) return res.status(400).json({ error: '결재자를 고르세요. 결재자가 없으면 총괄 담당자에게 설정을 요청하세요.' });
-  const own = id => RISK.items.find(it => it.id === id && itemOfficeCode(it) === code && it.assignedTo === u.id && assessedStatuses.includes(it.status));
-  const assessments = [...new Set(Array.isArray(b.assessmentIds) ? b.assessmentIds : [])].map(own).filter(Boolean)
-    .filter(it => !['pending', 'approved'].includes(stepStatus(it, 'assessment')));
-  const results = [...new Set(Array.isArray(b.resultIds) ? b.resultIds : [])].map(own).filter(Boolean)
-    .filter(it => resultWritten(it) && !['pending', 'approved'].includes(stepStatus(it, 'result')));
-  if (!assessments.length && !results.length) return res.status(400).json({ error: '결재에 올릴 평가표나 이행결과서를 고르세요.' });
-  const noLevel = assessments.find(it => !it.riskLevel);
-  if (noLevel) return res.status(400).json({ error: `${noLevel.id}의 위험성 수준(상·중·하)을 정한 뒤 올리세요.` });
-  const resultBeforeAssessment = results.find(it => stepStatus(it, 'assessment') !== 'approved' && !assessments.includes(it));
-  if (resultBeforeAssessment) return res.status(400).json({ error: `${resultBeforeAssessment.id}는 평가표 결재 전입니다. 평가표를 함께 올리세요.` });
-  RISK.bundleSeq = (Number(RISK.bundleSeq) || 0) + 1;
-  const bundle = { id: 'AB' + RISK.bundleSeq, kind: 'regular', officeCode: code, from: date(b.from), to: date(b.to),
-    assessmentIds: assessments.map(it => it.id), resultIds: results.map(it => it.id), status: 'pending',
-    requestedBy: u.name, requestedById: u.id, requestedAt: now, approverId: approver.id, approverName: approver.name, history: [] };
-  for (const it of assessments) recordStep(it, 'assessment', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null, rejectReason: null });
-  for (const it of results) recordStep(it, 'result', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null, rejectReason: null });
-  pushHistory(bundle, 'request', u); riskBundles().push(bundle); saveRisk(); broadcastRisk();
-  res.json({ ok: true, bundle: bundleView(bundle) });
-});
-// approve / reject (the chosen approver), withdraw (the requester, while pending).
-app.post('/api/risk/bundles/:id/:action', (req, res) => {
-  const u = userFromReq(req);
-  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
-  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
-  const bundle = riskBundles().find(x => x.id === req.params.id);
-  if (!bundle || !bundleVisible(u, bundle)) return res.status(404).json({ error: '결재 문서를 찾을 수 없습니다.' });
-  const action = req.params.action, reason = String(req.body?.reason || '').trim().slice(0, 500), now = new Date().toISOString();
-  if (!['approve', 'reject', 'withdraw'].includes(action)) return res.status(404).json({ error: 'not found' });
-  if (bundle.status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 문서만 처리할 수 있습니다.' });
-  if (action === 'withdraw' && bundle.requestedById !== u.id) return res.status(403).json({ error: '결재 요청은 올린 사람만 취소할 수 있습니다.' });
-  if (action !== 'withdraw' && bundle.approverId !== u.id) return res.status(403).json({ error: '지정된 결재자만 결재할 수 있습니다.' });
-  if (action === 'reject' && !reason) return res.status(400).json({ error: '반려 사유를 입력하세요.' });
-  const steps = bundle.kind === 'annual' ? [['annual', bundle.itemIds]] : [['assessment', bundle.assessmentIds], ['result', bundle.resultIds]];
-  for (const [step, ids] of steps) for (const id of ids || []) {
-    const it = RISK.items.find(x => x.id === id); if (!it || approvalsOf(it)[step]?.bundleId !== bundle.id) continue;
-    if (action === 'approve') recordStep(it, step, { status: 'approved', approvedBy: u.name, approvedById: u.id, approvedAt: now, ...(step === 'assessment' ? { approvedOnce: true } : {}) });
-    else if (action === 'reject') recordStep(it, step, { status: 'rejected', rejectReason: reason, rejectedBy: u.name, rejectedAt: now });
-    else recordStep(it, step, { status: approvalsOf(it)[step]?.approvedOnce ? 'reopened' : null, bundleId: null });
-  }
-  Object.assign(bundle, { status: { approve: 'approved', reject: 'rejected', withdraw: 'withdrawn' }[action], decidedBy: u.name, decidedAt: now, ...(reason ? { reason } : {}) });
-  pushHistory(bundle, action, u, reason); saveRisk(); broadcastRisk();
-  res.json({ ok: true, bundle: bundleView(bundle) });
-});
-// 정기평가 제출: a writer (or a branch's writer) marks the period as reviewed and complete for the yearly report.
-app.post('/api/risk/annual-submissions', (req, res) => {
-  const u = userFromReq(req);
-  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
-  if (!isSafetyMgr(u) || !riskRole(u).writer) return res.status(403).json({ error: '정기평가 제출은 공정 담당자가 합니다.' });
-  const from = String(req.body?.from || ''), to = String(req.body?.to || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: '정기평가 기간을 확인하세요.' });
-  const mine = RISK.items.filter(it => it.assignedTo === u.id && assessedStatuses.includes(it.status) && !it.routingInactive && riskItemDate(it) >= from && riskItemDate(it) <= to);
-  const open = mine.filter(it => stepStatus(it, 'assessment') !== 'approved' || (resultWritten(it) && stepStatus(it, 'result') !== 'approved'));
-  if (open.length) return res.status(400).json({ error: `결재가 끝나지 않은 항목이 ${open.length}건 있습니다(${open.slice(0, 5).map(it => it.id).join(', ')}). 결재를 마친 뒤 제출하세요.` });
-  const list = annualSubmissions().filter(s => !(s.writerId === u.id && s.from === from && s.to === to));
-  list.push({ officeCode: userOfficeCode(u), writerId: u.id, writerName: u.name, title: riskRole(u).title, from, to, itemCount: mine.length, at: new Date().toISOString() });
-  RISK.annualSubmissions = list; saveRisk(); broadcastRisk();
-  res.json({ ok: true });
+  const b = req.body || {}, action = b.action, reason = String(b.reason || '').trim().slice(0, 500);
+  if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: '결재 또는 반려를 고르세요.' });
+  const list = (Array.isArray(b.items) ? b.items : []).slice(0, 200);
+  if (!list.length) return res.status(400).json({ error: '결재할 문서를 고르세요.' });
+  const results = list.map(({ id, doc }) => {
+    const it = RISK.items.find(x => x.id === id);
+    if (!it || !RISK_DOCS.includes(doc) || !riskItemVisible(u, it)) return { id, doc, ok: false, error: '문서를 찾을 수 없습니다.' };
+    const failed = decideApproval(u, it, doc, action, reason);
+    return failed ? { id, doc, ok: false, error: failed.error } : { id, doc, ok: true };
+  });
+  if (results.some(r => r.ok)) { saveRisk(); broadcastRisk(); }
+  res.json({ ok: results.every(r => r.ok), done: results.filter(r => r.ok).length, results });
 });
 // 배분: the collector gives an item to a writer of the same office (or keeps it), which starts the assessment.
 app.post('/api/risk/items/:id/assign', (req, res) => {
@@ -2562,7 +2550,7 @@ app.post('/api/risk/items/:id/reopen', (req, res) => {
   if (!isCollector(u) || !riskItemVisible(u, it)) return res.status(403).json({ error: '보완 요청은 총괄 안전담당자가 합니다.' });
   const reason = String(req.body?.reason || '').trim().slice(0, 500);
   if (!reason) return res.status(400).json({ error: '보완할 내용을 입력하세요.' });
-  const steps = ['assessment', 'result', 'annual'].filter(step => stepStatus(it, step) === 'approved');
+  const steps = RISK_DOCS.filter(step => stepStatus(it, step) === 'approved');
   if (!steps.length) return res.status(409).json({ error: '결재가 끝난 항목에만 보완을 요청할 수 있습니다.' });
   for (const step of steps) recordStep(it, step, { status: 'reopened', reopenReason: reason, reopenedBy: u.name, reopenedAt: new Date().toISOString(), bundleId: null });
   pushHistory(it, 'reopen', u, reason); saveRisk(); broadcastRisk();
@@ -2684,8 +2672,10 @@ loadRisk();
 let riskOfficeMigrated = false;
 for (const it of RISK.items) if (!it.officeCode) { it.officeCode = HEAD_OFFICE_CODE; it.officeName = riskOffice(HEAD_OFFICE_CODE).name; riskOfficeMigrated = true; }
 if (riskOfficeMigrated) saveRisk();
-// Earlier approval records (half-year reports of 2026-11-04, per-item approval of 2026-11-05) become the 평가표 step of
-// the new bundles once; items without an owner go to the office's collector. The old lists stay in the file untouched.
+// Earlier approval records (half-year reports of 2026-11-04, per-item approval of 2026-11-05) become the 평가표 step
+// once; items without an owner go to the office's collector. Documents left waiting in a period bundle or the yearly
+// report of the first 2026-11-07 version go back to their writer (the bundles were removed; approved steps stay).
+// The old lists stay in the file untouched.
 let riskApprovalMigrated = false;
 for (const report of Array.isArray(RISK.officeReports) ? RISK.officeReports : []) for (const id of report.itemIds || []) {
   const it = RISK.items.find(x => x.id === id);
@@ -2696,6 +2686,11 @@ for (const it of RISK.items) {
     const a = it.approval, status = a.status === 'revision' ? 'reopened' : a.status;
     it.approvals = { assessment: { status, requestedBy: a.requestedBy || null, requestedAt: a.requestedAt || null, approvedBy: a.approvedBy || null, approvedAt: a.approvedAt || null, approvedOnce: !!a.approvedOnce, rejectReason: a.rejectReason || null } };
     riskApprovalMigrated = true;
+  }
+  if (it.approvals?.annual) { const { annual, ...rest } = it.approvals; it.approvals = rest; riskApprovalMigrated = true; }
+  for (const doc of RISK_DOCS) {
+    const a = it.approvals?.[doc];
+    if (a && a.status === 'pending' && !Array.isArray(a.chain)) { it.approvals[doc] = { ...a, status: a.approvedOnce ? 'reopened' : null, bundleId: null }; riskApprovalMigrated = true; }
   }
   if (!it.assignedTo && !['inbox', 'referred', 'discarded'].includes(it.status)) {
     const owner = riskAccounts().find(a => userOfficeCode(a) === itemOfficeCode(it) && riskRole(a).collector);
