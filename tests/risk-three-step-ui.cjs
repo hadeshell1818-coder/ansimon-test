@@ -29,7 +29,7 @@ async function main(){
   assert.equal(await page.getByRole('button',{name:'전체 보기',exact:true}).count(),0);
   assert.equal(await page.getByRole('button',{name:'3개월',exact:true}).count(),0,'dates only: no period presets');
   assert.equal(await page.getByRole('button',{name:'상반기',exact:true}).count(),0);
-  assert.equal(await page.getByRole('button',{name:'오늘',exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'오늘',exact:true}).count(),0,'start and end dates only');
   assert.equal(await page.getByRole('button',{name:'공정별 출력',exact:true}).count(),1);
   await page.screenshot({path:path.join(os.tmpdir(),'risk-three-step-desktop.png'),fullPage:true});
   // A written assessment opens with what was written (2026-11-05): risk level, measures and references are in the form.

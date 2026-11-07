@@ -39,7 +39,12 @@ async function main(){
   release();await page.locator('#risk-answer-0').waitFor();
   await page.locator('#risk-answer-0').fill('한 개 10kg, 하루 20회');
   await page.getByRole('button',{name:'초안 작성 계속'}).click();
-  await page.getByText('AI 초안을 개선대책·관련근거 칸에 넣었습니다',{exact:true}).waitFor();
+  await page.getByText('AI 초안을 아래 개선대책·관련근거 칸에 넣었습니다',{exact:true}).waitFor();
+  // Right under the AI button: a short status line, then the 개선대책·관련근거 boxes (seen at once); the long explanation is folded.
+  const order=await page.evaluate(()=>['risk-advice-button','risk-advice-result','e-reduction','e-reference','risk-chat-input'].map(id=>document.getElementById(id).getBoundingClientRect().top));
+  assert.deepEqual([...order].sort((a,b)=>a-b),order,'button → status → 개선대책 → 관련근거 → chat');
+  assert.equal(await page.locator('#risk-advice-result details.ai-explain').getAttribute('open'),null,'the explanation is folded');
+  await page.locator('#risk-advice-result details.ai-explain > summary').click();
   assert.equal(await page.locator('#risk-advice-result .advice-edit').count(),0,'the draft is not repeated below the form boxes');
   assert.match(await page.locator('#e-reduction').inputValue(),/\S/);
   await page.getByText('소요 시간: 16.2초 (위험 이해 1.8초 · 근거 찾기 4.1초 · 초안 작성 5.9초 · 검토 2.0초)').waitFor();
