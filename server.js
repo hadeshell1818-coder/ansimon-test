@@ -164,20 +164,21 @@ if (process.env.PW_JIP5) {
 }
 /* 시험 계정(2026-11-04/07): 장흥대덕우체국 담당자·국장·직원과 장흥우체국 공정 담당자·과장·총괄국장이 비밀번호
  * PW_TEST_OFFICE 하나를 함께 쓴다. 역할·결재 흐름을 시험하는 용도이며, 직원 명단으로 계정을 만들 때 이 블록과 변수를
- * 지운다(AGENTS.md 1-1절). 직함과 역할은 기본값이고 총괄 안전담당자가 설정 화면에서 바꾼다. */
+ * 지운다(AGENTS.md 1-1절). 직함과 역할은 기본값이고 총괄 안전담당자가 설정 화면에서 바꾼다. 이름은 결재란·담당자(성명)에
+ * 사람 이름이 찍히는 것을 보도록 지어낸 시험용 이름이다(실제 직원 아님). */
 if (process.env.PW_TEST_OFFICE) {
   const testOfficeHash = requiredPassword('PW_TEST_OFFICE');
   const testAccount = (name, org, officeCode, role, riskRole) => ({ pwHash: testOfficeHash, kind: 'safety_mgr', name, org, region: '장흥군', type: null, role, officeCode, riskRole, test: true });
-  USERS.daedeok1 = testAccount('대덕 담당자', '장흥대덕우체국', 'daedeok', '관내국 안전 담당자(시험용)', { title: '대덕 담당자', collector: true, writer: true, supervisorId: 'daedeok2' });
-  USERS.daedeok2 = testAccount('대덕 국장', '장흥대덕우체국', 'daedeok', '관내국장(시험용)', { title: '국장', approver: true });
-  USERS.jhpost = testAccount('우편팀장(시험)', '장흥우체국 영업과', 'jangheung', '우편팀장(시험용)', { title: '우편팀장', writer: true, supervisorId: 'jhsales', processes: ['접수(창구)'] });
-  USERS.jhcomm = testAccount('소통팀장(시험)', '장흥우체국 우편물류과', 'jangheung', '소통팀장(시험용)', { title: '소통팀장', writer: true, supervisorId: 'jhlogi', processes: ['구분', '발착', '집배'] });
-  USERS.jhsales = testAccount('영업과장(시험)', '장흥우체국 영업과', 'jangheung', '영업과장(시험용)', { title: '영업과장', approver: true });
-  USERS.jhlogi = testAccount('우편물류과장(시험)', '장흥우체국 우편물류과', 'jangheung', '우편물류과장(시험용)', { title: '우편물류과장', approver: true });
-  USERS.jhchief = testAccount('총괄국장(시험)', '장흥우체국', 'jangheung', '총괄국장(시험용)', { title: '총괄국장', chief: true });
+  USERS.daedeok1 = testAccount('김민수(시험)', '장흥대덕우체국', 'daedeok', '관내국 안전 담당자(시험용)', { title: '대덕 담당자', collector: true, writer: true, supervisorId: 'daedeok2' });
+  USERS.daedeok2 = testAccount('이영호(시험)', '장흥대덕우체국', 'daedeok', '관내국장(시험용)', { title: '국장', approver: true });
+  USERS.jhpost = testAccount('박서연(시험)', '장흥우체국 영업과', 'jangheung', '우편팀장(시험용)', { title: '우편팀장', writer: true, supervisorId: 'jhsales', processes: ['접수(창구)'] });
+  USERS.jhcomm = testAccount('정우진(시험)', '장흥우체국 우편물류과', 'jangheung', '소통팀장(시험용)', { title: '소통팀장', writer: true, supervisorId: 'jhlogi', processes: ['구분', '발착', '집배'] });
+  USERS.jhsales = testAccount('한상철(시험)', '장흥우체국 영업과', 'jangheung', '영업과장(시험용)', { title: '영업과장', approver: true });
+  USERS.jhlogi = testAccount('윤재석(시험)', '장흥우체국 우편물류과', 'jangheung', '우편물류과장(시험용)', { title: '우편물류과장', approver: true });
+  USERS.jhchief = testAccount('송태호(시험)', '장흥우체국', 'jangheung', '총괄국장(시험용)', { title: '총괄국장', chief: true });
   // A branch employee for the app (2026-11-05): their internal hazard reports land in the 대덕 inbox. Not on the control
   // room roster (still the fixed head-office six), so no return reports or zone alerts until the staff list arrives.
-  USERS.daedeok3 = { pwHash: testOfficeHash, kind: 'carrier', name: '대덕 직원', org: '장흥대덕우체국', region: '장흥군', type: null, role: '직원(시험용)', officeCode: 'daedeok', test: true };
+  USERS.daedeok3 = { pwHash: testOfficeHash, kind: 'carrier', name: '최지훈(시험)', org: '장흥대덕우체국', region: '장흥군', type: null, role: '직원(시험용)', officeCode: 'daedeok', test: true };
 }
 // Prototype accounts use per-account passwords when configured, otherwise existing PW_JIP.
 for (let i=11;i<=16;i++) {
@@ -1955,10 +1956,11 @@ function logisticsTitle() { const collector = officeCollectors(HEAD_OFFICE_CODE)
 // branch 담당 | 국장). doc: 'assessment' for the 위험성평가표, 'result' for the 이행결과서.
 function riskApprovalNames(code, rows, doc = 'assessment') {
   const names = pick => [...new Set(rows.flatMap(pick).filter(Boolean))].join(', ');
-  // A rejected, withdrawn or reopened document shows no names until it goes up again.
+  // 담당 = the writer (sender) once the document exists; the other cells only for a document in progress or approved
+  // (a rejected, withdrawn or reopened one shows them again after it goes up and is decided).
   const live = it => ['pending', 'approved'].includes(approvalsOf(it)[doc]?.status) ? approvalsOf(it)[doc] : null;
   const signed = role => names(it => (live(it)?.chain || []).filter(step => step.status === 'done' && step.roles.includes(role)).map(step => step.name));
-  const writer = names(it => [live(it)?.requestedBy]);
+  const writer = names(it => [live(it)?.requestedBy || (doc === 'result' ? (resultWritten(it) ? it.resultPerson || it.assignedName : '') : it.evaluator || it.assignedName)]);
   if (code !== HEAD_OFFICE_CODE) return { branch: true, labels: ['담당', '국장'], values: [writer, signed('chief')] };
   return { branch: false, labels: ['담당', '과장', logisticsTitle(), '국장'], values: [writer, signed('supervisor'), signed('logistics'), signed('chief')] };
 }
@@ -2126,7 +2128,8 @@ app.get('/api/risk/export.xlsx', (req, res) => {
     return riskItemVisible(u, it) && (office === 'all' || itemOfficeCode(it) === office)
       && !it.routingInactive && ['assessing', 'assessed', 'done'].includes(it.status) && date >= from && date <= to;
   }).sort((a, b) => String(a.assessmentStartedAt || a.triagedAt || a.createdAt).localeCompare(String(b.assessmentStartedAt || b.triagedAt || b.createdAt)));
-  const headers = ['번호', '유해·위험요인', '위험성 수준', '개선대책', '개선예정일', '개선완료일', '담당자(성명)', '이행결과서', '관련근거(선택사항)'];
+  // Line breaks between whole words so a narrow column never leaves one syllable on its own line (2026-11-07).
+  const headers = ['번호', '유해·위험요인', '위험성\n수준', '개선대책', '개선\n예정일', '개선\n완료일', '담당자\n(성명)', '이행\n결과서', '관련근거\n(선택사항)'];
   const border = { top: { style: 'thin', color: { rgb: '9AA4AE' } }, bottom: { style: 'thin', color: { rgb: '9AA4AE' } }, left: { style: 'thin', color: { rgb: '9AA4AE' } }, right: { style: 'thin', color: { rgb: '9AA4AE' } } };
   const workbook = XLSXStyle.utils.book_new();
   const processOf = it => it.customProcess || it.assessmentTarget || PROCESSES.find(process => process.id === it.proc)?.name || '미지정 공정';
@@ -2462,7 +2465,7 @@ const pushHistory = (target, action, u, reason = '') => { target.history = [...(
 const currentStep = a => a && a.status === 'pending' ? (a.chain || [])[a.step || 0] || null : null;
 const docName = doc => doc === 'result' ? '이행결과서' : '위험성평가표';
 // Send one document of one item into its 결재선 (the assigned writer; the collector for an item not given to anyone).
-function requestApproval(u, it, doc) {
+function requestApproval(u, it, doc, { withAssessment = false } = {}) {
   const a = approvalsOf(it)[doc] || {}, role = riskRole(u);
   if (!(it.assignedTo ? it.assignedTo === u.id : (role.collector || it.createdById === u.id))) return { status: 403, error: '배분받은 담당자만 결재를 올릴 수 있습니다.' };
   if (['pending', 'approved'].includes(a.status)) return { status: 409, error: a.status === 'pending' ? '이미 결재 중입니다.' : '결재가 끝난 문서입니다. 고치려면 총괄 담당자의 보완 요청이 필요합니다.' };
@@ -2470,7 +2473,7 @@ function requestApproval(u, it, doc) {
   if (doc === 'assessment' && !it.riskLevel) return { status: 400, error: '위험성 수준(상·중·하)을 정한 뒤 올리세요.' };
   if (doc === 'result') {
     if (!resultWritten(it)) return { status: 400, error: '이행결과서를 먼저 작성하세요.' };
-    if (stepStatus(it, 'assessment') !== 'approved') return { status: 400, error: '위험성평가표 결재가 끝난 뒤 이행결과서를 올리세요.' };
+    if (stepStatus(it, 'assessment') !== 'approved' && !withAssessment) return { status: 400, error: '위험성평가표 결재가 끝난 뒤 이행결과서를 올리거나 평가표와 함께 올리세요.' };
   }
   const { chain, error } = approvalChain(accountById(it.assignedTo) || u);
   if (error) return { status: 400, error };
@@ -2496,9 +2499,19 @@ function decideApproval(u, it, doc, action, reason) {
 app.post('/api/risk/items/:id/approval/:doc/:action', (req, res) => {
   const u = userFromReq(req), it = RISK.items.find(x => x.id === req.params.id);
   const { doc, action } = req.params, reason = String(req.body?.reason || '').trim().slice(0, 500);
-  if (!it || !RISK_DOCS.includes(doc) || !['request', 'withdraw', 'approve', 'reject'].includes(action)) return res.status(404).json({ error: 'not found' });
+  if (!it || !(RISK_DOCS.includes(doc) || (doc === 'both' && ['request', 'withdraw'].includes(action))) || !['request', 'withdraw', 'approve', 'reject'].includes(action)) return res.status(404).json({ error: 'not found' });
   let failed = null;
-  if (action === 'request') failed = requestApproval(u, it, doc);
+  // both (2026-11-07 user decision): the 평가표 and the 이행결과서 go up together on the same 결재선 and are decided
+  // together from the queue; if the 이행결과서 cannot go, the 평가표 is not sent either.
+  if (doc === 'both' && action === 'request') {
+    const before = approvalsOf(it).assessment;
+    failed = requestApproval(u, it, 'assessment') || requestApproval(u, it, 'result', { withAssessment: true });
+    if (failed) it.approvals = { ...approvalsOf(it), assessment: before };
+  } else if (doc === 'both') {
+    const pending = RISK_DOCS.filter(d => approvalsOf(it)[d]?.status === 'pending' && approvalsOf(it)[d].requestedById === u.id);
+    if (!pending.length) failed = { status: 409, error: '취소할 결재가 없습니다.' };
+    for (const d of pending) { recordStep(it, d, { status: approvalsOf(it)[d].approvedOnce ? 'reopened' : null, step: 0 }); pushHistory(it.approvals[d], 'withdraw', u); }
+  } else if (action === 'request') failed = requestApproval(u, it, doc);
   else if (action === 'withdraw') {
     const a = approvalsOf(it)[doc];
     if (!a || a.status !== 'pending') failed = { status: 409, error: '결재 대기 중인 문서만 취소할 수 있습니다.' };
@@ -2507,7 +2520,7 @@ app.post('/api/risk/items/:id/approval/:doc/:action', (req, res) => {
   } else failed = decideApproval(u, it, doc, action, reason);
   if (failed) return res.status(failed.status).json({ error: failed.error });
   saveRisk(); broadcastRisk();
-  res.json({ ok: true, approval: approvalsOf(it)[doc] });
+  res.json({ ok: true, approval: approvalsOf(it)[doc === 'both' ? 'assessment' : doc], approvals: approvalsOf(it) });
 });
 // 선택 결재: several items at once (each recorded separately); items that fail are reported, the rest go through.
 app.post('/api/risk/approvals/decide', (req, res) => {

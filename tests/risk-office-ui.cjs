@@ -107,6 +107,13 @@ async function main() {
     const resultForm = await writer.page.evaluate(() => resultFormHtml(R.registered.find(it => it.id === 'H3')));
     assert.match(resultForm, /<th>담당자\(성명\)<\/th>/);
     assert.match(resultForm, /approval-box four/);
+    // Both ready: one button sends the 평가표 and the 이행결과서 together; nothing to reopen on one's own items.
+    const both = await writer.page.evaluate(() => approvalButtons({ ...R.registered.find(it => it.id === 'H1'), doneAt: '2026-11-07T01:00:00Z' }));
+    assert.match(both, /평가표·이행결과서 함께 결재 올리기/); assert.match(both, /평가표만 결재 올리기/);
+    assert.equal(await writer.page.evaluate(() => reopenButton(R.registered.find(it => it.id === 'H3'))), '', 'a writer fixes their own document directly');
+    // 담당 is the writer once the document exists; a returned document shows its reason at the top.
+    assert.match(await writer.page.evaluate(() => approvalBox('jangheung', [R.registered.find(it => it.id === 'H1')])), /<td>우편팀장\(시험\)<\/td><td><\/td><td><\/td><td><\/td>/);
+    assert.match(await writer.page.evaluate(() => returnNotice({ approvals: { assessment: { status: 'rejected', rejectedBy: '영업과장(시험)', rejectReason: '대책 보완' } } }, 'assessment')), /반려\(영업과장\(시험\)\): 대책 보완 — 이 창에서 고친 뒤 다시 결재를 올리세요/);
     assert.deepEqual(writer.errors, []);
 
     // Approver: lands on 결재, sees what is their turn, approves several at once; the table is view-only.
@@ -116,7 +123,7 @@ async function main() {
     assert.match(await approver.page.locator('.queue-table').innerText(), /위험성평가표[\s\S]*창구 의자 바퀴 미끄러짐[\s\S]*검토/);
     await approver.page.getByLabel('모두 선택').check();
     await approver.page.getByRole('button', { name: '선택 결재(검토)' }).click();
-    await toast(approver.page, '1건');
+    await toast(approver.page, '1개 문서');
     assert.deepEqual(approver.sent.find(p => p.path === '/api/risk/approvals/decide').body, { action: 'approve', items: [{ id: 'H1', doc: 'assessment' }], reason: '' });
     await approver.page.locator('#tab-table').click();
     assert.equal(await approver.page.locator('.three-step select').count(), 0);
@@ -137,7 +144,10 @@ async function main() {
     const progress = await collector.page.locator('.progress-table').innerText();
     assert.match(progress, /우편팀장 우편팀장\(시험\)[\s\S]*창구 의자 바퀴 미끄러짐[\s\S]*평가표: 서무팀장 확인 대기/);
     assert.match(progress, /이행결과서: 결재 올리기 전/);
-    await collector.page.locator('.progress-table tr', { hasText: 'H3' }).getByRole('button', { name: '보완 요청' }).click();
+    assert.equal(await collector.page.locator('.progress-table').getByRole('button', { name: /보완 요청/ }).count(), 0, 'no 보완 요청 marks in the list');
+    assert.equal(await collector.page.locator('.locked-row').count(), 0);
+    await collector.page.evaluate(() => editRow('H3'));
+    await collector.page.getByRole('button', { name: '보완 요청 보내기' }).click();
     await toast(collector.page, '보완을 요청');
     assert.deepEqual(collector.sent.find(p => p.path === '/api/risk/items/H3/reopen').body, { reason: '보완 내용' });
     assert.match(await collector.page.locator('.form-section', { hasText: '진행 현황' }).innerText(), /청 보고: 「위험성평가표」 탭에서 기간/);
@@ -148,6 +158,11 @@ async function main() {
     const pendingBox = await collector.page.evaluate(() => approvalBox('jangheung', R.registered.filter(it => it.id === 'H1')));
     assert.match(pendingBox, /<td>우편팀장\(시험\)<\/td><td>영업과장\(시험\)<\/td><td><\/td><td><\/td>/, 'only the steps done so far');
     const branchBox = await collector.page.evaluate(() => approvalBox('daedeok', R.registered.filter(it => it.id === 'D1')));
+    const branchResultBox = await collector.page.evaluate(() => { const d = R.registered.find(it => it.id === 'D1'); return approvalBox('daedeok', [{ ...d, doneAt: '2026-11-07T02:00:00Z', resultPerson: '대덕 담당자', approvals: { ...d.approvals, result: { ...d.approvals.assessment } } }], 'result'); });
+    assert.match(branchResultBox, /<td>대덕 담당자<\/td><td>대덕 국장<\/td>/, 'the 이행결과서 box carries the writer and the approving 국장');
+    // Queue: both documents of one item at my turn are one row, decided together.
+    const grouped = await collector.page.evaluate(() => { const it = R.registered.find(x => x.id === 'H1'); const a = it.approvals.assessment; R.registered.push({ ...it, id: 'H9', approvals: { assessment: a, result: { ...a } } }); const q = myQueue().find(x => x.it.id === 'H9'); R.registered.pop(); return q.docs; });
+    assert.deepEqual(grouped, ['assessment', 'result']);
     assert.match(branchBox, /<th>담당<\/th><th>국장<\/th><\/tr><tr><td>대덕 담당자<\/td><td>대덕 국장<\/td>/);
     // Office picker and 관내 전체 print: head office first, branch after it, no page break.
     await collector.page.locator('#tab-table').click();

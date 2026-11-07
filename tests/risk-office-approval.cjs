@@ -167,6 +167,20 @@ async function main() {
     for (const who of ['sales', 'hq', 'logi', 'chief']) assert.equal((await decide(who, 'approve', [{ id: 'H1', doc: 'result' }])).body.done, 1, who);
     assert.equal(steps('H1').result.status, 'approved');
 
+    // Both together: the 평가표 and the 이행결과서 go up on the same line and are decided together; withdrawing takes both back.
+    item && RISK.items.push(item('H5', 'jangheung', 'post', { customProcess: '접수(창구)', factor: '번호표 전선 걸림', riskLevel: '중', doneAt: '2026-08-22T00:00:00Z', resultUpdatedAt: '2026-08-22T00:00:00Z', afterRiskLevel: '하', resultNote: '정리' }));
+    assert.equal((await act('post', 'H5', 'result', 'request')).status, 400, 'alone it waits for the 평가표');
+    assert.equal((await act('post', 'H5', 'both', 'request')).status, 200);
+    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], ['pending', 'pending']);
+    assert.equal((await act('post', 'H5', 'both', 'withdraw')).status, 200);
+    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], [null, null]);
+    await act('post', 'H5', 'both', 'request');
+    for (const who of ['sales', 'hq', 'logi', 'chief']) assert.equal((await decide(who, 'approve', [{ id: 'H5', doc: 'assessment' }, { id: 'H5', doc: 'result' }])).body.done, 2, who);
+    assert.deepEqual([steps('H5').assessment.status, steps('H5').result.status], ['approved', 'approved']);
+    RISK.items.pop();
+    const failBoth = (await act('post', 'H1', 'both', 'request'));
+    assert.equal(failBoth.status, 409, 'an approved 평가표 cannot go up again');
+
     // Export: names of the steps that happened; 과장 and 우편물류과장 cells both carry the 우편물류과장 for 소통팀장's item.
     const sheets = await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=jangheung');
     const sheetOf = process => sheets.find(rows => String(rows[2]?.[0] || '').includes(`□ 공정명: ${process}`));
@@ -198,7 +212,7 @@ async function main() {
     assert.equal((await call('hq', 'POST', '/api/risk/items/H1/reopen', { reason: '개선예정일 기재' })).status, 200);
     assert.deepEqual([steps('H1').assessment.status, steps('H1').result.status], ['reopened', 'reopened']);
     const reopenedSheet = (await sheetRows('hq', '?from=2026-07-01&to=2026-12-31&office=jangheung')).find(rows => String(rows[2]?.[0] || '').includes('□ 공정명: 접수(창구)'));
-    assert.deepEqual(reopenedSheet[1].slice(5, 9).map(v => v ?? ''), ['', '', '', ''], 'no names while reopened');
+    assert.deepEqual(reopenedSheet[1].slice(5, 9).map(v => v ?? ''), ['우편팀장', '', '', ''], 'only the writer while reopened');
     assert.equal((await patch('post', 'H1', { dueDate: '12.31' })).status, 200);
     assert.equal((await call('hq', 'POST', '/api/risk/items/D1/reopen', { reason: '사진 보완' })).status, 200, 'the head office asks a branch for 보완');
     assert.equal((await patch('dd', 'D1', { dueDate: '12.31' })).status, 200);
