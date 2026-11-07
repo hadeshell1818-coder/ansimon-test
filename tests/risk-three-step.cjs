@@ -8,7 +8,7 @@ const routes = {};
 const legacy = { id: 'RA1', status: 'assessed', frequency: 4, severity: 3, afterRisk: 4, factor: '계단 파손으로 넘어짐 위험', createdAt: new Date().toISOString() };
 const RISK = { items: [legacy] };
 const ctx = vm.createContext({ RISK, Date, process, console,
-  app: { patch: (p,h) => routes[p] = h, post: (p,h) => routes[p] = h, get: (p,h) => routes[p] = h, delete: (p,h) => routes['DELETE '+p] = h },
+  app: { put: (p,h) => routes['PUT '+p] = h, patch: (p,h) => routes[p] = h, post: (p,h) => routes[p] = h, get: (p,h) => routes[p] = h, delete: (p,h) => routes['DELETE '+p] = h },
   userFromReq: req => req.user, isSafetyMgr: u => u?.kind === 'safety_mgr',
   procById: () => ({ name: '시설물' }), PROCESSES: [], HAZARD_TYPES: {}, SAFETY_OFFICE: '시험 우체국',
   saveRisk() {}, broadcastRisk() {}, syncRiskSource() {}, reports: [], SAFE: { hazards: [] }, save() {}, broadcast() {}, saveSafety() {}, broadcastSafety() {}, signedRiskUrl: () => '/photo', nextRiskId: () => 'RA2',
@@ -22,7 +22,7 @@ const criteria=vm.runInContext('RISK_CRITERIA',ctx);
 assert.deepEqual(Array.from(criteria.levels,x=>[x.value,x.allow]),[['상',false],['중',false],['하',true]]);
 assert.equal(ctx.itemForMgr(legacy).riskValue,null);
 assert.equal(ctx.itemForMgr(legacy).legacyReviewRequired,true);
-const user={kind:'safety_mgr',name:'시험 담당자'};
+const user={id:'mgr',kind:'safety_mgr',name:'시험 담당자',riskRole:{collector:true,writer:true}};
 function call(path,body={},actor=user){const res={code:200,status(c){this.code=c;return this},json(b){this.body=b;return this}};routes[path]({user:actor,params:{id:'RA1'},body,query:{}},res);return res}
 assert.equal(call('/api/risk/items/:id',{riskLevel:'상'},null).code,403);
 assert.equal(call('/api/risk/items/:id',{riskLevel:3}).code,400);

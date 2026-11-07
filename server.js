@@ -156,16 +156,25 @@ if (process.env.PW_JIP4) {
   console.warn('⚠️ PW_JIP4 미설정 — 우체국 안전관제(jip4) 계정이 비활성화됩니다.');
 }
 if (process.env.PW_JIP5) {
-  USERS.jip5 = { pwHash: requiredPassword('PW_JIP5'), kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', region: '장흥군', type: null, role: '안전보건담당자', officeCode: 'jangheung', officeRole: 'manager' };
+  USERS.jip5 = { pwHash: requiredPassword('PW_JIP5'), kind: 'safety_mgr', name: '안전보건담당자', org: '장흥우체국', region: '장흥군', type: null, role: '안전보건담당자', officeCode: 'jangheung',
+    // 총괄 안전담당자(장흥: 서무팀장) and the writer for the processes other teams do not cover. Real names come with the staff list.
+    riskRole: { title: '서무팀장', collector: true, writer: true, supervisorId: 'jhlogi', processes: ['시설 등', '청사·사무실'] } };
 } else {
   console.warn('⚠️ PW_JIP5 미설정 — 안전보건담당자(jip5) 계정이 비활성화됩니다.');
 }
-/* 관내국 시험 계정(2026-11-04): 장흥대덕우체국 담당자(daedeok1)와 국장(daedeok2)이 비밀번호 PW_TEST_OFFICE 하나를 함께 쓴다.
- * 국 구분·상하반기 보고·국장 결재를 시험하는 용도이며, 직원 명단으로 계정을 만들 때 이 블록과 변수를 지운다(AGENTS.md 1-1절). */
+/* 시험 계정(2026-11-04/07): 장흥대덕우체국 담당자·국장·직원과 장흥우체국 공정 담당자·과장·총괄국장이 비밀번호
+ * PW_TEST_OFFICE 하나를 함께 쓴다. 역할·결재 흐름을 시험하는 용도이며, 직원 명단으로 계정을 만들 때 이 블록과 변수를
+ * 지운다(AGENTS.md 1-1절). 직함과 역할은 기본값이고 총괄 안전담당자가 설정 화면에서 바꾼다. */
 if (process.env.PW_TEST_OFFICE) {
   const testOfficeHash = requiredPassword('PW_TEST_OFFICE');
-  USERS.daedeok1 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 담당자', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국 안전 담당자(시험용)', officeCode: 'daedeok', officeRole: 'manager', test: true };
-  USERS.daedeok2 = { pwHash: testOfficeHash, kind: 'safety_mgr', name: '대덕 국장', org: '장흥대덕우체국', region: '장흥군', type: null, role: '관내국장(시험용)', officeCode: 'daedeok', officeRole: 'head', test: true };
+  const testAccount = (name, org, officeCode, role, riskRole) => ({ pwHash: testOfficeHash, kind: 'safety_mgr', name, org, region: '장흥군', type: null, role, officeCode, riskRole, test: true });
+  USERS.daedeok1 = testAccount('대덕 담당자', '장흥대덕우체국', 'daedeok', '관내국 안전 담당자(시험용)', { title: '대덕 담당자', collector: true, writer: true, supervisorId: 'daedeok2' });
+  USERS.daedeok2 = testAccount('대덕 국장', '장흥대덕우체국', 'daedeok', '관내국장(시험용)', { title: '국장', approver: true });
+  USERS.jhpost = testAccount('우편팀장(시험)', '장흥우체국 영업과', 'jangheung', '우편팀장(시험용)', { title: '우편팀장', writer: true, supervisorId: 'jhsales', processes: ['접수(창구)'] });
+  USERS.jhcomm = testAccount('소통팀장(시험)', '장흥우체국 우편물류과', 'jangheung', '소통팀장(시험용)', { title: '소통팀장', writer: true, supervisorId: 'jhlogi', processes: ['구분', '발착', '집배'] });
+  USERS.jhsales = testAccount('영업과장(시험)', '장흥우체국 영업과', 'jangheung', '영업과장(시험용)', { title: '영업과장', approver: true });
+  USERS.jhlogi = testAccount('우편물류과장(시험)', '장흥우체국 우편물류과', 'jangheung', '우편물류과장(시험용)', { title: '우편물류과장', approver: true });
+  USERS.jhchief = testAccount('총괄국장(시험)', '장흥우체국', 'jangheung', '총괄국장(시험용)', { title: '총괄국장', chief: true });
   // A branch employee for the app (2026-11-05): their internal hazard reports land in the 대덕 inbox. Not on the control
   // room roster (still the fixed head-office six), so no return reports or zone alerts until the staff list arrives.
   USERS.daedeok3 = { pwHash: testOfficeHash, kind: 'carrier', name: '대덕 직원', org: '장흥대덕우체국', region: '장흥군', type: null, role: '직원(시험용)', officeCode: 'daedeok', test: true };
@@ -1857,10 +1866,12 @@ setInterval(() => resendUnacknowledged().catch(e => console.error('push reminder
 const RISK_FILE = path.join(DATA_DIR, 'risk.json');
 const isSafetyMgr = u => !!u && u.kind === 'safety_mgr' && (u.org === SAFETY_OFFICE || RISK_OFFICES.some(office => office.code === u.officeCode));
 
-/* 국 구분(관내국): 총괄국 장흥우체국과 관내국 9곳이 같은 화면을 쓰고, 서버가 로그인한 사람의 국·역할로 자료를 거른다.
- * 관내국 평가는 한 건씩 그 국 국장이 결재하면 바로 총괄국에 보인다(2026-11-05 사용자 결정: 상·하반기 묶음 보고 폐지).
- * 결재 대기·결재 완료 항목의 평가 내용은 고정되고, 총괄국의 보완 요청으로만 다시 고친다. 이행결과서는 결재 뒤에 쓰는
- * 문서라 결재 완료 항목에도 작성한다(AGENTS.md 1-1절). 기록의 국 코드가 없으면 총괄국이다. */
+/* 국 구분(관내국)과 위험성평가 역할(2026-11-07 사용자 결정, AGENTS.md 1-1절).
+ * 국마다 총괄 안전담당자(장흥: 서무팀장, 큰 국: 산업안전보건실장)가 앱 신고를 받아 공정 담당자(우편팀장·소통팀장 등)에게
+ * 배분하고, 담당자는 자기 건만 작성한다. 담당자는 평가표·이행결과서를 한 달이든 분기든 모아 자기 결재자(과장, 관내국은
+ * 국장)에게 한 번에 결재를 올린다. 정기평가(연 1회)는 각 담당자가 기간분을 제출하면 총괄 담당자가 국 전체(관내국 포함)를
+ * 한 문서로 총괄국장에게 올려 한 번 결재받고 청에 보고한다. 역할·결재자·공정은 총괄 담당자가 설정 화면에서 정한다.
+ * 결재된 내용은 고정되고 총괄 담당자의 보완 요청으로만 다시 연다. 기록의 국 코드가 없으면 총괄국이다. */
 const HEAD_OFFICE_CODE = 'jangheung';
 const RISK_OFFICES = [
   { code: HEAD_OFFICE_CODE, name: '장흥우체국', head: true },
@@ -1870,38 +1881,65 @@ const RISK_OFFICES = [
 const riskOffice = code => RISK_OFFICES.find(office => office.code === code) || RISK_OFFICES[0];
 const userOfficeCode = u => (u && RISK_OFFICES.some(office => office.code === u.officeCode)) ? u.officeCode : HEAD_OFFICE_CODE;
 const itemOfficeCode = it => (it && RISK_OFFICES.some(office => office.code === it.officeCode)) ? it.officeCode : HEAD_OFFICE_CODE;
-const isOfficeHead = u => u?.officeRole === 'head';
-const isHeadOfficeManager = u => isSafetyMgr(u) && userOfficeCode(u) === HEAD_OFFICE_CODE && !isOfficeHead(u);
-// The head (국장) of an office, by account: the approval box names the office head even before a decision
-// (2026-11-05 user decision). The head office has no head account, so its 국장 cell stays blank for signing.
-const officeHeadName = code => Object.values(typeof USERS === 'object' && USERS ? USERS : {}).find(u => u.officeRole === 'head' && u.officeCode === code)?.name || '';
+const riskAccounts = () => Object.entries(typeof USERS === 'object' && USERS ? USERS : {}).filter(([, u]) => u.kind === 'safety_mgr').map(([id, u]) => ({ id, ...u }));
+// Role of an account: the defaults written with the account, overridden by what the 총괄 담당자 set on the settings screen.
+const ROLE_KEYS = ['title', 'collector', 'writer', 'approver', 'chief', 'supervisorId', 'processes'];
+function riskRole(u) {
+  if (!u) return { title: '', collector: false, writer: false, approver: false, chief: false, supervisorId: null, processes: [] };
+  const base = u.riskRole || {}, saved = (RISK.roles && RISK.roles[u.id]) || {};
+  const pick = key => Object.hasOwn(saved, key) ? saved[key] : base[key];
+  return { title: pick('title') || u.title || '', collector: !!pick('collector'), writer: !!pick('writer'), approver: !!pick('approver'), chief: !!pick('chief'),
+    supervisorId: pick('supervisorId') || null, processes: Array.isArray(pick('processes')) ? pick('processes') : [] };
+}
+const accountById = id => { const u = typeof USERS === 'object' && USERS ? USERS[id] : null; return u ? { id, ...u } : null; };
+const isCollector = u => isSafetyMgr(u) && riskRole(u).collector;
+const isHeadOfficeManager = u => isCollector(u) && userOfficeCode(u) === HEAD_OFFICE_CODE;
 const riskItemDate = it => String(it?.assessmentStartedAt || it?.triagedAt || it?.createdAt || '').slice(0, 10);
-// Per-item approval: absent = 결재 요청 전. pending → approved | rejected; approved → revision (head office) → pending again.
-const approvalOf = it => (it && it.approval && typeof it.approval === 'object') ? it.approval : null;
-const approvalStatus = it => approvalOf(it)?.status || null;
-// Own office always; the head office manager also sees a branch item once its head has approved it (approvedOnce
-// keeps it visible during a revision).
+const approvalsOf = it => (it && it.approvals && typeof it.approvals === 'object') ? it.approvals : {};
+const stepStatus = (it, step) => approvalsOf(it)[step]?.status || null;
+// A branch item reaches the head office once its own head approved its assessment (it stays visible during a reopen).
+const branchApproved = it => !!approvalsOf(it).assessment?.approvedOnce;
 function riskItemVisible(u, it) {
   if (!isSafetyMgr(u)) return false;
-  if (itemOfficeCode(it) === userOfficeCode(u)) return true;
-  return isHeadOfficeManager(u) && !!approvalOf(it)?.approvedOnce;
+  const role = riskRole(u), own = itemOfficeCode(it) === userOfficeCode(u);
+  if (own) {
+    if (role.collector || role.chief) return true;
+    if (role.writer && (it.assignedTo === u.id || (!it.assignedTo && it.createdById === u.id))) return true;
+    if (role.approver) { const writer = accountById(it.assignedTo); return !!writer && riskRole(writer).supervisorId === u.id; }
+    return false;
+  }
+  return userOfficeCode(u) === HEAD_OFFICE_CODE && (role.collector || role.chief) && branchApproved(it);
 }
-// Why a change is refused (null when allowed): only the item's own office edits it, heads only view and approve,
-// and an item awaiting or holding approval stays fixed. The 이행결과서 (improve) is allowed on an approved item.
-function riskItemDenied(u, it, { improve = false } = {}) {
+// Why a change is refused (null when allowed). part: 'assessment' (평가표) or 'result' (이행결과서). Only the assigned
+// writer edits (the collector edits items not yet given to anyone or given to themselves); approvers and the chief view
+// and decide. A step awaiting or holding approval is fixed until withdrawn or reopened by the collector.
+function riskItemDenied(u, it, { part = 'assessment' } = {}) {
   if (itemOfficeCode(it) !== userOfficeCode(u)) return { status: 403, error: '다른 국의 위험성평가는 수정할 수 없습니다.' };
-  if (isOfficeHead(u)) return { status: 403, error: '국장 계정은 보기와 결재만 할 수 있습니다.' };
-  const status = approvalStatus(it);
-  if (status === 'pending') return { status: 409, error: '국장 결재 대기 중인 항목입니다. 고치려면 결재 요청을 취소하세요.' };
-  if (status === 'approved' && !improve) return { status: 409, error: '결재가 끝난 항목입니다. 고치려면 총괄국의 보완 요청이 필요합니다.' };
+  const role = riskRole(u), mine = it.assignedTo ? it.assignedTo === u.id : (role.collector || it.createdById === u.id);
+  if (!mine) return { status: 403, error: role.approver || role.chief ? '결재자 계정은 보기와 결재만 할 수 있습니다.' : '배분받은 담당자만 수정할 수 있습니다.' };
+  if (stepStatus(it, 'annual') === 'approved' || stepStatus(it, 'annual') === 'pending') return { status: 409, error: '정기평가 결재에 들어간 항목입니다. 고치려면 총괄 담당자의 보완 요청이 필요합니다.' };
+  const steps = part === 'result' ? ['result'] : ['assessment'];
+  for (const step of steps) {
+    if (stepStatus(it, step) === 'pending') return { status: 409, error: '결재 대기 중인 항목입니다. 고치려면 결재 요청을 취소하세요.' };
+    if (stepStatus(it, step) === 'approved') return { status: 409, error: '결재가 끝난 항목입니다. 고치려면 총괄 담당자의 보완 요청이 필요합니다.' };
+  }
   return null;
 }
-// Names for the approval box at the top right of printed and exported forms: 담당 = the evaluators (the writer),
-// 국장 = the branch head who approved, or the branch's head account; the head office leaves 국장 blank.
-function riskApprovalNames(code, rows) {
-  const evaluators = [...new Set(rows.map(it => it.evaluator || it.assessedBy || it.improvedBy).filter(Boolean))].join(', ');
-  const approvedBy = [...new Set(rows.map(it => approvalOf(it)?.approvedBy).filter(Boolean))].join(', ');
-  return { writer: evaluators, approver: code === HEAD_OFFICE_CODE ? '' : (approvedBy || officeHeadName(code)) };
+// Names stamped in the approval box at the top right of printed and exported forms, only for steps that happened:
+// 담당 = who sent it for approval, 과장 = who approved it, 국장 = the 총괄국장 who approved the yearly report. A branch
+// form has 담당 and 국장 (its head). step: 'assessment' for the 위험성평가표, 'result' for the 이행결과서.
+function riskApprovalNames(code, rows, step = 'assessment') {
+  const names = pick => [...new Set(rows.map(pick).filter(Boolean))].join(', ');
+  const writer = names(it => approvalsOf(it)[step]?.requestedBy), reviewer = names(it => approvalsOf(it)[step]?.approvedBy);
+  if (code !== HEAD_OFFICE_CODE) return { branch: true, writer, reviewer: '', chief: reviewer };
+  return { branch: false, writer, reviewer, chief: names(it => approvalsOf(it).annual?.approvedBy) };
+}
+// 평가자 line: 관리감독자(the supervisors' titles), the writers' titles, then 담당 직원 (2026-11-07 user decision).
+function riskAssessors(rows) {
+  const writers = [...new Set(rows.map(it => it.assignedTo).filter(Boolean))].map(accountById).filter(Boolean);
+  const supervisors = [...new Set(writers.map(w => riskRole(w).supervisorId).filter(Boolean))].map(accountById).filter(Boolean);
+  const titles = list => [...new Set(list.map(a => riskRole(a).title || a.name).filter(Boolean))];
+  return [supervisors.length ? `관리감독자(${titles(supervisors).join('·')})` : '', ...titles(writers), '담당 직원'].filter(Boolean).join(', ');
 }
 
 /* 공정: 교재 서식은 소포 공정 예시. 장흥우체국 실제 공정으로 교체 예정(값은 예시). */
@@ -2016,13 +2054,13 @@ app.use(['/api/risk/state', '/api/risk/items'], (req, res, next) => {
   if (!isSafetyMgr(user)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
   // Every item change (PATCH, DELETE, triage, improve, transfer) passes here once for office and approval state.
   const id = req.baseUrl === '/api/risk/items' ? decodeURIComponent(String(req.path || '').split('/')[1] || '') : '';
-  if (id === 'manual' && isOfficeHead(user)) return res.status(403).json({ error: '국장 계정은 보기와 결재만 할 수 있습니다.' });
+  if (id === 'manual' && !riskRole(user).writer && !riskRole(user).collector) return res.status(403).json({ error: '결재자 계정은 보기와 결재만 할 수 있습니다.' });
   const item = id && id !== 'manual' ? RISK.items.find(x => x.id === id) : null;
   if (item) {
     if (!riskItemVisible(user, item)) return res.status(404).json({ error: 'not found' });
     const action = String(req.path || '').split('/')[2] || '';
-    // Approval actions have their own checks below; the 이행결과서 may be written on an approved item.
-    const denied = action === 'approval' || req.method === 'GET' ? null : riskItemDenied(user, item, { improve: action === 'improve' });
+    // Assignment and reopening have their own checks below; the 이행결과서 is its own step.
+    const denied = ['assign', 'reopen'].includes(action) || req.method === 'GET' ? null : riskItemDenied(user, item, { part: action === 'improve' ? 'result' : 'assessment' });
     if (denied) return res.status(denied.status).json({ error: denied.error });
   }
   next();
@@ -2032,15 +2070,22 @@ app.get('/api/risk/state', async (req, res) => {
   ensureRiskDemo();
   const own = userOfficeCode(u);
   const visible = RISK.items.filter(it => riskItemVisible(u, it));
+  const role = riskRole(u);
   const view = it => ({ ...itemForMgr(it), officeCode: itemOfficeCode(it), officeName: riskOffice(itemOfficeCode(it)).name,
-    readOnly: !!riskItemDenied(u, it), canImprove: !riskItemDenied(u, it, { improve: true }), approval: approvalView(it) });
+    readOnly: !!riskItemDenied(u, it), canImprove: !riskItemDenied(u, it, { part: 'result' }), approvals: approvalsOf(it) });
+  const account = a => ({ id: a.id, name: a.name, officeCode: userOfficeCode(a), ...riskRole(a) });
   res.json({
     role: 'safety_mgr', processes: PROCESSES, hazardTypes: HAZARD_TYPES,
     criteria: RISK_CRITERIA,
-    office: { code: own, name: riskOffice(own).name, head: own === HEAD_OFFICE_CODE, role: isOfficeHead(u) ? 'head' : 'manager', headName: officeHeadName(own) },
-    offices: RISK_OFFICES.map(office => ({ ...office, headName: officeHeadName(office.code) })),
-    inbox: isOfficeHead(u) ? [] : visible.filter(it => itemOfficeCode(it) === own && !it.routingInactive && ['inbox','referred'].includes(it.status)).map(view),
-    registered: visible.filter(it => !it.routingInactive && it.status !== 'inbox').map(view),
+    me: { id: u.id, name: u.name, ...role },
+    office: { code: own, name: riskOffice(own).name, head: own === HEAD_OFFICE_CODE, role: role.collector ? 'collector' : role.writer ? 'writer' : role.chief ? 'chief' : role.approver ? 'head' : 'viewer' },
+    offices: RISK_OFFICES,
+    // Accounts of this office (and, for the head office, the branches): names, titles and roles for the 결재선 and 배분.
+    accounts: riskAccounts().filter(a => userOfficeCode(a) === own || own === HEAD_OFFICE_CODE).map(account),
+    inbox: role.collector ? visible.filter(it => itemOfficeCode(it) === own && !it.routingInactive && ['inbox','referred'].includes(it.status)).map(view) : [],
+    registered: visible.filter(it => !it.routingInactive && !['inbox','referred'].includes(it.status)).map(view),
+    bundles: riskBundles().filter(b => bundleVisible(u, b)).map(bundleView),
+    submissions: annualSubmissions().filter(x => x.officeCode === own || own === HEAD_OFFICE_CODE),
   });
 });
 app.get('/api/risk/export.xlsx', (req, res) => {
@@ -2065,56 +2110,51 @@ app.get('/api/risk/export.xlsx', (req, res) => {
   const headStyle = { border, fill: { patternType: 'solid', fgColor: { rgb: 'E8EDF2' } }, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true } };
   const bodyStyle = c => ({ border, font: { sz: 10 }, alignment: { vertical: 'top', wrapText: true, horizontal: c === 1 || c === 3 || c === 8 ? 'left' : 'center' } });
   const setCell = (sheet, r, c, style) => { const address = XLSXStyle.utils.encode_cell({ r, c }); const cell = sheet[address] || (sheet[address] = { t: 's', v: '' }); cell.s = style; };
-  // Title block (two rows): the form title on the left, the approval box (담당 · 국장 with names) at the top right.
-  const titleBlock = (code, title, group) => { const approval = riskApprovalNames(code, group); return [[title, '', '', '', '', '', '', '담당', '국장'], ['', '', '', '', '', '', '', approval.writer || '', approval.approver || '']]; };
-  const styleTitleBlock = (sheet, r) => { setCell(sheet, r, 0, titleStyle); for (let c = headers.length - 2; c < headers.length; c++) { setCell(sheet, r, c, boxHead); setCell(sheet, r + 1, c, boxName); } };
-  const styleTable = (sheet, headRow, count) => { for (let c = 0; c < headers.length; c++) { setCell(sheet, headRow, c, headStyle); for (let r = headRow + 1; r <= headRow + count; r++) setCell(sheet, r, c, bodyStyle(c)); } };
+  // One block per process, as on the paper form: the title with the approval box at the top right (담당 · 과장 · 국장 at
+  // the head office, 담당 · 국장 at a branch; names only for steps that happened), then □ 공정명 □ 평가일 □ 평가자, then
+  // the table. The body columns are unchanged.
+  const processBlock = (code, processName, group) => {
+    const names = riskApprovalNames(code, group), labels = names.branch ? ['담당', '국장'] : ['담당', '과장', '국장'];
+    const values = names.branch ? [names.writer, names.chief] : [names.writer, names.reviewer, names.chief];
+    const boxStart = headers.length - labels.length, pad = n => Array(n).fill('');
+    const info = `□ 공정명: ${processName}     □ 평가일: ${from} ~ ${to}     □ 평가자: ${riskAssessors(group)}`;
+    const { rows, heights } = riskExportRows(group);
+    return { boxStart, count: rows.length,
+      aoa: [[`${riskOffice(code).name} 위험성평가표`, ...pad(boxStart - 1), ...labels], [...pad(boxStart), ...values.map(v => v || '')], [info], headers, ...rows],
+      heights: [20, 36, 24, 42, ...heights] };
+  };
+  const placeBlock = (sheet, top, block, merges) => {
+    merges.push({ s: { r: top, c: 0 }, e: { r: top + 1, c: block.boxStart - 1 } }, { s: { r: top + 2, c: 0 }, e: { r: top + 2, c: headers.length - 1 } });
+    setCell(sheet, top, 0, titleStyle);
+    for (let c = block.boxStart; c < headers.length; c++) { setCell(sheet, top, c, boxHead); setCell(sheet, top + 1, c, boxName); }
+    setCell(sheet, top + 2, 0, { font: { sz: 10 }, alignment: { horizontal: 'left', vertical: 'center', wrapText: true } });
+    for (let c = 0; c < headers.length; c++) { setCell(sheet, top + 3, c, headStyle); for (let r = top + 4; r <= top + 3 + block.count; r++) setCell(sheet, r, c, bodyStyle(c)); }
+  };
+  const byProcess = list => { const groups = new Map(); for (const it of list) { const name = processOf(it); if (!groups.has(name)) groups.set(name, []); groups.get(name).push(it); } return groups; };
   if (office === 'all') {
     // 관내 전체 (head office, for the regional report): one sheet, the head office first and each approved branch after it,
-    // every office with its own title block and approval box, processes as sub-headings, no sheet or page per office.
-    const aoa = [], heightsAll = [], merges = [], blocks = [];
+    // each process with its own block, no sheet or page per office.
+    const blocks = [], aoa = [], heightsAll = [];
     for (const current of RISK_OFFICES) {
-      const own = items.filter(it => itemOfficeCode(it) === current.code);
-      if (!own.length && current.code !== HEAD_OFFICE_CODE) continue;
-      const top = aoa.length;
-      aoa.push(...titleBlock(current.code, `${current.name} 위험성평가표`, own)); heightsAll.push(20, 36);
-      merges.push({ s: { r: top, c: 0 }, e: { r: top + 1, c: headers.length - 3 } });
-      blocks.push({ kind: 'title', row: top });
-      const processes = new Map();
-      for (const it of own) { const name = processOf(it); if (!processes.has(name)) processes.set(name, []); processes.get(name).push(it); }
-      if (!processes.size) { aoa.push([`${from} ~ ${to} 평가 항목 없음`]); heightsAll.push(18); }
-      for (const [processName, group] of processes) {
-        aoa.push([`공정명: ${processName}`]); heightsAll.push(20); merges.push({ s: { r: aoa.length - 1, c: 0 }, e: { r: aoa.length - 1, c: headers.length - 1 } });
-        blocks.push({ kind: 'process', row: aoa.length - 1 });
-        const { rows, heights } = riskExportRows(group);
-        blocks.push({ kind: 'table', row: aoa.length, count: rows.length });
-        aoa.push(headers, ...rows); heightsAll.push(42, ...heights);
+      const groups = byProcess(items.filter(it => itemOfficeCode(it) === current.code));
+      for (const [processName, group] of groups) {
+        const block = processBlock(current.code, processName, group);
+        blocks.push({ top: aoa.length, block }); aoa.push(...block.aoa, []); heightsAll.push(...block.heights, 10);
       }
-      aoa.push([]); heightsAll.push(10);
     }
-    const sheet = XLSXStyle.utils.aoa_to_sheet(aoa);
-    sheet['!merges'] = merges;
-    sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch }));
-    sheet['!rows'] = heightsAll.map(hpt => ({ hpt }));
-    for (const block of blocks) {
-      if (block.kind === 'title') styleTitleBlock(sheet, block.row);
-      else if (block.kind === 'process') setCell(sheet, block.row, 0, { font: { bold: true, sz: 11 }, alignment: { horizontal: 'left', vertical: 'center' } });
-      else styleTable(sheet, block.row, block.count);
-    }
+    if (!blocks.length) { aoa.push([`${from} ~ ${to} 평가 항목 없음`]); heightsAll.push(18); }
+    const sheet = XLSXStyle.utils.aoa_to_sheet(aoa), merges = [];
+    for (const { top, block } of blocks) placeBlock(sheet, top, block, merges);
+    sheet['!merges'] = merges; sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch })); sheet['!rows'] = heightsAll.map(hpt => ({ hpt }));
     XLSXStyle.utils.book_append_sheet(workbook, sheet, '관내 전체');
   } else {
-    const groups = new Map();
-    for (const it of items) { const name = processOf(it); if (!groups.has(name)) groups.set(name, []); groups.get(name).push(it); }
+    const groups = byProcess(items);
     if (!groups.size) groups.set('조회결과', []);
     const usedNames = new Set();
     for (const [processName, group] of groups) {
-      const { rows, heights } = riskExportRows(group);
-      // Rows 0–1: title on the left, approval box (담당 · 국장 with names) at the top right; row 3: column headers.
-      const sheet = XLSXStyle.utils.aoa_to_sheet([...titleBlock(office, `${riskOffice(office).name} 위험성평가표 · 공정명: ${processName}`, group), [], headers, ...rows]);
-      sheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 1, c: headers.length - 3 } }];
-      sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch }));
-      sheet['!rows'] = [{ hpt: 20 }, { hpt: 36 }, { hpt: 8 }, { hpt: 42 }, ...heights.map(hpt => ({ hpt }))];
-      styleTitleBlock(sheet, 0); styleTable(sheet, 3, rows.length);
+      const block = processBlock(office, processName, group), sheet = XLSXStyle.utils.aoa_to_sheet(block.aoa), merges = [];
+      placeBlock(sheet, 0, block, merges);
+      sheet['!merges'] = merges; sheet['!cols'] = RISK_EXPORT_WIDTHS.map(wch => ({ wch })); sheet['!rows'] = block.heights.map(hpt => ({ hpt }));
       const baseName = String(processName).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || '공정';
       let sheetName = baseName, suffix = 2;
       while (usedNames.has(sheetName)) { const tail = ` (${suffix++})`; sheetName = baseName.slice(0, 31 - tail.length) + tail; }
@@ -2122,7 +2162,7 @@ app.get('/api/risk/export.xlsx', (req, res) => {
       XLSXStyle.utils.book_append_sheet(workbook, sheet, sheetName);
     }
   }
-  const buffer = configureRiskExport(XLSXStyle.write(workbook, { type: 'buffer', bookType: 'xlsx' }), office === 'all' ? 2 : 4);
+  const buffer = configureRiskExport(XLSXStyle.write(workbook, { type: 'buffer', bookType: 'xlsx' }), office === 'all' ? 0 : 4);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''risk-assessment.xlsx");
   res.send(buffer);
@@ -2207,7 +2247,8 @@ app.post('/api/risk/items/:id/triage', (req, res) => {
   const u = userFromReq(req); if (!isSafetyMgr(u)) return res.status(403).json({ error: 'forbidden' });
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   const dec = (req.body || {}).decision;
-  if (dec === 'promote') { it.status = 'assessing'; it.assessmentStartedAt = it.assessmentStartedAt || new Date().toISOString(); it.evaluator = it.evaluator || u.name; }
+  if (!isCollector(u)) return res.status(403).json({ error: '접수 판별은 그 국의 총괄 안전담당자가 합니다.' });
+  if (dec === 'promote') { it.status = 'assessing'; it.assessmentStartedAt = it.assessmentStartedAt || new Date().toISOString(); it.evaluator = u.name; it.assignedTo = u.id; it.assignedName = u.name; it.assignedAt = new Date().toISOString(); }
   else if (dec === 'invalid') { it.status = 'discarded'; it.discardReason = '오신고·해당없음'; }
   else return res.status(400).json({ error: 'decision 오류' });
   it.triagedBy = u.name; it.triagedAt = new Date().toISOString();
@@ -2235,7 +2276,7 @@ app.post('/api/risk/items/manual', async (req, res) => {
     reporter: u.name, reporterOrg: u.org || null, reporterZone: null, createdAt: now,
     assessmentStartedAt: now, triagedAt: now, triagedBy: u.name,
     lat: null, lng: null, note: '', photoFile, proc: null, customProcess,
-    assessmentTarget: customProcess, evaluator: u.name, hazard: null, aiMode: 'manual', aiDraft: null,
+    assessmentTarget: customProcess, evaluator: u.name, assignedTo: u.id, assignedName: u.name, assignedAt: now, createdById: u.id, hazard: null, aiMode: 'manual', aiDraft: null,
     factor, currentControl: null, fieldReview: null, evidenceIds: [], frequency: null, severity: null,
     riskLevel: null, reduction: null, afterRisk: null, afterRiskLevel: null, dueDate: null,
     dept: null, owner: null, workContent: null, referenceText: '',
@@ -2365,6 +2406,7 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   updated.improvementHistory = [...(updated.improvementHistory||[]), {afterRiskLevel:updated.afterRiskLevel||null,afterRisk:updated.afterRisk,completedDate:updated.completedDate||null,reduction:updated.reduction,improvementSteps:updated.improvementSteps,resultNote:updated.resultNote,doneAt:updated.doneAt,by:u.name,at:new Date().toISOString()}];
   updated.afterRiskLevel=b.afterRiskLevel; updated.completedDate=b.completedDate;
   if (typeof b.owner === 'string') it.owner = b.owner.slice(0, 100);
+  if (typeof b.resultPerson === 'string') updated.resultPerson = b.resultPerson.trim().slice(0, 50);
   if (typeof b.reduction === 'string') updated.reduction = b.reduction.slice(0, 500);
   if (typeof b.improvementSteps === 'string') updated.improvementSteps = b.improvementSteps.slice(0, 3000);
   if (typeof b.resultNote === 'string') updated.resultNote = b.resultNote.slice(0, 1500);
@@ -2383,50 +2425,176 @@ app.post('/api/risk/items/:id/improve', (req, res) => {
   res.json({ ok: true });
 });
 
-/* 관내국 건별 결재: 관내국 담당자가 한 건씩 결재 요청 → 그 국 국장이 결재 또는 반려(사유) → 결재되면 따로 보고 없이
- * 바로 총괄국에 보인다. 결재된 항목은 고정되고, 총괄국의 보완 요청(사유)으로 다시 고쳐 재결재한다. 총괄국 자체 평가는
- * 앱 결재 없이 출력물 결재란만 쓴다. 요청·취소·결재·반려·보완 요청의 사람·시각·사유를 항목에 남긴다. */
-function approvalView(it) {
-  const a = approvalOf(it);
-  return a ? { status: a.status, requestedBy: a.requestedBy || null, requestedAt: a.requestedAt || null, approvedBy: a.approvedBy || null, approvedAt: a.approvedAt || null,
-    rejectReason: a.rejectReason || null, revisionBy: a.revisionBy || null, revisionReason: a.revisionReason || null, revisionAt: a.revisionAt || null,
-    approvedOnce: !!a.approvedOnce, history: a.history || [] } : null;
+/* 위험성평가 결재 묶음(2026-11-07 사용자 결정).
+ * 평소: 담당자가 기간을 골라 결재 안 받은 평가표와 이행결과서를 함께 묶어 자기 결재자(과장, 관내국은 국장)에게 올리고,
+ * 결재자가 한 번에 결재 또는 반려(사유)한다. 결재된 단계는 고정된다.
+ * 정기평가(연 1회): 각 담당자가 기간분을 「정기평가 제출」하고, 총괄 담당자가 국 전체(관내국 결재분 포함)를 한 문서로
+ * 총괄국장에게 올려 한 번 결재받는다. 그 결재본이 청 보고서다.
+ * 총괄 담당자는 결재 전에도 배분한 건의 진행 상태를 보고, 결재된 건에 보완 요청(사유)을 해 다시 열 수 있다.
+ * 앱 결재는 공식 전자결재(온나라 등)를 대신하지 않는다. 요청·결재·반려·보완 요청의 사람·시각·사유를 남긴다. */
+const riskBundles = () => { if (!Array.isArray(RISK.bundles)) RISK.bundles = []; return RISK.bundles; };
+const annualSubmissions = () => { if (!Array.isArray(RISK.annualSubmissions)) RISK.annualSubmissions = []; return RISK.annualSubmissions; };
+const assessedStatuses = ['assessing', 'assessed', 'done'];
+const resultWritten = it => !!(it.resultUpdatedAt || it.doneAt);
+function bundleVisible(u, bundle) {
+  if (bundle.requestedById === u.id || bundle.approverId === u.id) return true;
+  const role = riskRole(u);
+  return (role.collector || role.chief) && (bundle.officeCode === userOfficeCode(u) || (userOfficeCode(u) === HEAD_OFFICE_CODE && bundle.status === 'approved'));
 }
-const APPROVAL_ACTIONS = ['request', 'withdraw', 'approve', 'reject', 'revision'];
-app.post('/api/risk/items/:id/approval/:action', (req, res) => {
+function bundleView(bundle) {
+  const title = id => RISK.items.find(it => it.id === id);
+  return { ...bundle, officeName: riskOffice(bundle.officeCode).name,
+    items: [...new Set([...(bundle.assessmentIds || []), ...(bundle.resultIds || []), ...(bundle.itemIds || [])])].map(title).filter(Boolean)
+      .map(it => ({ id: it.id, factor: it.factor || '', process: it.customProcess || it.assessmentTarget || '', riskLevel: it.riskLevel || '', officeCode: itemOfficeCode(it) })) };
+}
+const recordStep = (it, step, data) => { it.approvals = { ...approvalsOf(it), [step]: { ...(approvalsOf(it)[step] || {}), ...data } }; };
+const pushHistory = (target, action, u, reason = '') => { target.history = [...(target.history || []), { action, by: u.name, byId: u.id, at: new Date().toISOString(), ...(reason ? { reason } : {}) }].slice(-100); };
+// Approvers a writer may send to: approvers of the same office (the 결재선 is chosen by the writer, as in office mail).
+const officeApprovers = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).approver);
+const officeChiefs = code => riskAccounts().filter(a => userOfficeCode(a) === code && riskRole(a).chief);
+
+app.post('/api/risk/bundles', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  const b = req.body || {}, role = riskRole(u), code = userOfficeCode(u), now = new Date().toISOString();
+  const date = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  if (b.kind === 'annual') {
+    if (!role.collector || code !== HEAD_OFFICE_CODE) return res.status(403).json({ error: '정기평가 결재는 총괄국 총괄 안전담당자가 올립니다.' });
+    const from = date(b.from), to = date(b.to);
+    if (!from || !to || from > to) return res.status(400).json({ error: '정기평가 기간을 확인하세요.' });
+    const chief = officeChiefs(code).find(a => a.id === b.approverId) || officeChiefs(code)[0];
+    if (!chief) return res.status(400).json({ error: '총괄국장 계정이 설정되지 않았습니다. 설정 화면에서 지정하세요.' });
+    const items = RISK.items.filter(it => !it.routingInactive && assessedStatuses.includes(it.status) && riskItemDate(it) >= from && riskItemDate(it) <= to
+      && (itemOfficeCode(it) === code || branchApproved(it)) && stepStatus(it, 'annual') !== 'approved');
+    if (!items.length) return res.status(400).json({ error: '그 기간에 정기평가로 올릴 항목이 없습니다.' });
+    // Every own-office item must have its 평가표 approved first (the routine 과장 approval); branch items are approved already.
+    const unapproved = items.filter(it => itemOfficeCode(it) === code && stepStatus(it, 'assessment') !== 'approved');
+    if (unapproved.length) return res.status(400).json({ error: `평가표 결재가 끝나지 않은 항목이 ${unapproved.length}건 있습니다(${unapproved.slice(0, 5).map(it => it.id).join(', ')}). 담당자 결재를 마친 뒤 올리세요.` });
+    if (riskBundles().some(x => x.kind === 'annual' && x.status === 'pending' && x.officeCode === code)) return res.status(409).json({ error: '이미 총괄국장 결재 대기 중인 정기평가가 있습니다.' });
+    RISK.bundleSeq = (Number(RISK.bundleSeq) || 0) + 1;
+    const bundle = { id: 'AB' + RISK.bundleSeq, kind: 'annual', officeCode: code, from, to, itemIds: items.map(it => it.id), status: 'pending',
+      requestedBy: u.name, requestedById: u.id, requestedAt: now, approverId: chief.id, approverName: chief.name, history: [] };
+    for (const it of items) recordStep(it, 'annual', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null });
+    pushHistory(bundle, 'request', u); riskBundles().push(bundle); saveRisk(); broadcastRisk();
+    return res.json({ ok: true, bundle: bundleView(bundle) });
+  }
+  if (!role.writer) return res.status(403).json({ error: '결재 요청은 공정 담당자가 합니다.' });
+  const approver = officeApprovers(code).find(a => a.id === (b.approverId || role.supervisorId));
+  if (!approver) return res.status(400).json({ error: '결재자를 고르세요. 결재자가 없으면 총괄 담당자에게 설정을 요청하세요.' });
+  const own = id => RISK.items.find(it => it.id === id && itemOfficeCode(it) === code && it.assignedTo === u.id && assessedStatuses.includes(it.status));
+  const assessments = [...new Set(Array.isArray(b.assessmentIds) ? b.assessmentIds : [])].map(own).filter(Boolean)
+    .filter(it => !['pending', 'approved'].includes(stepStatus(it, 'assessment')));
+  const results = [...new Set(Array.isArray(b.resultIds) ? b.resultIds : [])].map(own).filter(Boolean)
+    .filter(it => resultWritten(it) && !['pending', 'approved'].includes(stepStatus(it, 'result')));
+  if (!assessments.length && !results.length) return res.status(400).json({ error: '결재에 올릴 평가표나 이행결과서를 고르세요.' });
+  const noLevel = assessments.find(it => !it.riskLevel);
+  if (noLevel) return res.status(400).json({ error: `${noLevel.id}의 위험성 수준(상·중·하)을 정한 뒤 올리세요.` });
+  const resultBeforeAssessment = results.find(it => stepStatus(it, 'assessment') !== 'approved' && !assessments.includes(it));
+  if (resultBeforeAssessment) return res.status(400).json({ error: `${resultBeforeAssessment.id}는 평가표 결재 전입니다. 평가표를 함께 올리세요.` });
+  RISK.bundleSeq = (Number(RISK.bundleSeq) || 0) + 1;
+  const bundle = { id: 'AB' + RISK.bundleSeq, kind: 'regular', officeCode: code, from: date(b.from), to: date(b.to),
+    assessmentIds: assessments.map(it => it.id), resultIds: results.map(it => it.id), status: 'pending',
+    requestedBy: u.name, requestedById: u.id, requestedAt: now, approverId: approver.id, approverName: approver.name, history: [] };
+  for (const it of assessments) recordStep(it, 'assessment', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null, rejectReason: null });
+  for (const it of results) recordStep(it, 'result', { status: 'pending', bundleId: bundle.id, requestedBy: u.name, requestedAt: now, approvedBy: null, approvedAt: null, rejectReason: null });
+  pushHistory(bundle, 'request', u); riskBundles().push(bundle); saveRisk(); broadcastRisk();
+  res.json({ ok: true, bundle: bundleView(bundle) });
+});
+// approve / reject (the chosen approver), withdraw (the requester, while pending).
+app.post('/api/risk/bundles/:id/:action', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u)) return res.status(403).json({ error: '안전관리 담당자 계정으로 로그인해 주세요.' });
+  const bundle = riskBundles().find(x => x.id === req.params.id);
+  if (!bundle || !bundleVisible(u, bundle)) return res.status(404).json({ error: '결재 문서를 찾을 수 없습니다.' });
+  const action = req.params.action, reason = String(req.body?.reason || '').trim().slice(0, 500), now = new Date().toISOString();
+  if (!['approve', 'reject', 'withdraw'].includes(action)) return res.status(404).json({ error: 'not found' });
+  if (bundle.status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 문서만 처리할 수 있습니다.' });
+  if (action === 'withdraw' && bundle.requestedById !== u.id) return res.status(403).json({ error: '결재 요청은 올린 사람만 취소할 수 있습니다.' });
+  if (action !== 'withdraw' && bundle.approverId !== u.id) return res.status(403).json({ error: '지정된 결재자만 결재할 수 있습니다.' });
+  if (action === 'reject' && !reason) return res.status(400).json({ error: '반려 사유를 입력하세요.' });
+  const steps = bundle.kind === 'annual' ? [['annual', bundle.itemIds]] : [['assessment', bundle.assessmentIds], ['result', bundle.resultIds]];
+  for (const [step, ids] of steps) for (const id of ids || []) {
+    const it = RISK.items.find(x => x.id === id); if (!it || approvalsOf(it)[step]?.bundleId !== bundle.id) continue;
+    if (action === 'approve') recordStep(it, step, { status: 'approved', approvedBy: u.name, approvedById: u.id, approvedAt: now, ...(step === 'assessment' ? { approvedOnce: true } : {}) });
+    else if (action === 'reject') recordStep(it, step, { status: 'rejected', rejectReason: reason, rejectedBy: u.name, rejectedAt: now });
+    else recordStep(it, step, { status: approvalsOf(it)[step]?.approvedOnce ? 'reopened' : null, bundleId: null });
+  }
+  Object.assign(bundle, { status: { approve: 'approved', reject: 'rejected', withdraw: 'withdrawn' }[action], decidedBy: u.name, decidedAt: now, ...(reason ? { reason } : {}) });
+  pushHistory(bundle, action, u, reason); saveRisk(); broadcastRisk();
+  res.json({ ok: true, bundle: bundleView(bundle) });
+});
+// 정기평가 제출: a writer (or a branch's writer) marks the period as reviewed and complete for the yearly report.
+app.post('/api/risk/annual-submissions', (req, res) => {
+  const u = userFromReq(req);
+  if (!u) return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+  if (!isSafetyMgr(u) || !riskRole(u).writer) return res.status(403).json({ error: '정기평가 제출은 공정 담당자가 합니다.' });
+  const from = String(req.body?.from || ''), to = String(req.body?.to || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: '정기평가 기간을 확인하세요.' });
+  const mine = RISK.items.filter(it => it.assignedTo === u.id && assessedStatuses.includes(it.status) && !it.routingInactive && riskItemDate(it) >= from && riskItemDate(it) <= to);
+  const open = mine.filter(it => stepStatus(it, 'assessment') !== 'approved' || (resultWritten(it) && stepStatus(it, 'result') !== 'approved'));
+  if (open.length) return res.status(400).json({ error: `결재가 끝나지 않은 항목이 ${open.length}건 있습니다(${open.slice(0, 5).map(it => it.id).join(', ')}). 결재를 마친 뒤 제출하세요.` });
+  const list = annualSubmissions().filter(s => !(s.writerId === u.id && s.from === from && s.to === to));
+  list.push({ officeCode: userOfficeCode(u), writerId: u.id, writerName: u.name, title: riskRole(u).title, from, to, itemCount: mine.length, at: new Date().toISOString() });
+  RISK.annualSubmissions = list; saveRisk(); broadcastRisk();
+  res.json({ ok: true });
+});
+// 배분: the collector gives an item to a writer of the same office (or keeps it), which starts the assessment.
+app.post('/api/risk/items/:id/assign', (req, res) => {
   const u = userFromReq(req);
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
-  const action = req.params.action, reason = String(req.body?.reason || '').trim().slice(0, 500), now = new Date().toISOString();
-  if (!APPROVAL_ACTIONS.includes(action)) return res.status(404).json({ error: 'not found' });
-  const code = itemOfficeCode(it), ownOffice = code === userOfficeCode(u), status = approvalStatus(it);
-  if (code === HEAD_OFFICE_CODE) return res.status(400).json({ error: '총괄국 평가는 앱 결재 없이 출력물 결재란만 사용합니다.' });
-  if (!['assessing', 'assessed', 'done'].includes(it.status) || it.routingInactive) return res.status(400).json({ error: '평가표에 올라온 항목만 결재할 수 있습니다.' });
-  const a = it.approval = approvalOf(it) || { status: null, approvedOnce: false, history: [] };
-  if (action === 'request') {
-    if (!ownOffice || isOfficeHead(u)) return res.status(403).json({ error: '결재 요청은 관내국 안전 담당자가 합니다.' });
-    if (status === 'pending') return res.status(409).json({ error: '이미 국장 결재 대기 중입니다.' });
-    if (status === 'approved') return res.status(409).json({ error: '이미 결재된 항목입니다. 고치려면 총괄국의 보완 요청이 필요합니다.' });
-    if (!it.riskLevel) return res.status(400).json({ error: '위험성 수준(상·중·하)을 정한 뒤 결재를 요청하세요.' });
-    Object.assign(a, { status: 'pending', requestedBy: u.name, requestedById: u.id, requestedAt: now, approvedBy: null, approvedById: null, approvedAt: null, rejectReason: null });
-  } else if (action === 'withdraw') {
-    if (!ownOffice || isOfficeHead(u)) return res.status(403).json({ error: '결재 요청은 관내국 안전 담당자만 취소할 수 있습니다.' });
-    if (status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 항목만 취소할 수 있습니다.' });
-    a.status = a.approvedOnce ? 'revision' : null;
-  } else if (action === 'approve' || action === 'reject') {
-    if (!ownOffice || !isOfficeHead(u)) return res.status(403).json({ error: '그 국의 국장만 결재할 수 있습니다.' });
-    if (status !== 'pending') return res.status(409).json({ error: '결재 대기 중인 항목만 결재할 수 있습니다.' });
-    if (action === 'reject' && !reason) return res.status(400).json({ error: '반려 사유를 입력하세요.' });
-    if (action === 'approve') Object.assign(a, { status: 'approved', approvedBy: u.name, approvedById: u.id, approvedAt: now, approvedOnce: true, revisionReason: null, revisionBy: null, revisionAt: null });
-    else Object.assign(a, { status: 'rejected', rejectReason: reason });
-  } else if (action === 'revision') {
-    if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '보완 요청은 총괄국 안전관리담당자가 합니다.' });
-    if (status !== 'approved') return res.status(409).json({ error: '결재가 끝난 항목에만 보완을 요청할 수 있습니다.' });
-    if (!reason) return res.status(400).json({ error: '보완할 내용을 입력하세요.' });
-    Object.assign(a, { status: 'revision', revisionReason: reason, revisionBy: u.name, revisionAt: now });
+  if (!isCollector(u) || itemOfficeCode(it) !== userOfficeCode(u)) return res.status(403).json({ error: '배분은 그 국의 총괄 안전담당자가 합니다.' });
+  if (stepStatus(it, 'assessment') === 'pending' || stepStatus(it, 'assessment') === 'approved') return res.status(409).json({ error: '결재 중이거나 결재된 항목은 다시 배분할 수 없습니다.' });
+  const writer = accountById(String(req.body?.writerId || ''));
+  if (!writer || userOfficeCode(writer) !== userOfficeCode(u) || !riskRole(writer).writer) return res.status(400).json({ error: '같은 국의 공정 담당자를 고르세요.' });
+  const now = new Date().toISOString();
+  Object.assign(it, { assignedTo: writer.id, assignedName: writer.name, assignedAt: now, assignedBy: u.name, evaluator: writer.name });
+  if (['inbox', 'referred'].includes(it.status)) Object.assign(it, { status: 'assessing', assessmentStartedAt: it.assessmentStartedAt || now, triagedBy: u.name, triagedAt: now });
+  pushHistory(it, 'assign', u, writer.name);
+  syncRiskSource(it); saveRisk(); save(); broadcastRisk();
+  res.json({ ok: true });
+});
+// 보완 요청: the collector reopens an approved item (with a reason); the writer corrects it and sends it again.
+app.post('/api/risk/items/:id/reopen', (req, res) => {
+  const u = userFromReq(req);
+  const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
+  if (!isCollector(u) || !riskItemVisible(u, it)) return res.status(403).json({ error: '보완 요청은 총괄 안전담당자가 합니다.' });
+  const reason = String(req.body?.reason || '').trim().slice(0, 500);
+  if (!reason) return res.status(400).json({ error: '보완할 내용을 입력하세요.' });
+  const steps = ['assessment', 'result', 'annual'].filter(step => stepStatus(it, step) === 'approved');
+  if (!steps.length) return res.status(409).json({ error: '결재가 끝난 항목에만 보완을 요청할 수 있습니다.' });
+  for (const step of steps) recordStep(it, step, { status: 'reopened', reopenReason: reason, reopenedBy: u.name, reopenedAt: new Date().toISOString(), bundleId: null });
+  pushHistory(it, 'reopen', u, reason); saveRisk(); broadcastRisk();
+  res.json({ ok: true });
+});
+// 역할 설정: the head office collector sets titles, roles, approvers and processes for accounts of the head office and
+// its branches (a branch has no admin of its own). Every change is recorded.
+app.get('/api/risk/roles', (req, res) => {
+  const u = userFromReq(req);
+  if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '역할 설정은 총괄국 총괄 안전담당자가 합니다.' });
+  res.json({ accounts: riskAccounts().map(a => ({ id: a.id, name: a.name, officeCode: userOfficeCode(a), officeName: riskOffice(userOfficeCode(a)).name, ...riskRole(a) })), history: (RISK.roleHistory || []).slice(-50) });
+});
+app.put('/api/risk/roles/:id', (req, res) => {
+  const u = userFromReq(req);
+  if (!isHeadOfficeManager(u)) return res.status(403).json({ error: '역할 설정은 총괄국 총괄 안전담당자가 합니다.' });
+  const target = accountById(req.params.id);
+  if (!target || target.kind !== 'safety_mgr') return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });
+  const b = req.body || {}, before = riskRole(target), next = {};
+  if (typeof b.title === 'string') next.title = b.title.trim().slice(0, 40);
+  for (const key of ['collector', 'writer', 'approver', 'chief']) if (typeof b[key] === 'boolean') next[key] = b[key];
+  if (Object.hasOwn(b, 'supervisorId')) {
+    const sup = b.supervisorId ? accountById(String(b.supervisorId)) : null;
+    if (b.supervisorId && (!sup || userOfficeCode(sup) !== userOfficeCode(target) || !riskRole(sup).approver)) return res.status(400).json({ error: '결재자는 같은 국의 결재자(과장·국장)만 고를 수 있습니다.' });
+    if (sup && sup.id === target.id) return res.status(400).json({ error: '자기 자신을 결재자로 지정할 수 없습니다.' });
+    next.supervisorId = sup ? sup.id : null;
   }
-  a.history = [...(a.history || []), { action, by: u.name, byId: u.id, at: now, ...(reason ? { reason } : {}) }].slice(-100);
+  if (Array.isArray(b.processes)) next.processes = b.processes.map(x => String(x).trim().slice(0, 60)).filter(Boolean).slice(0, 20);
+  if (next.collector === true && userOfficeCode(target) === HEAD_OFFICE_CODE && target.id !== u.id && !b.confirmCollector) return res.status(400).json({ error: '총괄 안전담당자를 바꾸면 설정 권한이 함께 넘어갑니다. 확인 후 다시 저장하세요.' });
+  RISK.roles = { ...(RISK.roles || {}), [target.id]: { ...((RISK.roles || {})[target.id] || {}), ...next } };
+  RISK.roleHistory = [...(RISK.roleHistory || []), { target: target.id, targetName: target.name, before, after: riskRole(target), by: u.name, at: new Date().toISOString() }].slice(-500);
   saveRisk(); broadcastRisk();
-  res.json({ ok: true, approval: approvalView(it) });
+  res.json({ ok: true, role: riskRole(target) });
 });
 
 /* 청 누적보고: 기간 집계 */
@@ -2516,18 +2684,22 @@ loadRisk();
 let riskOfficeMigrated = false;
 for (const it of RISK.items) if (!it.officeCode) { it.officeCode = HEAD_OFFICE_CODE; it.officeName = riskOffice(HEAD_OFFICE_CODE).name; riskOfficeMigrated = true; }
 if (riskOfficeMigrated) saveRisk();
-// Half-year reports (2026-11-04 design) carried the approval; now each item carries its own. A report's state is copied
-// to the items it listed once; the report list itself stays in the file untouched.
+// Earlier approval records (half-year reports of 2026-11-04, per-item approval of 2026-11-05) become the 평가표 step of
+// the new bundles once; items without an owner go to the office's collector. The old lists stay in the file untouched.
 let riskApprovalMigrated = false;
-for (const report of Array.isArray(RISK.officeReports) ? RISK.officeReports : []) {
-  for (const id of report.itemIds || []) {
-    const it = RISK.items.find(x => x.id === id);
-    if (!it || it.approval || !report.status || report.status === 'draft') continue;
-    it.approval = { status: report.status === 'rejected' ? 'rejected' : report.status, requestedBy: report.preparedBy || null, requestedAt: report.requestedAt || null,
-      approvedBy: report.approvedBy || null, approvedAt: report.approvedAt || null, rejectReason: report.rejectReason || null,
-      revisionBy: report.revisionBy || null, revisionReason: report.revisionReason || null, revisionAt: report.revisionAt || null,
-      approvedOnce: !!report.approvedOnce, history: [...(report.history || []), { action: 'migrate', by: '시스템', at: new Date().toISOString(), reason: `상·하반기 보고 ${report.id}에서 옮김` }] };
+for (const report of Array.isArray(RISK.officeReports) ? RISK.officeReports : []) for (const id of report.itemIds || []) {
+  const it = RISK.items.find(x => x.id === id);
+  if (it && !it.approval && report.status && report.status !== 'draft') it.approval = { status: report.status, requestedBy: report.preparedBy || null, requestedAt: report.requestedAt || null, approvedBy: report.approvedBy || null, approvedAt: report.approvedAt || null, approvedOnce: !!report.approvedOnce };
+}
+for (const it of RISK.items) {
+  if (it.approval && !it.approvals) {
+    const a = it.approval, status = a.status === 'revision' ? 'reopened' : a.status;
+    it.approvals = { assessment: { status, requestedBy: a.requestedBy || null, requestedAt: a.requestedAt || null, approvedBy: a.approvedBy || null, approvedAt: a.approvedAt || null, approvedOnce: !!a.approvedOnce, rejectReason: a.rejectReason || null } };
     riskApprovalMigrated = true;
+  }
+  if (!it.assignedTo && !['inbox', 'referred', 'discarded'].includes(it.status)) {
+    const owner = riskAccounts().find(a => userOfficeCode(a) === itemOfficeCode(it) && riskRole(a).collector);
+    if (owner) { it.assignedTo = owner.id; it.assignedName = owner.name; riskApprovalMigrated = true; }
   }
 }
 if (riskApprovalMigrated) saveRisk();
