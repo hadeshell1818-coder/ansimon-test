@@ -2560,6 +2560,8 @@ app.post('/api/risk/items/:id/reopen', (req, res) => {
   const u = userFromReq(req);
   const it = RISK.items.find(x => x.id === req.params.id); if (!it) return res.status(404).json({ error: 'not found' });
   if (!isCollector(u) || !riskItemVisible(u, it)) return res.status(403).json({ error: '보완 요청은 총괄 안전담당자가 합니다.' });
+  // A branch item approved by its own 국장 is final for the head office: no 보완 요청 from there (2026-11-07 user decision).
+  if (itemOfficeCode(it) !== userOfficeCode(u)) return res.status(403).json({ error: '관내국에서 결재된 건은 보완 요청을 하지 않습니다.' });
   const reason = String(req.body?.reason || '').trim().slice(0, 500);
   if (!reason) return res.status(400).json({ error: '보완할 내용을 입력하세요.' });
   const steps = RISK_DOCS.filter(step => stepStatus(it, step) === 'approved');
