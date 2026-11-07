@@ -63,7 +63,9 @@ if (PERSISTENT_STORAGE && fs.existsSync(path.join(__dirname, 'uploads'))) {
   }
 }
 // Public health check: whether data survives a redeploy (no paths or counts are shown).
-app.get('/api/health', (_req, res) => res.json({ ok: true, storage: { persistent: PERSISTENT_STORAGE } }));
+// 명단 반영 여부는 인원 수와 명부 출처만 알려 준다(이름·번호 없음).
+function staffHealth() { try { const s = staffDir.status(); return { ready: s.ready, count: s.count, rosterSource: ROSTER_SOURCE, groups: ZONES.length, roster: ROSTER.length }; } catch { return null; } }
+app.get('/api/health', (_req, res) => res.json({ ok: true, storage: { persistent: PERSISTENT_STORAGE }, staff: staffHealth() }));
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -1335,7 +1337,7 @@ app.get('/api/safety/state', (req, res) => {
   const today = kstDate();
   if (isSafetyCtl(u)) {
     return res.json({
-      role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, levels: LEVELS,
+      role: 'control', today, callNumber: SAFETY_CALL_NUMBER, zones: ZONES, roster: ROSTER, rosterSource: ROSTER_SOURCE, levels: LEVELS,
       push: { enabled: PUSH_ENABLED, subscribed: ROSTER.filter(r => (SAFE.pushSubscriptions?.[r.id] || []).length).length },
       hazards: SAFE.hazards.filter(h => h.status === 'pending' || isToday(h.createdAt)).map(hazardForCtl),
       calls: SAFE.calls.filter(c => isToday(c.at)).map(callForCtl),

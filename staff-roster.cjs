@@ -21,7 +21,12 @@ const COLUMNS = {
 const FIELDS = ['officeCode', 'dept', 'phone', 'duty', 'zone', 'team'];
 const MAX_FAILS = 5, LOCK_MS = 30 * 60 * 1000;
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-const normPhone = value => { const digits = String(value ?? '').replace(/\D/g, ''); return /^1[016789]\d{7,8}$/.test(digits) ? '0' + digits : digits; };
+// 휴대폰 번호: 숫자만. 앞의 0이 빠진 숫자(1012345678)는 0을 붙이고, 한 칸에 번호가 둘 이상(두 줄·쉼표)이면 첫 휴대폰 번호를 쓴다.
+const normPhone = value => {
+  const text = String(value ?? ''), digits = text.replace(/\D/g, '');
+  if (digits.length > 11) { const mobile = text.match(/01[016789][\s.\-)]*\d{3,4}[\s.\-]*\d{4}/); if (mobile) return mobile[0].replace(/\D/g, ''); }
+  return /^1[016789]\d{7,8}$/.test(digits) ? '0' + digits : digits;
+};
 const validPhone = phone => /^01\d{8,9}$/.test(phone);
 const shortOffice = office => office.name.replace(/우체국$/, '');
 const formatPhone = phone => phone.length === 11 ? `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}` : phone.length === 10 ? `${phone.slice(0, 3)}-${phone.slice(3, 6)}-${phone.slice(6)}` : phone;
